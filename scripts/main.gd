@@ -1,6 +1,15 @@
 extends Node2D
 
 const WORLD_SIZE := Vector2(2200, 720)
+const ENEMY_SCRIPT := preload("res://scripts/enemy.gd")
+const INITIAL_ENEMY_COUNT := 7
+const TESTABLE_PLATFORM_COUNT := 4
+const MIN_ENEMY_X := 230.0
+const MAX_ENEMY_X := 1120.0
+const ENEMY_RESPAWN_DELAY := 1.35
+
+@onready var player: RoguePlayer = $Player
+@onready var controls_label: Label = $HUD/Controls
 
 var platform_rects := [
 	Rect2(-80, 640, 2420, 160),
@@ -11,12 +20,23 @@ var platform_rects := [
 	Rect2(1610, 540, 240, 32),
 	Rect2(1930, 420, 180, 32),
 ]
+var _rng := RandomNumberGenerator.new()
+var _enemies: Array = []
+var _spawn_generation := 0
 
 
 func _ready() -> void:
+	_rng.randomize()
 	_configure_inputs()
 	_create_platform_colliders()
+	player.attack_started.connect(_on_player_attack_started)
+	_reset_enemies()
 	queue_redraw()
+
+
+func _process(_delta: float) -> void:
+	if Input.is_action_just_pressed(&"restart"):
+		_reset_enemies()
 
 
 func _configure_inputs() -> void:
@@ -54,6 +74,72 @@ func _create_platform_colliders() -> void:
 
 		body.add_child(collision)
 		add_child(body)
+
+
+func _reset_enemies() -> void:
+	_spawn_generation += 1
+	for enemy in _enemies:
+		if is_instance_valid(enemy):
+			enemy.queue_free()
+	_enemies.clear()
+
+	for _enemy_index in range(INITIAL_ENEMY_COUNT):
+		_spawn_random_enemy()
+
+	_update_controls()
+
+
+func _spawn_random_enemy() -> void:
+	var surface_limit: int = mini(TESTABLE_PLATFORM_COUNT, platform_rects.size()) - 1
+	var surface_index := _rng.randi_range(0, surface_limit)
+	var surface: Rect2 = platform_rects[surface_index]
+	var minimum_x := maxf(surface.position.x + 42.0, MIN_ENEMY_X)
+	var maximum_x := minf(surface.end.x - 42.0, MAX_ENEMY_X)
+	var enemy = ENEMY_SCRIPT.new()
+
+	enemy.name = "TestEnemy_%02d" % (_enemies.size() + 1)
+	enemy.position = Vector2(
+		_rng.randf_range(minimum_x, maximum_x),
+		surface.position.y - 22.0
+	)
+	enemy.setup(_rng.randi_range(0, 2), _rng.randf_range(0.0, TAU), minimum_x, maximum_x)
+	enemy.set_target(player)
+	enemy.defeated.connect(_on_enemy_defeated.bind(enemy))
+	add_child(enemy)
+	_enemies.append(enemy)
+
+
+func _on_player_attack_started(origin: Vector2, facing: float) -> void:
+	for enemy in _enemies.duplicate():
+		if not is_instance_valid(enemy):
+			_enemies.erase(enemy)
+			continue
+
+		if enemy.is_hit_by_attack(origin, facing):
+			enemy.defeat()
+
+
+func _on_enemy_defeated(enemy) -> void:
+	if not _enemies.has(enemy):
+		return
+
+	_enemies.erase(enemy)
+	_update_controls()
+	get_tree().create_timer(ENEMY_RESPAWN_DELAY).timeout.connect(
+		_spawn_enemy_after_delay.bind(_spawn_generation)
+	)
+
+
+func _spawn_enemy_after_delay(spawn_generation: int) -> void:
+	if spawn_generation != _spawn_generation:
+		return
+
+	_spawn_random_enemy()
+	_update_controls()
+
+
+func _update_controls() -> void:
+	controls_label.text = "Move: A/D    Jump: W / Space    Attack: J (defeat enemies)    Dash: K    R: new enemies    Enemies: %d" % _enemies.size()
 
 
 func _draw() -> void:
