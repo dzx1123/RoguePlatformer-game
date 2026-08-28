@@ -1,0 +1,32 @@
+[gd_scene format=3 uid="uid://gjo7l1ijwq11"]
+
+[ext_resource type="Script" uid="uid://bapkxs3kua3il" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/Player.tscn" id="2_player"]
+
+[node name="Main" type="Node2D" unique_id=790779306]
+position = Vector2(44, 78)
+script = ExtResource("1_main")
+
+[node name="Player" parent="." unique_id=1944071821 instance=ExtResource("2_player")]
+position = Vector2(160, 580)
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1916944117]
+layer = 10
+
+[node name="Title" type="Label" parent="HUD" unique_id=1715400884]
+offset_left = 28.0
+offset_top = 20.0
+offset_right = 690.0
+offset_bottom = 56.0
+theme_override_colors/font_color = Color(0.86, 0.95, 1, 1)
+theme_override_font_sizes/font_size = 26
+text = "ROGUE PLATFORMER  /  PROTOTYPE 01"
+
+[node name="Controls" type="Label" parent="HUD" unique_id=213085046]
+offset_left = -24.0
+offset_top = -90.0
+offset_right = 896.0
+offset_bottom = -60.0
+theme_override_colors/font_color = Color(0.67, 0.78, 0.86, 1)
+theme_override_font_sizes/font_size = 16
+text = "Move: A/D or ←/→    Jump: W / ↑ / Space    Attack: J    Dash: K    Restart: R"

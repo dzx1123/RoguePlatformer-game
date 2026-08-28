@@ -1,0 +1,15 @@
+# Godot-generated editor and import data
+.godot/
+.import/
+
+# Temporary and operating-system files
+*.tmp
+*.temp
+*.bak
+*.swp
+Thumbs.db
+Desktop.ini
+
+# Local export output
+export/
+exports/
