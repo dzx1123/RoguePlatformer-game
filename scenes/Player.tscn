@@ -1,29 +1,28 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://ch47n3c02j78e"]
 
-[ext_resource type="Script" path="res://scripts/player.gd" id="1_player"]
+[ext_resource type="Script" uid="uid://ct2jpfkqg33k7" path="res://scripts/player.gd" id="1_player"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape_player"]
 radius = 18.0
 height = 56.0
 
-[node name="Player" type="CharacterBody2D"]
+[node name="Player" type="CharacterBody2D" unique_id=52737867]
 collision_layer = 2
-collision_mask = 1
 script = ExtResource("1_player")
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=1259810511]
 shape = SubResource("CapsuleShape_player")
 
-[node name="HeroSprite" type="Sprite2D" parent="."]
+[node name="HeroSprite" type="Sprite2D" parent="." unique_id=2025043771]
+z_index = 1
+texture_filter = 1
 position = Vector2(0, -15)
 scale = Vector2(0.22, 0.22)
-texture_filter = 1
-z_index = 1
 
-[node name="Camera2D" type="Camera2D" parent="."]
-position_smoothing_enabled = true
-position_smoothing_speed = 7.0
+[node name="Camera2D" type="Camera2D" parent="." unique_id=338405928]
 limit_left = 0
 limit_top = 0
 limit_right = 2200
 limit_bottom = 720
+position_smoothing_enabled = true
+position_smoothing_speed = 7.0

@@ -1,18 +1,18 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://c7dswf6op2a3x"]
 
-[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
-[ext_resource type="PackedScene" path="res://scenes/Player.tscn" id="2_player"]
+[ext_resource type="Script" uid="uid://bapkxs3kua3il" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="PackedScene" uid="uid://ch47n3c02j78e" path="res://scenes/Player.tscn" id="2_player"]
 
-[node name="Main" type="Node2D"]
+[node name="Main" type="Node2D" unique_id=512895902]
 script = ExtResource("1_main")
 
-[node name="Player" parent="." instance=ExtResource("2_player")]
+[node name="Player" parent="." unique_id=456313591 instance=ExtResource("2_player")]
 position = Vector2(160, 580)
 
-[node name="HUD" type="CanvasLayer" parent="."]
+[node name="HUD" type="CanvasLayer" parent="." unique_id=856135768]
 layer = 10
 
-[node name="Title" type="Label" parent="HUD"]
+[node name="Title" type="Label" parent="HUD" unique_id=1377092095]
 offset_left = 28.0
 offset_top = 20.0
 offset_right = 690.0
@@ -21,11 +21,13 @@ theme_override_colors/font_color = Color(0.86, 0.95, 1, 1)
 theme_override_font_sizes/font_size = 26
 text = "ROGUE PLATFORMER  /  PROTOTYPE 01"
 
-[node name="Controls" type="Label" parent="HUD"]
+[node name="Controls" type="Label" parent="HUD" unique_id=1254561163]
 offset_left = 30.0
 offset_top = 60.0
 offset_right = 950.0
 offset_bottom = 90.0
 theme_override_colors/font_color = Color(0.67, 0.78, 0.86, 1)
 theme_override_font_sizes/font_size = 16
-text = "Move: A/D or ←/→    Jump: W / ↑ / Space    Attack: J    Dash: K    Restart: R"
+text = "移动: A/D or ←/→    跳跃: W / ↑ / Space    攻击: J    闪避: K    重置: R"
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="." unique_id=1962190840]
