@@ -55,7 +55,7 @@ func _run_test() -> void:
 		_fail("First room was not a normal combat encounter")
 		return
 	_defeat_current_room(main)
-	await _wait_physics_frames(5)
+	await _wait_physics_frames(32)
 	main.call(&"choose_upgrade", 0)
 	await _wait_physics_frames(5)
 	if String(main.call(&"get_current_encounter_name")) != "宝藏房":
@@ -63,7 +63,7 @@ func _run_test() -> void:
 		return
 	var gold_before_treasure: int = int(main.call(&"get_gold"))
 	_defeat_current_room(main)
-	await _wait_physics_frames(5)
+	await _wait_physics_frames(32)
 	if not bool(main.call(&"is_awaiting_chest")):
 		_fail("Treasure room did not spawn a reward chest")
 		return
@@ -96,7 +96,7 @@ func _run_test() -> void:
 		_fail("Elite room spawned fewer than two elite enemies")
 		return
 	_defeat_current_room(main)
-	await _wait_physics_frames(5)
+	await _wait_physics_frames(32)
 	main.call(&"choose_upgrade", 0)
 	await _wait_physics_frames(5)
 
@@ -129,7 +129,7 @@ func _run_test() -> void:
 		_fail("Boss rank or boss health was not configured")
 		return
 	boss.defeat()
-	await _wait_physics_frames(6)
+	await _wait_physics_frames(36)
 	if not bool(main.call(&"is_run_complete")):
 		_fail("Boss defeat did not complete the run")
 		return

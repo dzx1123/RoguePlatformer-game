@@ -6,6 +6,11 @@ class_name RogueEnemy
 signal defeated
 signal health_changed(current_health: int, maximum_health: int)
 signal projectile_requested(origin: Vector2, projectile_velocity: Vector2, damage: int)
+signal sound_requested(cue: StringName, is_boss: bool)
+
+const MELEE_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_melee_sheet.png")
+const RANGED_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_ranged_sheet.png")
+const BOSS_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_boss_sheet.png")
 
 enum EnemyRole {
 	MELEE,
@@ -45,6 +50,10 @@ const RANGED_MAX_HEALTH := 48
 const ELITE_HEALTH_MULTIPLIER := 2.1
 const BOSS_MAX_HEALTH := 460
 const HURT_INVULNERABILITY := 0.10
+const HURT_ANIMATION_DURATION := 0.18
+const DEATH_ANIMATION_DURATION := 0.42
+const SPRITE_COLUMNS := 4.0
+const SPRITE_ROWS := 4.0
 
 var _variant: int = 0
 var _role: int = EnemyRole.MELEE
@@ -65,6 +74,10 @@ var _hurt_invulnerability_remaining: float = 0.0
 var _max_health: int = MELEE_MAX_HEALTH
 var _current_health: int = MELEE_MAX_HEALTH
 var _is_defeated: bool = false
+var _difficulty_health_multiplier: float = 1.0
+var _difficulty_damage_multiplier: float = 1.0
+var _death_remaining: float = 0.0
+var _enemy_sprite: Sprite2D
 
 
 func _ready() -> void:
@@ -73,8 +86,8 @@ func _ready() -> void:
 
 	var body_collision := CollisionShape2D.new()
 	var body_shape := CapsuleShape2D.new()
-	body_shape.radius = 27.0 if is_boss() else (20.0 if is_elite() else 16.0)
-	body_shape.height = 76.0 if is_boss() else (52.0 if is_elite() else 42.0)
+	body_shape.radius = 36.0 if is_boss() else (24.0 if is_elite() else 18.0)
+	body_shape.height = 84.0 if is_boss() else (58.0 if is_elite() else 44.0)
 	body_collision.shape = body_shape
 	add_child(body_collision)
 
@@ -87,14 +100,23 @@ func _ready() -> void:
 	var hurtbox_collision := CollisionShape2D.new()
 	var hurtbox_shape := RectangleShape2D.new()
 	hurtbox_shape.size = (
-		Vector2(76.0, 92.0)
+		Vector2(112.0, 100.0)
 		if is_boss()
-		else (Vector2(56.0, 66.0) if is_elite() else Vector2(44.0, 54.0))
+		else (Vector2(72.0, 64.0) if is_elite() else Vector2(58.0, 52.0))
 	)
-	hurtbox_collision.position = Vector2(0.0, -7.0 if is_boss() else -3.0)
+	hurtbox_collision.position = Vector2(0.0, -10.0 if is_boss() else -3.0)
 	hurtbox_collision.shape = hurtbox_shape
 	hurtbox.add_child(hurtbox_collision)
 	add_child(hurtbox)
+
+	_enemy_sprite = Sprite2D.new()
+	_enemy_sprite.name = "EnemySprite"
+	_enemy_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_enemy_sprite.region_enabled = true
+	_enemy_sprite.region_filter_clip_enabled = true
+	_enemy_sprite.z_index = 1
+	add_child(_enemy_sprite)
+	_update_sprite_animation()
 	queue_redraw()
 
 
@@ -104,10 +126,14 @@ func setup(
 	patrol_left: float,
 	patrol_right: float,
 	role: int = EnemyRole.MELEE,
-	rank: int = EnemyRank.NORMAL
+	rank: int = EnemyRank.NORMAL,
+	difficulty_health_multiplier: float = 1.0,
+	difficulty_damage_multiplier: float = 1.0
 ) -> void:
 	_role = clampi(role, EnemyRole.MELEE, EnemyRole.RANGED)
 	_rank = clampi(rank, EnemyRank.NORMAL, EnemyRank.BOSS)
+	_difficulty_health_multiplier = maxf(0.1, difficulty_health_multiplier)
+	_difficulty_damage_multiplier = maxf(0.1, difficulty_damage_multiplier)
 	_variant = variant % 3
 	if _role == EnemyRole.RANGED:
 		_variant = 1
@@ -125,7 +151,10 @@ func setup(
 		_max_health = int(round(float(base_health) * ELITE_HEALTH_MULTIPLIER))
 	else:
 		_max_health = base_health
+	_max_health = maxi(1, int(round(float(_max_health) * _difficulty_health_multiplier)))
 	_current_health = _max_health
+	if is_instance_valid(_enemy_sprite):
+		_update_sprite_animation()
 	queue_redraw()
 
 
@@ -171,21 +200,34 @@ func get_max_health() -> int:
 
 func get_hurtbox_rect() -> Rect2:
 	if is_boss():
-		return Rect2(global_position - Vector2(38.0, 53.0), Vector2(76.0, 92.0))
+		return Rect2(global_position - Vector2(56.0, 60.0), Vector2(112.0, 100.0))
 	if is_elite():
-		return Rect2(global_position - Vector2(28.0, 36.0), Vector2(56.0, 66.0))
-	return Rect2(global_position - Vector2(22.0, 30.0), Vector2(44.0, 54.0))
+		return Rect2(global_position - Vector2(36.0, 35.0), Vector2(72.0, 64.0))
+	return Rect2(global_position - Vector2(29.0, 29.0), Vector2(58.0, 52.0))
 
 
 func is_hit_by_attack(
 	attack_origin: Vector2,
 	facing: float,
-	reach_scale: float = 1.0
+	reach_scale: float = 1.0,
+	attack_type: int = 0
 ) -> bool:
 	if _is_defeated or _hurt_invulnerability_remaining > 0.0:
 		return false
 
 	var safe_reach: float = maxf(0.5, reach_scale)
+	if attack_type == 1:
+		var up_rect := Rect2(
+			Vector2(attack_origin.x - 48.0 * safe_reach, attack_origin.y - 158.0 * safe_reach),
+			Vector2(96.0 * safe_reach, 178.0 * safe_reach)
+		)
+		return up_rect.intersects(get_hurtbox_rect())
+	if attack_type == 2:
+		var down_rect := Rect2(
+			Vector2(attack_origin.x - 50.0 * safe_reach, attack_origin.y - 22.0 * safe_reach),
+			Vector2(100.0 * safe_reach, 170.0 * safe_reach)
+		)
+		return down_rect.intersects(get_hurtbox_rect())
 	var rear_reach: float = 22.0
 	var forward_reach: float = 120.0 * safe_reach
 	var attack_left: float = attack_origin.x - rear_reach
@@ -202,9 +244,10 @@ func receive_player_attack(
 	attack_origin: Vector2,
 	facing: float,
 	damage: int,
-	reach_scale: float = 1.0
+	reach_scale: float = 1.0,
+	attack_type: int = 0
 ) -> bool:
-	if not is_hit_by_attack(attack_origin, facing, reach_scale):
+	if not is_hit_by_attack(attack_origin, facing, reach_scale, attack_type):
 		return false
 
 	_current_health = maxi(0, _current_health - maxi(1, damage))
@@ -229,12 +272,26 @@ func defeat() -> void:
 		return
 
 	_is_defeated = true
-	defeated.emit()
-	queue_free()
+	_death_remaining = DEATH_ANIMATION_DURATION
+	_attack_remaining = 0.0
+	velocity = Vector2.ZERO
+	collision_layer = 0
+	collision_mask = 0
+	# Death frames must finish even if a room/test temporarily paused this enemy's AI.
+	set_physics_process(true)
+	_update_sprite_animation()
+	queue_redraw()
 
 
 func _physics_process(delta: float) -> void:
 	if _is_defeated:
+		_elapsed += delta
+		_death_remaining = maxf(0.0, _death_remaining - delta)
+		_update_sprite_animation()
+		queue_redraw()
+		if _death_remaining <= 0.0:
+			defeated.emit()
+			queue_free()
 		return
 
 	_elapsed += delta
@@ -252,8 +309,10 @@ func _physics_process(delta: float) -> void:
 			_attack_action_performed = true
 			if is_ranged_enemy() or (is_boss() and _boss_attack_uses_projectile):
 				_fire_projectile()
+				sound_requested.emit(&"spit", is_boss())
 			else:
 				_hit_target_if_still_close()
+				sound_requested.emit(&"bite", is_boss())
 	else:
 		if _target_in_attack_range() and _attack_cooldown_remaining <= 0.0:
 			_start_attack()
@@ -275,6 +334,7 @@ func _physics_process(delta: float) -> void:
 	if global_position.y > 820.0:
 		defeat()
 		return
+	_update_sprite_animation()
 	queue_redraw()
 
 
@@ -387,7 +447,9 @@ func _hit_target_if_still_close() -> void:
 	elif not _target_in_attack_range():
 		return
 	if _target.has_method(&"receive_enemy_attack"):
-		var damage: int = 32 if is_boss() else (28 if is_elite() else MELEE_DAMAGE)
+		var damage: int = _get_scaled_damage(
+			32 if is_boss() else (28 if is_elite() else MELEE_DAMAGE)
+		)
 		_target.call(&"receive_enemy_attack", global_position, damage)
 
 
@@ -399,7 +461,9 @@ func _fire_projectile() -> void:
 	).normalized()
 	if projectile_direction.is_zero_approx():
 		projectile_direction = Vector2(_facing, 0.0)
-	var projectile_damage: int = 20 if is_boss() else (18 if is_elite() else RANGED_DAMAGE)
+	var projectile_damage: int = _get_scaled_damage(
+		20 if is_boss() else (18 if is_elite() else RANGED_DAMAGE)
+	)
 	var projectile_speed: float = RANGED_PROJECTILE_SPEED * (1.12 if is_boss() else 1.0)
 	if is_boss():
 		for spread_angle in [-0.16, 0.0, 0.16]:
@@ -416,105 +480,122 @@ func _fire_projectile() -> void:
 		)
 
 
-func _draw() -> void:
-	var movement_speed: float = _get_ranged_move_speed() if is_ranged_enemy() else _get_melee_chase_speed()
-	var motion_blend: float = clampf(absf(velocity.x) / movement_speed, 0.0, 1.0)
-	var gait_time: float = _elapsed * (2.4 + 7.0 * motion_blend) + _phase
-	var bob: float = sin(gait_time) * (0.7 + 1.4 * motion_blend)
+func _get_scaled_damage(base_damage: int) -> int:
+	return maxi(1, int(round(float(base_damage) * _difficulty_damage_multiplier)))
+
+
+func _get_sprite_sheet() -> Texture2D:
+	if is_boss():
+		return BOSS_SLIME_SHEET
+	if is_ranged_enemy():
+		return RANGED_SLIME_SHEET
+	return MELEE_SLIME_SHEET
+
+
+func _get_sprite_scale() -> float:
+	if is_boss():
+		return 0.43
+	if is_elite():
+		return 0.36
+	return 0.29
+
+
+func _get_sprite_baseline_offset() -> float:
+	# The generated sheets have a 313.5px cell. Align their opaque idle bottoms with
+	# the collision body's floor contact so every platform uses the same visual baseline.
+	if is_boss():
+		return -13.0
+	if is_elite():
+		return -19.0 if is_ranged_enemy() else -17.0
+	return -17.0 if is_ranged_enemy() else -15.0
+
+
+func _set_sprite_cell(column: int, row: int) -> void:
+	var sheet := _get_sprite_sheet()
+	if _enemy_sprite.texture != sheet:
+		_enemy_sprite.texture = sheet
+	var cell_size := Vector2(
+		float(sheet.get_width()) / SPRITE_COLUMNS,
+		float(sheet.get_height()) / SPRITE_ROWS
+	)
+	_enemy_sprite.region_rect = Rect2(
+		Vector2(float(clampi(column, 0, 3)), float(clampi(row, 0, 3))) * cell_size,
+		cell_size
+	)
+
+
+func _update_sprite_animation() -> void:
+	if not is_instance_valid(_enemy_sprite):
+		return
+
+	var animation_row: int = 0
+	var animation_column: int = int(floor(_elapsed * 6.0 + _phase)) % 4
 	var attack_progress: float = 0.0
-	if _attack_remaining > 0.0:
-		attack_progress = 1.0 - _attack_remaining / _get_attack_duration()
-	var lunge_distance: float = 4.0 if is_ranged_enemy() else 9.0
-	var lunge: float = sin(attack_progress * PI) * _facing * lunge_distance
-	var center := Vector2(lunge, -4.0 + bob)
-	var rank_scale: float = 1.0
-	if is_boss():
-		rank_scale = 1.72
-	elif is_elite():
-		rank_scale = 1.24
-	draw_set_transform(Vector2(0.0, 6.0 if is_boss() else 0.0), 0.0, Vector2.ONE * rank_scale)
-	if is_boss():
-		draw_circle(center, 34.0 + sin(_elapsed * 3.0) * 3.0, Color(0.95, 0.22, 0.28, 0.16))
-		draw_arc(center, 31.0, 0.0, TAU, 28, Color(1.0, 0.46, 0.24, 0.72), 3.0)
-	elif is_elite():
-		draw_circle(center, 29.0 + sin(_elapsed * 4.0) * 2.0, Color(0.78, 0.36, 1.0, 0.13))
-		draw_arc(center, 27.0, 0.0, TAU, 24, Color(0.72, 0.42, 1.0, 0.62), 2.0)
-
-	draw_circle(Vector2(0.0, 21.0), 20.0, Color(0.02, 0.05, 0.08, 0.42))
-	match _variant:
-		0:
-			_draw_slime(center)
-		1:
-			_draw_bat(center)
-		_:
-			_draw_stalker(center)
-
-	if _hurt_remaining > 0.0:
-		draw_circle(center, 27.0, Color(1.0, 0.26, 0.20, 0.30))
-
-	if _attack_remaining > 0.0:
-		if is_ranged_enemy() or (is_boss() and _boss_attack_uses_projectile):
-			var charge_radius: float = lerpf(4.0, 10.0, sin(attack_progress * PI))
-			draw_circle(
-				center + Vector2(_facing * 22.0, -4.0),
-				charge_radius,
-				Color(0.48, 0.92, 1.0, 0.74)
+	if _is_defeated:
+		animation_row = 3
+		var death_progress: float = 1.0 - _death_remaining / DEATH_ANIMATION_DURATION
+		animation_column = 2 + mini(1, int(floor(death_progress * 2.0)))
+	elif _hurt_remaining > 0.0:
+		animation_row = 3
+		var hurt_progress: float = 1.0 - _hurt_remaining / HURT_ANIMATION_DURATION
+		animation_column = mini(1, int(floor(hurt_progress * 2.0)))
+	elif _attack_remaining > 0.0:
+		animation_row = 2
+		attack_progress = clampf(
+			1.0 - _attack_remaining / maxf(_get_attack_duration(), 0.001),
+			0.0,
+			0.999
+		)
+		if is_boss():
+			animation_column = (
+				2 + mini(1, int(floor(attack_progress * 2.0)))
+				if _boss_attack_uses_projectile
+				else mini(1, int(floor(attack_progress * 2.0)))
 			)
 		else:
-			var start_angle: float = -1.2 if _facing > 0.0 else PI - 0.4
-			var end_angle: float = 0.4 if _facing > 0.0 else PI + 1.2
-			draw_arc(
-				center + Vector2(_facing * 14.0, -3.0),
-				31.0,
-				start_angle,
-				end_angle,
-				10,
-				Color(1.0, 0.44, 0.32, 0.78),
-				3.0,
-				true
+			animation_column = mini(3, int(floor(attack_progress * 4.0)))
+	elif absf(velocity.x) > 8.0:
+		animation_row = 1
+		animation_column = int(floor(_elapsed * 10.0 + _phase)) % 4
+
+	_set_sprite_cell(animation_column, animation_row)
+	_enemy_sprite.flip_h = _facing > 0.0
+	var sprite_scale := _get_sprite_scale()
+	_enemy_sprite.scale = Vector2.ONE * sprite_scale
+	_enemy_sprite.position = Vector2(0.0, _get_sprite_baseline_offset())
+	_enemy_sprite.modulate = Color.WHITE
+	if _attack_remaining > 0.0:
+		var lunge_distance: float = 5.0 if is_ranged_enemy() else (13.0 if is_boss() else 9.0)
+		_enemy_sprite.position.x = sin(attack_progress * PI) * _facing * lunge_distance
+	elif _is_defeated:
+		var fade_progress: float = 1.0 - _death_remaining / DEATH_ANIMATION_DURATION
+		_enemy_sprite.modulate.a = 1.0 - smoothstep(0.72, 1.0, fade_progress)
+
+
+func _draw() -> void:
+	if is_boss():
+		draw_circle(Vector2(0.0, -13.0), 57.0 + sin(_elapsed * 3.0) * 2.0, Color(0.98, 0.12, 0.20, 0.10))
+		draw_arc(Vector2(0.0, -13.0), 55.0, 0.0, TAU, 32, Color(0.98, 0.28, 0.22, 0.44), 2.0)
+	elif is_elite():
+		draw_circle(Vector2(0.0, -7.0), 37.0 + sin(_elapsed * 4.0), Color(0.68, 0.30, 1.0, 0.10))
+		draw_arc(Vector2(0.0, -7.0), 36.0, 0.0, TAU, 26, Color(0.76, 0.44, 1.0, 0.46), 2.0)
+
+	if _attack_remaining > 0.0:
+		var attack_progress: float = 1.0 - _attack_remaining / _get_attack_duration()
+		if is_ranged_enemy() or (is_boss() and _boss_attack_uses_projectile):
+			var charge_radius: float = lerpf(3.0, 9.0, sin(attack_progress * PI))
+			draw_circle(
+				Vector2(_facing * (42.0 if is_boss() else 25.0), -10.0),
+				charge_radius,
+				Color(0.38, 0.94, 1.0, 0.66)
 			)
 
-	if _current_health < _max_health:
+	if _current_health < _max_health and not _is_defeated:
 		var health_ratio: float = float(_current_health) / float(maxi(_max_health, 1))
-		draw_rect(Rect2(-24.0, -42.0, 48.0, 6.0), Color(0.03, 0.07, 0.10, 0.86))
+		var bar_width: float = 96.0 if is_boss() else (64.0 if is_elite() else 48.0)
+		var bar_y: float = -84.0 if is_boss() else (-56.0 if is_elite() else -43.0)
+		draw_rect(Rect2(-bar_width * 0.5, bar_y, bar_width, 6.0), Color(0.03, 0.07, 0.10, 0.88))
 		draw_rect(
-			Rect2(-22.0, -40.0, 44.0 * health_ratio, 2.0),
-			Color(0.96, 0.28, 0.24, 0.94)
+			Rect2(-bar_width * 0.5 + 2.0, bar_y + 2.0, (bar_width - 4.0) * health_ratio, 2.0),
+			Color(0.96, 0.20, 0.22, 0.96)
 		)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-
-func _draw_slime(center: Vector2) -> void:
-	draw_circle(center, 22.0, Color("#101a29"))
-	draw_circle(center + Vector2(0.0, -2.0), 18.0, Color("#7d59c9"))
-	draw_circle(center + Vector2(-7.0, -4.0), 4.0, Color("#f5f1df"))
-	draw_circle(center + Vector2(7.0, -4.0), 4.0, Color("#f5f1df"))
-	draw_circle(center + Vector2(-6.0, -4.0), 1.8, Color("#17223a"))
-	draw_circle(center + Vector2(8.0, -4.0), 1.8, Color("#17223a"))
-	draw_line(center + Vector2(-6.0, 8.0), center + Vector2(6.0, 8.0), Color("#d4a8ff"), 2.0)
-
-
-func _draw_bat(center: Vector2) -> void:
-	draw_colored_polygon(
-		PackedVector2Array([
-			center + Vector2(-7.0, -2.0), center + Vector2(-35.0, -12.0),
-			center + Vector2(-25.0, 12.0), center + Vector2(-8.0, 8.0),
-			center + Vector2(8.0, 8.0), center + Vector2(25.0, 12.0),
-			center + Vector2(35.0, -12.0), center + Vector2(7.0, -2.0),
-		]),
-		Color("#1e2747")
-	)
-	draw_circle(center, 15.0, Color("#2f3f70"))
-	draw_circle(center + Vector2(-5.0, -2.0), 3.0, Color("#ffda7b"))
-	draw_circle(center + Vector2(5.0, -2.0), 3.0, Color("#ffda7b"))
-	if is_ranged_enemy():
-		draw_arc(center, 23.0, 0.0, TAU, 18, Color(0.35, 0.84, 0.96, 0.42), 2.0)
-
-
-func _draw_stalker(center: Vector2) -> void:
-	draw_rect(Rect2(center + Vector2(-17.0, -17.0), Vector2(34.0, 32.0)), Color("#10242d"))
-	draw_rect(Rect2(center + Vector2(-13.0, -14.0), Vector2(26.0, 25.0)), Color("#3e998d"))
-	draw_line(center + Vector2(-11.0, 13.0), center + Vector2(-14.0, 24.0), Color("#10242d"), 4.0)
-	draw_line(center + Vector2(11.0, 13.0), center + Vector2(14.0, 24.0), Color("#10242d"), 4.0)
-	draw_circle(center + Vector2(-6.0, -4.0), 3.2, Color("#d9ff8a"))
-	draw_circle(center + Vector2(6.0, -4.0), 3.2, Color("#d9ff8a"))

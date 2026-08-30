@@ -67,10 +67,11 @@ func _draw() -> void:
 	draw_line(
 		trail_direction * 5.0,
 		trail_direction * 20.0,
-		Color(0.28, 0.78, 1.0, 0.38),
+		Color(0.96, 0.12, 0.28, 0.42),
 		6.0,
 		true
 	)
-	draw_circle(Vector2.ZERO, 9.0, Color(0.12, 0.38, 0.56, 0.72))
-	draw_circle(Vector2.ZERO, 6.0, Color(0.56, 0.94, 1.0, 0.96))
+	draw_circle(Vector2.ZERO, 9.0, Color(0.62, 0.02, 0.12, 0.82))
+	draw_circle(Vector2.ZERO, 6.0, Color(0.16, 0.84, 0.96, 0.96))
+	draw_arc(Vector2.ZERO, 8.0, 0.0, TAU, 18, Color(1.0, 0.22, 0.34, 0.94), 2.0)
 	draw_circle(Vector2(-2.0, -2.0), 2.0, Color.WHITE)

@@ -34,7 +34,7 @@ func _run_test() -> void:
 	await physics_frame
 	_send_attack_key(false, false)
 	var enemy_defeat_observed: bool = false
-	for _defeat_wait_frame in range(30):
+	for _defeat_wait_frame in range(40):
 		await physics_frame
 		var enemies_after_hit: Array = main.get("_enemies") as Array
 		if enemies_after_hit.size() == initial_enemy_count - 1:

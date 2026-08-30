@@ -32,7 +32,7 @@ func _run_test() -> void:
 
 	var baseline_stats: Dictionary = player.call(&"get_run_stats") as Dictionary
 	_defeat_current_room(main)
-	await _wait_physics_frames(5)
+	await _wait_physics_frames(32)
 	if not bool(main.call(&"is_choosing_upgrade")):
 		_fail("Clearing a non-final room did not open the upgrade choice")
 		return
@@ -79,7 +79,7 @@ func _run_test() -> void:
 
 	for room_number in range(1, 6):
 		_defeat_current_room(main)
-		await _wait_physics_frames(5)
+		await _wait_physics_frames(32)
 		if bool(main.call(&"is_awaiting_chest")):
 			if not bool(main.call(&"open_current_chest_for_test")):
 				_fail("Treasure room chest could not be opened")

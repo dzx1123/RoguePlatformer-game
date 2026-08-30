@@ -44,7 +44,10 @@ func _run_test() -> void:
 		"res://assets/characters/frames_polished/hero_land.png",
 		"res://assets/characters/frames_polished/hero_windup.png",
 		"res://assets/characters/frames_polished/hero_slash.png",
+		"res://assets/characters/frames_polished/hero_slash_followthrough.png",
 		"res://assets/characters/frames_polished/hero_recovery.png",
+		"res://assets/characters/frames_polished/hero_slash_up_followthrough.png",
+		"res://assets/characters/frames_polished/hero_slash_down_followthrough.png",
 	]
 	for texture_path in texture_paths:
 		var texture: Texture2D = load(texture_path)
@@ -56,11 +59,15 @@ func _run_test() -> void:
 	var run_texture_paths: Dictionary = {}
 	for run_frame_index in range(8):
 		player.set("_run_cycle", float(run_frame_index))
+		player.set("_movement_blend", 1.0)
 		player.call(&"_reset_sprite_pose")
 		player.call(&"_animate_run")
 		run_texture_paths[hero_sprite.texture.resource_path] = true
 	if run_texture_paths.size() != 8:
-		_fail("Run cycle used %d unique frames instead of 8" % run_texture_paths.size())
+		_fail("Same-character run cycle used %d poses instead of 8" % run_texture_paths.size())
+		return
+	if player.get_node_or_null("RunBlendSprite") != null:
+		_fail("Run animation still contains the double-exposure layer that caused white flashing")
 		return
 
 	player.set("_airborne_time", 0.03)
