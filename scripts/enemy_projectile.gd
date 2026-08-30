@@ -9,6 +9,7 @@ var _damage: int = 1
 var _target: Node2D
 var _remaining_lifetime: float = LIFETIME
 var _is_removing: bool = false
+var _style: int = RogueEnemy.ProjectileStyle.CRYSTAL_ORB
 
 
 func _ready() -> void:
@@ -26,10 +27,21 @@ func _ready() -> void:
 	queue_redraw()
 
 
-func setup(projectile_velocity: Vector2, damage: int, target: Node2D) -> void:
+func setup(
+	projectile_velocity: Vector2,
+	damage: int,
+	target: Node2D,
+	projectile_style: int = RogueEnemy.ProjectileStyle.CRYSTAL_ORB
+) -> void:
 	_velocity = projectile_velocity
 	_damage = maxi(1, damage)
 	_target = target
+	_style = clampi(
+		projectile_style,
+		RogueEnemy.ProjectileStyle.CRYSTAL_ORB,
+		RogueEnemy.ProjectileStyle.ARROW
+	)
+	queue_redraw()
 
 
 func _physics_process(delta: float) -> void:
@@ -61,6 +73,9 @@ func _remove_projectile() -> void:
 
 
 func _draw() -> void:
+	if _style == RogueEnemy.ProjectileStyle.ARROW:
+		_draw_arrow()
+		return
 	var trail_direction: Vector2 = -_velocity.normalized()
 	if trail_direction.is_zero_approx():
 		trail_direction = Vector2.LEFT
@@ -75,3 +90,25 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, 6.0, Color(0.16, 0.84, 0.96, 0.96))
 	draw_arc(Vector2.ZERO, 8.0, 0.0, TAU, 18, Color(1.0, 0.22, 0.34, 0.94), 2.0)
 	draw_circle(Vector2(-2.0, -2.0), 2.0, Color.WHITE)
+
+
+func _draw_arrow() -> void:
+	var direction := _velocity.normalized()
+	if direction.is_zero_approx():
+		direction = Vector2.LEFT
+	var normal := direction.orthogonal()
+	var tip := direction * 15.0
+	var tail := -direction * 16.0
+	draw_line(tail, tip - direction * 4.0, Color("#8c5528"), 3.0, false)
+	draw_line(tail + direction * 2.0, tip - direction * 5.0, Color("#d49a45"), 1.0, false)
+	draw_colored_polygon(
+		PackedVector2Array([
+			tip,
+			tip - direction * 8.0 + normal * 4.0,
+			tip - direction * 6.0,
+			tip - direction * 8.0 - normal * 4.0,
+		]),
+		Color("#d5e9ec")
+	)
+	draw_line(tail, tail + direction * 7.0 + normal * 5.0, Color("#5fd6e8"), 2.0, false)
+	draw_line(tail, tail + direction * 7.0 - normal * 5.0, Color("#5fd6e8"), 2.0, false)

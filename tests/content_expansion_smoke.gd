@@ -128,10 +128,61 @@ func _run_test() -> void:
 	if not boss.is_boss() or boss.get_max_health() < 400:
 		_fail("Boss rank or boss health was not configured")
 		return
+	if boss.get_enemy_family() != RogueEnemy.EnemyFamily.SLIME:
+		_fail("The first chapter boss was not the slime king")
+		return
 	boss.defeat()
 	await _wait_physics_frames(36)
+	if bool(main.call(&"is_run_complete")) or not bool(main.call(&"is_choosing_upgrade")):
+		_fail("The first chapter boss incorrectly ended the ten-room run")
+		return
+	if not bool(main.call(&"choose_upgrade", 0)):
+		_fail("The transition upgrade after the slime chapter was rejected")
+		return
+	await _wait_physics_frames(6)
+	if int(main.call(&"get_current_room_number")) != 6:
+		_fail("The second chapter did not begin in room six")
+		return
+	var goblin_enemies: Array = main.get("_enemies") as Array
+	if goblin_enemies.is_empty():
+		_fail("The goblin chapter spawned no enemies")
+		return
+	for enemy_value in goblin_enemies:
+		var goblin := enemy_value as RogueEnemy
+		if goblin.get_enemy_family() != RogueEnemy.EnemyFamily.GOBLIN:
+			_fail("Room six still contained a slime enemy")
+			return
+
+	for room_number in range(6, 11):
+		if room_number == 10:
+			var final_enemies: Array = main.get("_enemies") as Array
+			if final_enemies.size() != 1:
+				_fail("Goblin chief room did not contain exactly one boss")
+				return
+			var goblin_chief := final_enemies[0] as RogueEnemy
+			var chief_sprite := goblin_chief.get_node("EnemySprite") as Sprite2D
+			if (
+				not goblin_chief.is_boss()
+				or goblin_chief.get_enemy_family() != RogueEnemy.EnemyFamily.GOBLIN
+				or not chief_sprite.texture.resource_path.ends_with("red_fang_goblin_elite_sheet.png")
+			):
+				_fail("The final boss did not use the elite Red Fang design")
+				return
+		_defeat_current_room(main)
+		await _wait_physics_frames(36)
+		if bool(main.call(&"is_awaiting_chest")):
+			main.call(&"open_current_chest_for_test")
+			await _wait_physics_frames(5)
+		if room_number < 10:
+			if bool(main.call(&"is_shopping")):
+				main.call(&"_leave_shop")
+			elif not bool(main.call(&"choose_upgrade", 0)):
+				_fail("Goblin chapter room %d did not advance" % room_number)
+				return
+			await _wait_physics_frames(5)
+
 	if not bool(main.call(&"is_run_complete")):
-		_fail("Boss defeat did not complete the run")
+		_fail("Defeating the goblin chief did not complete the run")
 		return
 	var in_memory_progress: Dictionary = main.call(&"get_progression_snapshot") as Dictionary
 	if int(in_memory_progress.get("runs_completed", 0)) != 1:

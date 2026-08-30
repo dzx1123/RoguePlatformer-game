@@ -5,12 +5,20 @@ class_name RogueEnemy
 
 signal defeated
 signal health_changed(current_health: int, maximum_health: int)
-signal projectile_requested(origin: Vector2, projectile_velocity: Vector2, damage: int)
+signal projectile_requested(
+	origin: Vector2,
+	projectile_velocity: Vector2,
+	damage: int,
+	projectile_style: int
+)
 signal sound_requested(cue: StringName, is_boss: bool)
 
 const MELEE_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_melee_sheet.png")
 const RANGED_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_ranged_sheet.png")
 const BOSS_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_boss_sheet.png")
+const GOBLIN_CLUB_SHEET := preload("res://assets/enemies/red_fang_goblin_club_sheet.png")
+const GOBLIN_ELITE_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_sheet.png")
+const GOBLIN_ARCHER_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_sheet.png")
 
 enum EnemyRole {
 	MELEE,
@@ -21,6 +29,16 @@ enum EnemyRank {
 	NORMAL,
 	ELITE,
 	BOSS,
+}
+
+enum EnemyFamily {
+	SLIME,
+	GOBLIN,
+}
+
+enum ProjectileStyle {
+	CRYSTAL_ORB,
+	ARROW,
 }
 
 const GRAVITY := 1800.0
@@ -58,6 +76,7 @@ const SPRITE_ROWS := 4.0
 var _variant: int = 0
 var _role: int = EnemyRole.MELEE
 var _rank: int = EnemyRank.NORMAL
+var _family: int = EnemyFamily.SLIME
 var _phase: float = 0.0
 var _elapsed: float = 0.0
 var _patrol_left: float = 0.0
@@ -128,10 +147,12 @@ func setup(
 	role: int = EnemyRole.MELEE,
 	rank: int = EnemyRank.NORMAL,
 	difficulty_health_multiplier: float = 1.0,
-	difficulty_damage_multiplier: float = 1.0
+	difficulty_damage_multiplier: float = 1.0,
+	family: int = EnemyFamily.SLIME
 ) -> void:
 	_role = clampi(role, EnemyRole.MELEE, EnemyRole.RANGED)
 	_rank = clampi(rank, EnemyRank.NORMAL, EnemyRank.BOSS)
+	_family = clampi(family, EnemyFamily.SLIME, EnemyFamily.GOBLIN)
 	_difficulty_health_multiplier = maxf(0.1, difficulty_health_multiplier)
 	_difficulty_damage_multiplier = maxf(0.1, difficulty_damage_multiplier)
 	_variant = variant % 3
@@ -172,6 +193,10 @@ func is_elite() -> bool:
 
 func is_boss() -> bool:
 	return _rank == EnemyRank.BOSS
+
+
+func get_enemy_family() -> int:
+	return _family
 
 
 func get_gold_reward() -> int:
@@ -387,6 +412,8 @@ func _target_in_attack_range() -> bool:
 	if not is_zero_approx(offset.x):
 		_facing = signf(offset.x)
 	if is_boss():
+		if _family == EnemyFamily.GOBLIN:
+			return absf(offset.x) <= 138.0 and absf(offset.y) <= 88.0
 		return absf(offset.x) <= 450.0 and absf(offset.y) <= 190.0
 	if is_ranged_enemy():
 		return (
@@ -401,7 +428,10 @@ func _target_in_attack_range() -> bool:
 
 func _start_attack() -> void:
 	if is_boss() and is_instance_valid(_target):
-		_boss_attack_uses_projectile = absf(_target.global_position.x - global_position.x) > 125.0
+		_boss_attack_uses_projectile = (
+			_family == EnemyFamily.SLIME
+			and absf(_target.global_position.x - global_position.x) > 125.0
+		)
 	_attack_remaining = _get_attack_duration()
 	_attack_cooldown_remaining = _get_attack_cooldown()
 	_attack_action_performed = false
@@ -465,18 +495,25 @@ func _fire_projectile() -> void:
 		20 if is_boss() else (18 if is_elite() else RANGED_DAMAGE)
 	)
 	var projectile_speed: float = RANGED_PROJECTILE_SPEED * (1.12 if is_boss() else 1.0)
+	var projectile_style := (
+		ProjectileStyle.ARROW
+		if _family == EnemyFamily.GOBLIN and is_ranged_enemy()
+		else ProjectileStyle.CRYSTAL_ORB
+	)
 	if is_boss():
 		for spread_angle in [-0.16, 0.0, 0.16]:
 			projectile_requested.emit(
 				global_position + Vector2(_facing * 28.0, -12.0),
 				projectile_direction.rotated(float(spread_angle)) * projectile_speed,
-				projectile_damage
+				projectile_damage,
+				projectile_style
 			)
 	else:
 		projectile_requested.emit(
 			global_position + Vector2(_facing * 18.0, -8.0),
 			projectile_direction * projectile_speed,
-			projectile_damage
+			projectile_damage,
+			projectile_style
 		)
 
 
@@ -485,6 +522,12 @@ func _get_scaled_damage(base_damage: int) -> int:
 
 
 func _get_sprite_sheet() -> Texture2D:
+	if _family == EnemyFamily.GOBLIN:
+		if is_ranged_enemy():
+			return GOBLIN_ARCHER_SHEET
+		if is_elite() or is_boss():
+			return GOBLIN_ELITE_SHEET
+		return GOBLIN_CLUB_SHEET
 	if is_boss():
 		return BOSS_SLIME_SHEET
 	if is_ranged_enemy():
@@ -493,6 +536,12 @@ func _get_sprite_sheet() -> Texture2D:
 
 
 func _get_sprite_scale() -> float:
+	if _family == EnemyFamily.GOBLIN:
+		if is_boss():
+			return 0.38
+		if is_elite():
+			return 0.30
+		return 0.25 if is_ranged_enemy() else 0.26
 	if is_boss():
 		return 0.43
 	if is_elite():
@@ -503,6 +552,12 @@ func _get_sprite_scale() -> float:
 func _get_sprite_baseline_offset() -> float:
 	# The generated sheets have a 313.5px cell. Align their opaque idle bottoms with
 	# the collision body's floor contact so every platform uses the same visual baseline.
+	if _family == EnemyFamily.GOBLIN:
+		if is_boss():
+			return -11.0
+		if is_elite():
+			return -14.0
+		return -14.0 if is_ranged_enemy() else -15.0
 	if is_boss():
 		return -13.0
 	if is_elite():

@@ -12,8 +12,9 @@ const ABILITY_SLOT_SCRIPT := preload("res://scripts/ability_slot.gd")
 const SETTINGS_STORE_SCRIPT := preload("res://scripts/settings_store.gd")
 const PAUSE_INPUT_HANDLER_SCRIPT := preload("res://scripts/pause_input_handler.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
-const BUILD_LABEL := "战斗音效修正版 2026.08.30C"
-const ROOMS_PER_RUN := 5
+const BUILD_LABEL := "赤牙军团扩展版 2026.08.30D"
+const ROOMS_PER_RUN := 10
+const GOBLIN_CHAPTER_START := 5
 const ROOM_PLAYER_SPAWN := Vector2(150.0, 580.0)
 const ROOM_ENTRY_RECOVERY := 10
 const DEATH_RESTART_DELAY := 1.05
@@ -23,6 +24,8 @@ const ENEMY_ROLE_RANGED := 1
 const ENEMY_RANK_NORMAL := 0
 const ENEMY_RANK_ELITE := 1
 const ENEMY_RANK_BOSS := 2
+const ENEMY_FAMILY_SLIME := 0
+const ENEMY_FAMILY_GOBLIN := 1
 
 enum EncounterType {
 	NORMAL,
@@ -1017,6 +1020,7 @@ func _spawn_room_enemies() -> void:
 		_spawn_boss()
 		return
 	var spawn_values: Array = _current_room_data.get("enemies", []) as Array
+	var family: int = _get_enemy_family_for_room(_current_room_index)
 	for spawn_index in range(spawn_values.size()):
 		var spawn_value: Variant = spawn_values[spawn_index]
 		var descriptor: Dictionary = spawn_value as Dictionary
@@ -1039,7 +1043,8 @@ func _spawn_room_enemies() -> void:
 			minimum_x,
 			maximum_x,
 			role,
-			rank
+			rank,
+			family
 		)
 
 
@@ -1048,13 +1053,25 @@ func _spawn_enemy(
 	patrol_left: float,
 	patrol_right: float,
 	role: int,
-	rank: int = ENEMY_RANK_NORMAL
+	rank: int = ENEMY_RANK_NORMAL,
+	family: int = ENEMY_FAMILY_SLIME
 ) -> void:
 	var enemy: RogueEnemy = ENEMY_SCRIPT.new() as RogueEnemy
 	var variant: int = 1
 	if role != ENEMY_ROLE_RANGED:
 		variant = 0 if _rng.randi_range(0, 1) == 0 else 2
-	if rank == ENEMY_RANK_BOSS:
+	if family == ENEMY_FAMILY_GOBLIN:
+		if rank == ENEMY_RANK_BOSS:
+			enemy.name = "RedFangWarChief"
+		elif rank == ENEMY_RANK_ELITE:
+			enemy.name = "EliteRedFangBrute_%02d" % (_enemies.size() + 1)
+		else:
+			enemy.name = (
+				"RedFangArcher_%02d"
+				if role == ENEMY_ROLE_RANGED
+				else "RedFangClubSoldier_%02d"
+			) % (_enemies.size() + 1)
+	elif rank == ENEMY_RANK_BOSS:
 		enemy.name = "RedCrystalSlimeKing"
 	elif rank == ENEMY_RANK_ELITE:
 		enemy.name = "EliteRedCrystalSlime_%02d" % (_enemies.size() + 1)
@@ -1073,7 +1090,8 @@ func _spawn_enemy(
 		role,
 		rank,
 		_get_difficulty_health_multiplier(),
-		_get_difficulty_damage_multiplier()
+		_get_difficulty_damage_multiplier(),
+		family
 	)
 	enemy.set_target(player)
 	enemy.defeated.connect(_on_enemy_defeated.bind(enemy))
@@ -1099,12 +1117,14 @@ func _spawn_boss() -> void:
 	var minimum_x: float = maxf(boss_surface.position.x + 85.0, 190.0)
 	var maximum_x: float = minf(boss_surface.end.x - 85.0, WORLD_SIZE.x - 105.0)
 	var spawn_x: float = lerpf(minimum_x, maximum_x, 0.68)
+	var family: int = _get_enemy_family_for_room(_current_room_index)
 	_spawn_enemy(
 		Vector2(spawn_x, boss_surface.position.y - 42.0),
 		minimum_x,
 		maximum_x,
 		ENEMY_ROLE_MELEE,
-		ENEMY_RANK_BOSS
+		ENEMY_RANK_BOSS,
+		family
 	)
 
 
@@ -1463,14 +1483,15 @@ func _clear_chest() -> void:
 func _on_enemy_projectile_requested(
 	origin: Vector2,
 	projectile_velocity: Vector2,
-	damage: int
+	damage: int,
+	projectile_style: int
 ) -> void:
 	if not _run_active:
 		return
 	var projectile: Area2D = ENEMY_PROJECTILE_SCRIPT.new() as Area2D
 	add_child(projectile)
 	projectile.global_position = origin
-	projectile.call(&"setup", projectile_velocity, damage, player)
+	projectile.call(&"setup", projectile_velocity, damage, player, projectile_style)
 	projectile.connect(&"removed", _on_projectile_removed)
 	_projectiles.append(projectile)
 
@@ -1600,13 +1621,19 @@ func _update_room_label() -> void:
 		_room_label.text = ""
 		return
 	var room_title: String = _current_room_data.get("title", "未知房间")
+	var chapter_name := (
+		"赤牙营地"
+		if _get_enemy_family_for_room(_current_room_index) == ENEMY_FAMILY_GOBLIN
+		else "晶史莱姆巢穴"
+	)
 	if _run_complete:
 		_room_label.text = "第 %d 局\n全房间完成" % _run_number
 	else:
-		_room_label.text = "第 %d 局  房间 %d/%d\n%s · %s" % [
+		_room_label.text = "第 %d 局  房间 %d/%d · %s\n%s · %s" % [
 			_run_number,
 			_current_room_index + 1,
 			ROOMS_PER_RUN,
+			chapter_name,
 			room_title,
 			_get_encounter_name(_current_encounter),
 		]
@@ -1702,7 +1729,7 @@ func _bank_run_progress(victory: bool) -> String:
 
 
 func _get_encounter_for_room(room_index: int) -> int:
-	match room_index:
+	match posmod(room_index, 5):
 		1:
 			return EncounterType.TREASURE
 		2:
@@ -1713,6 +1740,10 @@ func _get_encounter_for_room(room_index: int) -> int:
 			return EncounterType.BOSS
 		_:
 			return EncounterType.NORMAL
+
+
+func _get_enemy_family_for_room(room_index: int) -> int:
+	return ENEMY_FAMILY_GOBLIN if room_index >= GOBLIN_CHAPTER_START else ENEMY_FAMILY_SLIME
 
 
 func _get_encounter_name(encounter: int) -> String:
