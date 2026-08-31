@@ -52,11 +52,15 @@ const HERO_SLASH_UP_FOLLOWTHROUGH: Texture2D = preload("res://assets/characters/
 const HERO_SLASH_DOWN_WINDUP: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down_windup.png")
 const HERO_SLASH_DOWN: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down.png")
 const HERO_SLASH_DOWN_FOLLOWTHROUGH: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down_followthrough.png")
+const HERO_SKILL_FULLMOON_SHEET: Texture2D = preload("res://assets/characters/frames_polished/hero_skill_fullmoon_sheet_v2.png")
 const DASH_ECHO_SCRIPT := preload("res://scripts/dash_echo.gd")
 
 const HERO_FRAME_SIZE := Vector2(640.0, 416.0)
 const HERO_SCALE := 0.22
 const RUN_FRAME_COUNT := 8.0
+const SKILL_SHEET_COLUMNS := 3.0
+const SKILL_SHEET_ROWS := 2.0
+const SKILL_FRAME_COUNT := 6
 const LANDING_SQUASH_DURATION := 0.20
 const ATTACK_HIT_PROGRESS := 0.38
 const ATTACK_FAILSAFE_MARGIN := 0.08
@@ -760,8 +764,6 @@ func _update_hero_visuals() -> void:
 		visual_modulate = Color(0.56, 0.64, 0.72, 0.72)
 	elif _hurt_remaining > 0.0:
 		visual_modulate = Color(1.0, 0.42, 0.42, 1.0)
-	elif _skill_remaining > 0.0:
-		visual_modulate = _weapon_accent.lightened(0.18)
 	elif _hurt_invulnerability_remaining > 0.0 and int(_visual_time * 20.0) % 2 == 0:
 		visual_modulate = Color(1.0, 1.0, 1.0, 0.52)
 	hero_sprite.modulate = visual_modulate
@@ -769,6 +771,7 @@ func _update_hero_visuals() -> void:
 
 func _reset_sprite_pose() -> void:
 	hero_sprite.visible = true
+	hero_sprite.region_enabled = false
 	hero_sprite.position = Vector2(0.0, -15.0)
 	hero_sprite.scale = Vector2(HERO_SCALE, HERO_SCALE)
 	hero_sprite.rotation = 0.0
@@ -780,6 +783,19 @@ func _set_texture(texture: Texture2D) -> void:
 		return
 	_current_texture = texture
 	hero_sprite.texture = texture
+
+
+func _set_skill_frame(frame_index: int) -> void:
+	_set_texture(HERO_SKILL_FULLMOON_SHEET)
+	hero_sprite.region_enabled = true
+	var cell_size := Vector2(
+		float(HERO_SKILL_FULLMOON_SHEET.get_width()) / SKILL_SHEET_COLUMNS,
+		float(HERO_SKILL_FULLMOON_SHEET.get_height()) / SKILL_SHEET_ROWS
+	)
+	var resolved_frame: int = clampi(frame_index, 0, SKILL_FRAME_COUNT - 1)
+	var column: int = resolved_frame % int(SKILL_SHEET_COLUMNS)
+	var row: int = floori(float(resolved_frame) / SKILL_SHEET_COLUMNS)
+	hero_sprite.region_rect = Rect2(Vector2(column, row) * cell_size, cell_size)
 
 
 func _run_texture(frame_index: int = -1) -> Texture2D:
@@ -1001,75 +1017,31 @@ func _animate_down_attack(attack_progress: float) -> void:
 
 
 func _animate_skill() -> void:
-	var skill_progress: float = 1.0 - _skill_remaining / maxf(_skill_duration, 0.001)
-	if skill_progress < 0.30:
-		_set_texture(HERO_WINDUP)
-		var charge: float = smoothstep(0.0, 1.0, skill_progress / 0.30)
-		hero_sprite.position += Vector2(-_facing * 5.0 * charge, 1.5 * charge)
-		hero_sprite.rotation = -_facing * 0.10 * charge
-		hero_sprite.scale = Vector2(HERO_SCALE * 0.96, HERO_SCALE * 1.06)
-	elif skill_progress < 0.76:
-		_set_texture(HERO_SLASH)
-		var strike: float = smoothstep(0.0, 1.0, (skill_progress - 0.30) / 0.46)
-		hero_sprite.position += Vector2(_facing * lerpf(-4.0, 10.0, strike), -1.0)
-		hero_sprite.rotation = _facing * lerpf(-0.08, 0.10, strike)
-		var impact: float = sin(strike * PI)
-		hero_sprite.scale = Vector2(
-			HERO_SCALE * (1.0 + impact * 0.10),
-			HERO_SCALE * (1.0 - impact * 0.05)
-		)
-	else:
-		_set_texture(HERO_RECOVERY)
-		var recovery: float = smoothstep(0.0, 1.0, (skill_progress - 0.76) / 0.24)
-		hero_sprite.position += Vector2(_facing * lerpf(7.0, 0.0, recovery), 0.0)
-		hero_sprite.rotation = _facing * lerpf(0.08, 0.0, recovery)
+	var skill_progress: float = clampf(
+		1.0 - _skill_remaining / maxf(_skill_duration, 0.001),
+		0.0,
+		0.999
+	)
+	var frame_index: int = mini(
+		SKILL_FRAME_COUNT - 1,
+		int(floor(skill_progress * float(SKILL_FRAME_COUNT)))
+	)
+	_set_skill_frame(frame_index)
+	# Each frame contains the complete character pose and painted moon trail. Small
+	# registration offsets keep the feet stable while the uppercut rises overhead.
+	var frame_offsets: Array[Vector2] = [
+		Vector2(-2.0, 1.0),
+		Vector2(-1.0, 0.0),
+		Vector2(1.0, -1.5),
+		Vector2(2.0, -2.5),
+		Vector2(2.0, -1.0),
+		Vector2(0.0, 0.0),
+	]
+	var offset := frame_offsets[frame_index]
+	hero_sprite.position += Vector2(offset.x * _facing, offset.y)
 
 
 func _draw() -> void:
-	if _skill_remaining > 0.0:
-		var skill_progress: float = 1.0 - _skill_remaining / maxf(_skill_duration, 0.001)
-		var arc_alpha: float = sin(clampf(skill_progress, 0.0, 1.0) * PI)
-		draw_arc(
-			_p(22.0, -8.0),
-			52.0 * _skill_reach,
-			-1.35 if _facing > 0.0 else PI - 0.35,
-			0.35 if _facing > 0.0 else PI + 1.35,
-			24,
-			Color(_weapon_accent.r, _weapon_accent.g, _weapon_accent.b, arc_alpha * 0.75),
-			7.0,
-			true
-		)
-		draw_circle(Vector2(0.0, -6.0), 28.0 + arc_alpha * 8.0, Color(
-			_weapon_accent.r,
-			_weapon_accent.g,
-			_weapon_accent.b,
-			arc_alpha * 0.12
-		))
-		var sweep_center := _p(24.0, -9.0)
-		for sweep_index in range(3):
-			var sweep_radius: float = (38.0 + float(sweep_index) * 15.0 + skill_progress * 24.0) * _skill_reach
-			var sweep_alpha: float = arc_alpha * (0.55 - float(sweep_index) * 0.12)
-			draw_arc(
-				sweep_center,
-				sweep_radius,
-				-1.40 - float(sweep_index) * 0.11 if _facing > 0.0 else PI - 0.28 - float(sweep_index) * 0.11,
-				0.32 + float(sweep_index) * 0.13 if _facing > 0.0 else PI + 1.45 + float(sweep_index) * 0.13,
-				20,
-				Color(_weapon_accent, sweep_alpha),
-				maxf(1.5, 5.0 - float(sweep_index)),
-				true
-			)
-		var blade_tip := _p(118.0 * _skill_reach * skill_progress, -12.0)
-		draw_line(_p(4.0, -6.0), blade_tip, Color(1.0, 1.0, 1.0, arc_alpha * 0.70), 2.0, true)
-		draw_circle(blade_tip, 7.0 + arc_alpha * 9.0, Color(_weapon_accent, arc_alpha * 0.62))
-		for spark_index in range(8):
-			var spark_angle: float = float(spark_index) * TAU / 8.0 + skill_progress * 4.0
-			var spark_direction := Vector2(cos(spark_angle), sin(spark_angle) * 0.58).normalized()
-			if spark_direction.x * _facing < -0.2:
-				spark_direction.x *= -1.0
-			var spark_start := sweep_center + spark_direction * (20.0 + skill_progress * 30.0)
-			var spark_end := spark_start + spark_direction * (12.0 + skill_progress * 35.0)
-			draw_line(spark_start, spark_end, Color(_weapon_accent, arc_alpha * 0.62), 2.0, true)
 	if _dash_remaining > 0.0:
 		_draw_dash_afterimages()
 		draw_line(_p(-58.0, -8.0), _p(-15.0, -8.0), Color(0.38, 0.92, 1.0, 0.50), 7.0)

@@ -41,7 +41,10 @@ func _run_test() -> void:
 	boss.set_target(far_target)
 	var boss_sprite := boss.get_node("EnemySprite") as Sprite2D
 	if boss_sprite.scale.x < 0.52 or boss.get_hurtbox_rect().size.x < 140.0:
-		_fail("Boss visual size and combat body were not enlarged together")
+		_fail(
+			"Boss visual size %.3f and hurtbox width %.1f were not enlarged together"
+			% [boss_sprite.scale.x, boss.get_hurtbox_rect().size.x]
+		)
 		return
 	if not bool(boss.call(&"_target_is_visible")):
 		_fail("Boss did not lock onto a player-sized target across the room")

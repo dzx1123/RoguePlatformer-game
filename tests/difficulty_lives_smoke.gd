@@ -58,6 +58,9 @@ func _run_test() -> void:
 	var hard_final_aggression: float = float(main.call(&"_get_difficulty_aggression_multiplier"))
 	if (
 		easy_first_health >= 1.0
+		or easy_first_damage > 0.60
+		or easy_first_speed > 0.82
+		or easy_first_aggression > 0.60
 		or easy_final_health <= easy_first_health
 		or easy_final_damage <= easy_first_damage
 		or easy_final_speed <= easy_first_speed
@@ -69,6 +72,28 @@ func _run_test() -> void:
 	):
 		_fail("Health, damage, speed, or aggression did not accumulate across twenty rooms")
 		return
+
+	var easy_enemy := RogueEnemy.new()
+	easy_enemy.setup(
+		0,
+		0.0,
+		-100.0,
+		100.0,
+		RogueEnemy.EnemyRole.MELEE,
+		RogueEnemy.EnemyRank.NORMAL,
+		easy_first_health,
+		easy_first_damage,
+		RogueEnemy.EnemyFamily.GOBLIN,
+		easy_first_speed,
+		easy_first_aggression
+	)
+	if (
+		float(easy_enemy.call(&"_get_attack_cooldown")) < 2.0
+		or float(easy_enemy.get("_attack_cooldown_remaining")) < 1.20
+	):
+		_fail("Easy mode enemies still attack immediately or too frequently")
+		return
+	easy_enemy.queue_free()
 
 	var enemy_count_before: int = (main.get("_enemies") as Array).size()
 	main.call(

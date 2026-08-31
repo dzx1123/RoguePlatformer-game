@@ -1114,7 +1114,7 @@ func _get_difficulty_health_multiplier() -> float:
 	var room_progress: float = float(maxi(_current_room_index, 0))
 	match _selected_difficulty:
 		Difficulty.EASY:
-			return 0.70 + room_progress * 0.06
+			return 0.65 + room_progress * 0.032
 		Difficulty.HARD:
 			return 1.35 + room_progress * 0.16
 		_:
@@ -1125,7 +1125,7 @@ func _get_difficulty_damage_multiplier() -> float:
 	var room_progress: float = float(maxi(_current_room_index, 0))
 	match _selected_difficulty:
 		Difficulty.EASY:
-			return 0.68 + room_progress * 0.045
+			return 0.55 + room_progress * 0.020
 		Difficulty.HARD:
 			return 1.25 + room_progress * 0.115
 		_:
@@ -1136,7 +1136,7 @@ func _get_difficulty_speed_multiplier() -> float:
 	var room_progress: float = float(maxi(_current_room_index, 0))
 	match _selected_difficulty:
 		Difficulty.EASY:
-			return 0.92 + room_progress * 0.015
+			return 0.78 + room_progress * 0.010
 		Difficulty.HARD:
 			return 1.08 + room_progress * 0.03
 		_:
@@ -1147,7 +1147,7 @@ func _get_difficulty_aggression_multiplier() -> float:
 	var room_progress: float = float(maxi(_current_room_index, 0))
 	match _selected_difficulty:
 		Difficulty.EASY:
-			return 0.90 + room_progress * 0.025
+			return 0.55 + room_progress * 0.020
 		Difficulty.HARD:
 			return 1.12 + room_progress * 0.05
 		_:

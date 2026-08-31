@@ -19,6 +19,9 @@ const BOSS_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_boss_s
 const GOBLIN_CLUB_SHEET := preload("res://assets/enemies/red_fang_goblin_club_sheet.png")
 const GOBLIN_ELITE_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_sheet.png")
 const GOBLIN_ARCHER_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_sheet.png")
+const GOBLIN_CLUB_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_club_run_sheet_v2.png")
+const GOBLIN_ELITE_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_run_sheet_v2.png")
+const GOBLIN_ARCHER_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_run_sheet_v2.png")
 
 enum EnemyRole {
 	MELEE,
@@ -76,6 +79,9 @@ const SPRITE_COLUMNS := 4.0
 const SPRITE_ROWS := 4.0
 const GOBLIN_IDLE_FPS := 4.5
 const GOBLIN_RUN_FPS := 11.0
+const GOBLIN_RUN_COLUMNS := 4.0
+const GOBLIN_RUN_ROWS := 2.0
+const GOBLIN_RUN_FRAME_COUNT := 8
 const PURSUIT_JUMP_SPEED := 690.0
 const PURSUIT_JUMP_MIN_HEIGHT := 36.0
 const PURSUIT_JUMP_MAX_HEIGHT := 420.0
@@ -179,6 +185,17 @@ func setup(
 	_patrol_right = patrol_right
 	_patrol_direction = -1.0 if sin(phase) < 0.0 else 1.0
 	_facing = _patrol_direction
+	# Low aggression now includes a readable reaction pause instead of attacking on
+	# the very first physics frame. Later rooms naturally shorten this delay.
+	var aggression_progress: float = inverse_lerp(
+		0.55,
+		2.20,
+		clampf(_difficulty_aggression_multiplier, 0.55, 2.20)
+	)
+	_attack_cooldown_remaining = (
+		lerpf(1.25, 0.10, aggression_progress)
+		+ fposmod(absf(_phase), 0.28)
+	)
 	var base_health: int = RANGED_MAX_HEALTH if is_ranged_enemy() else MELEE_MAX_HEALTH
 	if is_boss():
 		_max_health = BOSS_MAX_HEALTH
@@ -428,7 +445,7 @@ func _target_is_visible() -> bool:
 	var detection_x: float = RANGED_DETECTION_RANGE_X if is_ranged_enemy() else MELEE_DETECTION_RANGE_X
 	if is_boss():
 		detection_x = BOSS_DETECTION_RANGE_X
-	detection_x *= clampf(_difficulty_aggression_multiplier, 0.72, 2.20)
+	detection_x *= clampf(_difficulty_aggression_multiplier, 0.55, 2.20)
 	return absf(offset.x) <= detection_x and absf(offset.y) <= _get_detection_range_y()
 
 
@@ -436,14 +453,16 @@ func _get_detection_range_y() -> float:
 	if is_boss():
 		return 760.0
 	var vertical_scale: float = clampf(
-		0.78 + _difficulty_aggression_multiplier * 0.34,
-		0.95,
+		0.55 + _difficulty_aggression_multiplier * 0.45,
+		0.72,
 		1.60
 	)
 	return DETECTION_RANGE_Y * vertical_scale
 
 
 func _try_pursuit_jump() -> void:
+	if not is_boss() and _difficulty_aggression_multiplier < 0.68:
+		return
 	if (
 		_pursuit_jump_cooldown_remaining > 0.0
 		or _attack_remaining > 0.0
@@ -531,8 +550,11 @@ func _get_attack_cooldown() -> float:
 		)
 	else:
 		base_cooldown = RANGED_ATTACK_COOLDOWN if is_ranged_enemy() else MELEE_ATTACK_COOLDOWN
-	var aggression_scale: float = clampf(_difficulty_aggression_multiplier, 0.70, 2.20)
-	return maxf(0.40 if is_boss() else 0.46, base_cooldown / aggression_scale)
+	var aggression_scale: float = clampf(_difficulty_aggression_multiplier, 0.55, 2.20)
+	return maxf(
+		0.40 if is_boss() else 0.46,
+		base_cooldown / pow(aggression_scale, 1.35)
+	)
 
 
 func _get_melee_chase_speed() -> float:
@@ -617,6 +639,14 @@ func _get_sprite_sheet() -> Texture2D:
 	return MELEE_SLIME_SHEET
 
 
+func _get_goblin_run_sheet() -> Texture2D:
+	if is_ranged_enemy():
+		return GOBLIN_ARCHER_RUN_SHEET
+	if is_elite() or is_boss():
+		return GOBLIN_ELITE_RUN_SHEET
+	return GOBLIN_CLUB_RUN_SHEET
+
+
 func _get_sprite_scale() -> float:
 	if _family == EnemyFamily.GOBLIN:
 		if is_boss():
@@ -629,6 +659,14 @@ func _get_sprite_scale() -> float:
 	if is_elite():
 		return 0.36
 	return 0.29
+
+
+func _get_goblin_run_scale() -> float:
+	if is_boss():
+		return 0.54
+	if is_elite():
+		return 0.25
+	return 0.21 if is_ranged_enemy() else 0.23
 
 
 func _get_sprite_baseline_offset() -> float:
@@ -661,25 +699,25 @@ func _set_sprite_cell(column: int, row: int) -> void:
 	)
 
 
+func _set_goblin_run_frame(frame_index: int) -> void:
+	var sheet := _get_goblin_run_sheet()
+	if _enemy_sprite.texture != sheet:
+		_enemy_sprite.texture = sheet
+	var cell_size := Vector2(
+		float(sheet.get_width()) / GOBLIN_RUN_COLUMNS,
+		float(sheet.get_height()) / GOBLIN_RUN_ROWS
+	)
+	var resolved_frame: int = posmod(frame_index, GOBLIN_RUN_FRAME_COUNT)
+	var column: int = resolved_frame % int(GOBLIN_RUN_COLUMNS)
+	var row: int = floori(float(resolved_frame) / GOBLIN_RUN_COLUMNS)
+	_enemy_sprite.region_rect = Rect2(Vector2(column, row) * cell_size, cell_size)
+
+
 func _get_goblin_loop_column(is_running: bool) -> int:
 	var frames_per_second: float = GOBLIN_RUN_FPS if is_running else GOBLIN_IDLE_FPS
 	var frame_number: int = int(floor(_elapsed * frames_per_second + _phase))
 	if is_running:
-		# A mirrored return avoids the harsh frame 3 -> frame 0 teleport in the source.
-		var run_cycle_index: int = posmod(frame_number, 6)
-		match run_cycle_index:
-			0:
-				return 0
-			1:
-				return 1
-			2:
-				return 2
-			3:
-				return 3
-			4:
-				return 2
-			_:
-				return 1
+		return posmod(frame_number, GOBLIN_RUN_FRAME_COUNT)
 
 	# Idle breathes through the neutral pose instead of snapping from frame 3 to 0.
 	var idle_cycle_index: int = posmod(frame_number, 4)
@@ -733,18 +771,13 @@ func _apply_goblin_sprite_motion(
 	elif animation_row == 1:
 		var run_cycle: float = fposmod(
 			_elapsed * GOBLIN_RUN_FPS + _phase,
-			6.0
-		) / 6.0
+			float(GOBLIN_RUN_FRAME_COUNT)
+		) / float(GOBLIN_RUN_FRAME_COUNT)
 		var run_phase: float = run_cycle * TAU
-		var stride: float = sin(run_phase)
-		var lift: float = absf(stride) * (1.45 if is_elite() or is_boss() else 1.15)
-		var squash: float = cos(run_phase * 2.0) * 0.010
-		_enemy_sprite.position.y -= lift
-		_enemy_sprite.rotation = stride * _facing * 0.018
-		_enemy_sprite.scale = Vector2(
-			sprite_scale * (1.0 + squash),
-			sprite_scale * (1.0 - squash)
-		)
+		# The eight authored poses already carry the arm/leg weight shift. Keep the
+		# runtime motion as restrained as the hero run to avoid jitter and wobble.
+		_enemy_sprite.position.y -= absf(sin(run_phase)) * 0.28
+		_enemy_sprite.rotation = -_facing * 0.010
 	elif animation_row == 2:
 		if is_ranged_enemy():
 			var bow_draw: float = smoothstep(0.02, 0.45, attack_progress)
@@ -790,6 +823,7 @@ func _update_sprite_animation() -> void:
 	var attack_progress: float = 0.0
 	var hurt_progress: float = 0.0
 	var death_progress: float = 0.0
+	var using_goblin_run_sheet: bool = false
 	if _is_defeated:
 		animation_row = 3
 		death_progress = 1.0 - _death_remaining / DEATH_ANIMATION_DURATION
@@ -817,15 +851,23 @@ func _update_sprite_animation() -> void:
 			animation_column = mini(3, int(floor(attack_progress * 4.0)))
 	elif absf(velocity.x) > 8.0:
 		animation_row = 1
+		using_goblin_run_sheet = _family == EnemyFamily.GOBLIN
 		animation_column = (
 			_get_goblin_loop_column(true)
 			if _family == EnemyFamily.GOBLIN
 			else int(floor(_elapsed * 10.0 + _phase)) % 4
 		)
 
-	_set_sprite_cell(animation_column, animation_row)
+	if using_goblin_run_sheet:
+		_set_goblin_run_frame(animation_column)
+	else:
+		_set_sprite_cell(animation_column, animation_row)
 	_enemy_sprite.flip_h = _facing > 0.0
-	var sprite_scale := _get_sprite_scale()
+	var sprite_scale := (
+		_get_goblin_run_scale()
+		if using_goblin_run_sheet
+		else _get_sprite_scale()
+	)
 	_enemy_sprite.scale = Vector2.ONE * sprite_scale
 	_enemy_sprite.position = Vector2(0.0, _get_sprite_baseline_offset())
 	_enemy_sprite.rotation = 0.0

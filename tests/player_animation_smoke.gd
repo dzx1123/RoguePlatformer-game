@@ -54,6 +54,12 @@ func _run_test() -> void:
 		if texture.get_size() != expected_size:
 			_fail("Unexpected frame size for %s: %s" % [texture_path, texture.get_size()])
 			return
+	var skill_sheet := load(
+		"res://assets/characters/frames_polished/hero_skill_fullmoon_sheet_v2.png"
+	) as Texture2D
+	if skill_sheet == null or skill_sheet.get_width() % 3 != 0 or skill_sheet.get_height() % 2 != 0:
+		_fail("Full-moon skill sheet is not a valid 3x2 animation grid")
+		return
 
 	var hero_sprite: Sprite2D = player.get_node("HeroSprite") as Sprite2D
 	var run_texture_paths: Dictionary = {}
@@ -122,6 +128,30 @@ func _run_test() -> void:
 		return
 	if _attack_hit_count != 1:
 		_fail("Attack hit signal count was %d instead of 1" % _attack_hit_count)
+		return
+
+	var skill_regions: Dictionary = {}
+	var skill_duration: float = float(player.get("_skill_duration"))
+	for frame_index in range(6):
+		var progress: float = (float(frame_index) + 0.01) / 6.0
+		player.set("_skill_remaining", skill_duration * (1.0 - progress))
+		player.call(&"_reset_sprite_pose")
+		player.call(&"_animate_skill")
+		if not hero_sprite.texture.resource_path.ends_with("hero_skill_fullmoon_sheet_v2.png"):
+			_fail("Skill did not use the painted full-moon animation")
+			return
+		if not hero_sprite.region_enabled:
+			_fail("Skill sprite sheet region was not enabled")
+			return
+		skill_regions[hero_sprite.region_rect.position] = true
+	if skill_regions.size() != 6:
+		_fail("Full-moon skill did not expose all six animation frames")
+		return
+	player.set("_skill_remaining", 0.0)
+	player.call(&"_reset_sprite_pose")
+	player.call(&"_animate_idle")
+	if hero_sprite.region_enabled:
+		_fail("Skill sprite region leaked into the normal hero animation")
 		return
 
 	player.queue_free()

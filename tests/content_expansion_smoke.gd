@@ -176,10 +176,14 @@ func _run_test() -> void:
 				return
 			var goblin_chief := chapter_boss_enemies[0] as RogueEnemy
 			var chief_sprite := goblin_chief.get_node("EnemySprite") as Sprite2D
+			var chief_texture_path: String = chief_sprite.texture.resource_path
 			if (
 				not goblin_chief.is_boss()
 				or goblin_chief.get_enemy_family() != RogueEnemy.EnemyFamily.GOBLIN
-				or not chief_sprite.texture.resource_path.ends_with("red_fang_goblin_elite_sheet.png")
+				or (
+					not chief_texture_path.ends_with("red_fang_goblin_elite_sheet.png")
+					and not chief_texture_path.ends_with("red_fang_goblin_elite_run_sheet_v2.png")
+				)
 			):
 				_fail("The final boss did not use the elite Red Fang design")
 				return

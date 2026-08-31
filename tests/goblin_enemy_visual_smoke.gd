@@ -27,6 +27,22 @@ func _run_test() -> void:
 		if not _validate_clean_registered_sheet(image, asset_path):
 			return
 
+	var run_asset_paths: Array[String] = [
+		"res://assets/enemies/red_fang_goblin_club_run_sheet_v2.png",
+		"res://assets/enemies/red_fang_goblin_elite_run_sheet_v2.png",
+		"res://assets/enemies/red_fang_goblin_archer_run_sheet_v2.png",
+	]
+	for asset_path in run_asset_paths:
+		var texture := load(asset_path) as Texture2D
+		if texture == null or texture.get_width() % 4 != 0 or texture.get_height() % 2 != 0:
+			_fail("Goblin run sheet is not divisible into a 4x2 grid: %s" % asset_path)
+			return
+		var png_bytes: PackedByteArray = FileAccess.get_file_as_bytes(asset_path)
+		var image := Image.new()
+		if image.load_png_from_buffer(png_bytes) != OK or image.get_pixel(0, 0).a > 0.01:
+			_fail("Goblin run sheet is missing real alpha transparency: %s" % asset_path)
+			return
+
 	var club := _make_goblin(RogueEnemy.EnemyRole.MELEE, RogueEnemy.EnemyRank.NORMAL)
 	var elite := _make_goblin(RogueEnemy.EnemyRole.MELEE, RogueEnemy.EnemyRank.ELITE)
 	var archer := _make_goblin(RogueEnemy.EnemyRole.RANGED, RogueEnemy.EnemyRank.NORMAL)
@@ -52,28 +68,51 @@ func _run_test() -> void:
 		return
 
 	club.velocity.x = 100.0
-	var cell_width: float = float(club_sprite.texture.get_width()) / 4.0
-	var cell_height: float = float(club_sprite.texture.get_height()) / 4.0
-	var expected_run_columns: Array[int] = [0, 1, 2, 3, 2, 1]
-	for frame_index in range(expected_run_columns.size()):
+	var run_frames_seen: Dictionary = {}
+	for frame_index in range(8):
 		club.set("_elapsed", (float(frame_index) + 0.01) / 11.0)
 		club.call(&"_update_sprite_animation")
-		var run_column: int = int(round(club_sprite.region_rect.position.x / cell_width))
-		if run_column != expected_run_columns[frame_index]:
-			_fail("Goblin run cycle snapped or selected the wrong return frame")
+		if not club_sprite.texture.resource_path.ends_with("red_fang_goblin_club_run_sheet_v2.png"):
+			_fail("Ordinary goblin did not switch to its authored run sheet")
 			return
-	if not is_equal_approx(club_sprite.region_rect.position.y, cell_height):
-		_fail("Goblin run did not select the movement row")
+		var run_cell_width: float = float(club_sprite.texture.get_width()) / 4.0
+		var run_cell_height: float = float(club_sprite.texture.get_height()) / 2.0
+		var run_column: int = int(round(club_sprite.region_rect.position.x / run_cell_width))
+		var run_row: int = int(round(club_sprite.region_rect.position.y / run_cell_height))
+		var resolved_frame: int = run_row * 4 + run_column
+		if resolved_frame != frame_index:
+			_fail("Goblin run cycle selected frame %d instead of %d" % [resolved_frame, frame_index])
+			return
+		run_frames_seen[club_sprite.region_rect.position] = true
+	if run_frames_seen.size() != 8:
+		_fail("Goblin run did not expose all eight authored poses")
+		return
+
+	elite.velocity.x = 100.0
+	elite.call(&"_update_sprite_animation")
+	if not elite_sprite.texture.resource_path.ends_with("red_fang_goblin_elite_run_sheet_v2.png"):
+		_fail("Elite goblin did not switch to its authored run sheet")
+		return
+	archer.velocity.x = 100.0
+	archer.call(&"_update_sprite_animation")
+	if not archer_sprite.texture.resource_path.ends_with("red_fang_goblin_archer_run_sheet_v2.png"):
+		_fail("Archer goblin did not switch to its authored run sheet")
 		return
 
 	club.velocity.x = 0.0
+	club.call(&"_update_sprite_animation")
+	var cell_width: float = float(club_sprite.texture.get_width()) / 4.0
+	var cell_height: float = float(club_sprite.texture.get_height()) / 4.0
 	var expected_idle_columns: Array[int] = [0, 1, 2, 1]
 	for frame_index in range(expected_idle_columns.size()):
 		club.set("_elapsed", (float(frame_index) + 0.01) / 4.5)
 		club.call(&"_update_sprite_animation")
 		var idle_column: int = int(round(club_sprite.region_rect.position.x / cell_width))
 		if idle_column != expected_idle_columns[frame_index]:
-			_fail("Goblin idle cycle snapped instead of returning through its neutral pose")
+			_fail(
+				"Goblin idle frame %d selected column %d instead of %d"
+				% [frame_index, idle_column, expected_idle_columns[frame_index]]
+			)
 			return
 
 	club.call(&"_start_attack")
