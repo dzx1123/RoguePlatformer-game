@@ -17,12 +17,18 @@ func _run_test() -> void:
 	(entry.get_node("EntrySettings") as Button).emit_signal("pressed")
 	await process_frame
 	var settings_menu: Control = menu_main.get_node("HUD/SettingsMenu") as Control
+	var operation_guide: RichTextLabel = settings_menu.get_node("OperationGuide") as RichTextLabel
 	if (
 		not settings_menu.visible
 		or (settings_menu.get_node("Bind_dash") as Button) == null
 		or (settings_menu.get_node("DamageNumbersToggle") as CheckButton) == null
+		or operation_guide == null
 	):
-		_fail("Settings menu did not expose key binding and damage number controls")
+		_fail("Settings menu did not expose bindings, options, and the operation guide")
+		return
+	var guide_text: String = operation_guide.get_parsed_text()
+	if not guide_text.contains("操作说明") or not guide_text.contains("开宝箱") or not guide_text.contains("空中可再次跳跃"):
+		_fail("Settings operation guide did not contain the moved gameplay instructions")
 		return
 	(settings_menu.get_node("CloseSettings") as Button).emit_signal("pressed")
 	menu_main.queue_free()
@@ -31,6 +37,19 @@ func _run_test() -> void:
 	game_main.set("save_enabled", false)
 	root.add_child(game_main)
 	await physics_frame
+	var gameplay_title: Label = game_main.get_node("HUD/Title") as Label
+	var gameplay_controls: Label = game_main.get_node("HUD/Controls") as Label
+	if gameplay_title.visible or gameplay_controls.visible:
+		_fail("Gameplay still showed the old title or full-width control instructions")
+		return
+	if (
+		game_main.get_node_or_null("HUD/RoomCard") == null
+		or game_main.get_node_or_null("HUD/StatusToast") == null
+		or game_main.get_node_or_null("HUD/BottomHUD") == null
+		or game_main.get_node_or_null("HUD/WeaponPanel") == null
+	):
+		_fail("Redesigned top cards and dedicated bottom combat dock were not created")
+		return
 	var escape_event := InputEventKey.new()
 	escape_event.keycode = KEY_ESCAPE
 	escape_event.pressed = true

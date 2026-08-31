@@ -1,6 +1,9 @@
 extends Node2D
 
 const WORLD_SIZE := Vector2(1280.0, 720.0)
+const DISPLAY_SIZE := Vector2(1280.0, 840.0)
+const HUD_DOCK_TOP := 720.0
+const HEALTH_FILL_WIDTH := 354.0
 const ENEMY_SCRIPT := preload("res://scripts/rogue_enemy.gd")
 const ENEMY_PROJECTILE_SCRIPT := preload("res://scripts/enemy_projectile.gd")
 const ROOM_CATALOG_SCRIPT := preload("res://scripts/run_room_catalog.gd")
@@ -12,9 +15,11 @@ const ABILITY_SLOT_SCRIPT := preload("res://scripts/ability_slot.gd")
 const SETTINGS_STORE_SCRIPT := preload("res://scripts/settings_store.gd")
 const PAUSE_INPUT_HANDLER_SCRIPT := preload("res://scripts/pause_input_handler.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
-const BUILD_LABEL := "赤牙军团扩展版 2026.08.30D"
-const ROOMS_PER_RUN := 10
+const BUILD_LABEL := "月蚀混战扩展版 2026.08.31C"
+const ROOMS_PER_RUN := 20
 const GOBLIN_CHAPTER_START := 5
+const MIXED_CHAPTER_START := 10
+const FINAL_CHAPTER_START := 15
 const ROOM_PLAYER_SPAWN := Vector2(150.0, 580.0)
 const ROOM_ENTRY_RECOVERY := 10
 const DEATH_RESTART_DELAY := 1.05
@@ -99,8 +104,12 @@ var _camera_base_position := Vector2.ZERO
 var _camera_shake_remaining: float = 0.0
 var _camera_shake_duration: float = 0.0
 var _camera_shake_strength: float = 0.0
+var _attack_slot: Control
 var _dash_slot: Control
 var _skill_slot: Control
+var _weapon_slot_panels: Array[Panel] = []
+var _weapon_slot_labels: Array[Label] = []
+var _weapon_hud_state_key: String = ""
 var _lives_remaining: int = MAX_RUN_LIVES
 var _settings: RefCounted
 var _pause_overlay: Control
@@ -108,6 +117,7 @@ var _settings_overlay: Control
 var _settings_key_buttons: Dictionary = {}
 var _settings_volume_slider: HSlider
 var _settings_damage_numbers_toggle: CheckButton
+var _settings_guide_label: RichTextLabel
 var _settings_from_pause: bool = false
 var _awaiting_rebind_action: StringName = &""
 var _is_game_paused: bool = false
@@ -166,6 +176,8 @@ func _process(_delta: float) -> void:
 			_leave_shop()
 	if Input.is_action_just_pressed(&"cycle_weapon"):
 		_cycle_weapon()
+	if is_instance_valid(_chest):
+		_chest.set_opener_position(player.global_position)
 	_update_equipment_hud()
 	_update_ability_hud()
 	_update_lives_hud()
@@ -283,7 +295,9 @@ func _configure_camera() -> void:
 	camera.limit_left = 0
 	camera.limit_top = 0
 	camera.limit_right = int(WORLD_SIZE.x)
-	camera.limit_bottom = int(WORLD_SIZE.y)
+	# The extra 120 pixels belong to the fixed HUD dock. Keeping the camera limits
+	# equal to the full display pins the 720-pixel room to the top of the window.
+	camera.limit_bottom = int(DISPLAY_SIZE.y)
 	_camera_base_position = camera.position
 
 
@@ -310,89 +324,189 @@ func _trigger_camera_shake(strength: float, duration: float = 0.09) -> void:
 	_camera_shake_remaining = maxf(_camera_shake_remaining, duration)
 
 
+func _create_hud_panel(
+	panel_name: String,
+	panel_position: Vector2,
+	panel_size: Vector2,
+	border_color: Color,
+	accent_color: Color
+) -> Panel:
+	var panel := Panel.new()
+	panel.name = panel_name
+	panel.position = panel_position
+	panel.size = panel_size
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.018, 0.042, 0.065, 0.90)
+	panel_style.border_color = border_color
+	panel_style.set_border_width_all(1)
+	panel_style.corner_radius_top_left = 9
+	panel_style.corner_radius_top_right = 9
+	panel_style.corner_radius_bottom_left = 9
+	panel_style.corner_radius_bottom_right = 9
+	panel_style.shadow_color = Color(0.0, 0.0, 0.0, 0.36)
+	panel_style.shadow_size = 7
+	panel_style.shadow_offset = Vector2(0.0, 3.0)
+	panel.add_theme_stylebox_override("panel", panel_style)
+	hud.add_child(panel)
+	var accent := ColorRect.new()
+	accent.position = Vector2(0.0, 10.0)
+	accent.size = Vector2(4.0, panel_size.y - 20.0)
+	accent.color = accent_color
+	accent.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(accent)
+	return panel
+
+
 func _create_combat_hud() -> void:
-	title_label.text = "ROGUE PLATFORMER  /  RUN PROTOTYPE"
-	title_label.position = Vector2(28.0, 17.0)
-	title_label.add_theme_font_size_override("font_size", 23)
-	title_label.add_theme_color_override("font_color", Color(0.84, 0.93, 1.0, 1.0))
-	controls_label.position = Vector2(28.0, 49.0)
-	controls_label.add_theme_font_size_override("font_size", 14)
-	controls_label.add_theme_color_override("font_color", Color(0.58, 0.72, 0.82, 1.0))
+	# Gameplay stays visually clean; the complete control guide now lives in Settings.
+	title_label.text = ""
+	title_label.visible = false
+	controls_label.text = ""
+	controls_label.visible = false
+
+	# The combat dock occupies its own 120-pixel strip below the 1280x720 room.
+	# It is intentionally opaque so gameplay silhouettes never compete with HUD text.
+	var bottom_hud := Panel.new()
+	bottom_hud.name = "BottomHUD"
+	bottom_hud.position = Vector2(0.0, HUD_DOCK_TOP)
+	bottom_hud.size = Vector2(DISPLAY_SIZE.x, DISPLAY_SIZE.y - HUD_DOCK_TOP)
+	bottom_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var bottom_style := StyleBoxFlat.new()
+	bottom_style.bg_color = Color(0.008, 0.019, 0.032, 1.0)
+	bottom_style.border_color = Color(0.21, 0.58, 0.67, 0.72)
+	bottom_style.border_width_top = 2
+	bottom_style.shadow_color = Color(0.0, 0.0, 0.0, 0.72)
+	bottom_style.shadow_size = 12
+	bottom_style.shadow_offset = Vector2(0.0, -4.0)
+	bottom_hud.add_theme_stylebox_override("panel", bottom_style)
+	hud.add_child(bottom_hud)
+
+	var top_rune := ColorRect.new()
+	top_rune.position = Vector2(28.0, 4.0)
+	top_rune.size = Vector2(1224.0, 2.0)
+	top_rune.color = Color(0.31, 0.82, 0.90, 0.54)
+	top_rune.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bottom_hud.add_child(top_rune)
+
+	_create_hud_panel(
+		"VitalsPanel",
+		Vector2(28.0, 728.0),
+		Vector2(390.0, 104.0),
+		Color(0.23, 0.58, 0.66, 0.60),
+		Color("#46cdd9")
+	)
+	_create_hud_panel(
+		"AbilityPanel",
+		Vector2(432.0, 722.0),
+		Vector2(416.0, 114.0),
+		Color(0.40, 0.55, 0.75, 0.72),
+		Color("#86a8ff")
+	)
+	var weapon_panel: Panel = _create_hud_panel(
+		"WeaponPanel",
+		Vector2(862.0, 728.0),
+		Vector2(390.0, 104.0),
+		Color(0.63, 0.47, 0.24, 0.68),
+		Color("#e8b65c")
+	)
 
 	var health_background := ColorRect.new()
 	health_background.name = "HealthBackground"
-	health_background.position = Vector2(20.0, 669.0)
-	health_background.size = Vector2(236.0, 24.0)
-	health_background.color = Color(0.025, 0.055, 0.075, 0.90)
+	health_background.position = Vector2(42.0, 755.0)
+	health_background.size = Vector2(362.0, 28.0)
+	health_background.color = Color(0.012, 0.033, 0.047, 0.98)
 	health_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(health_background)
 
 	_health_fill = ColorRect.new()
 	_health_fill.name = "HealthFill"
 	_health_fill.position = Vector2(4.0, 4.0)
-	_health_fill.size = Vector2(228.0, 16.0)
+	_health_fill.size = Vector2(HEALTH_FILL_WIDTH, 20.0)
 	_health_fill.color = Color(0.18, 0.82, 0.50, 0.96)
 	_health_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	health_background.add_child(_health_fill)
 
 	_health_label = Label.new()
 	_health_label.name = "HealthLabel"
-	_health_label.position = Vector2(8.0, 0.0)
-	_health_label.size = Vector2(220.0, 24.0)
+	_health_label.position = Vector2(4.0, 0.0)
+	_health_label.size = Vector2(354.0, 28.0)
+	_health_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_health_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_health_label.add_theme_font_size_override("font_size", 15)
 	_health_label.add_theme_color_override("font_color", Color.WHITE)
+	_health_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.84))
+	_health_label.add_theme_constant_override("outline_size", 2)
 	_health_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	health_background.add_child(_health_label)
 
+	_create_hud_panel(
+		"RoomCard",
+		Vector2(1002.0, 16.0),
+		Vector2(246.0, 70.0),
+		Color(0.26, 0.68, 0.78, 0.72),
+		Color("#61d6e8")
+	)
+	_create_hud_panel(
+		"StatusToast",
+		Vector2(42.0, 802.0),
+		Vector2(362.0, 25.0),
+		Color(0.78, 0.57, 0.24, 0.48),
+		Color("#efb85d")
+	)
+
 	_status_label = Label.new()
 	_status_label.name = "CombatStatus"
-	_status_label.position = Vector2(808.0, 155.0)
-	_status_label.size = Vector2(430.0, 34.0)
-	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_status_label.position = Vector2(52.0, 804.0)
+	_status_label.size = Vector2(340.0, 21.0)
+	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	_status_label.add_theme_font_size_override("font_size", 16)
-	_status_label.add_theme_color_override("font_color", Color(1.0, 0.76, 0.40, 1.0))
+	_status_label.clip_text = true
+	_status_label.add_theme_font_size_override("font_size", 12)
+	_status_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.50, 1.0))
 	_status_label.add_theme_color_override("font_outline_color", Color(0.025, 0.045, 0.07, 0.96))
-	_status_label.add_theme_constant_override("outline_size", 4)
+	_status_label.add_theme_constant_override("outline_size", 1)
 	_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(_status_label)
 
 	_room_label = Label.new()
 	_room_label.name = "RoomProgress"
-	_room_label.position = Vector2(965.0, 16.0)
-	_room_label.size = Vector2(285.0, 54.0)
-	_room_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_room_label.add_theme_font_size_override("font_size", 17)
+	_room_label.position = Vector2(1018.0, 24.0)
+	_room_label.size = Vector2(214.0, 54.0)
+	_room_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_room_label.add_theme_font_size_override("font_size", 14)
 	_room_label.add_theme_color_override("font_color", Color(0.78, 0.90, 0.96, 1.0))
 	_room_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(_room_label)
 
 	_currency_label = Label.new()
 	_currency_label.name = "Currency"
-	_currency_label.position = Vector2(20.0, 696.0)
-	_currency_label.size = Vector2(365.0, 20.0)
-	_currency_label.add_theme_font_size_override("font_size", 14)
+	_currency_label.position = Vector2(42.0, 785.0)
+	_currency_label.size = Vector2(362.0, 16.0)
 	_currency_label.clip_text = true
-	_currency_label.add_theme_font_size_override("font_size", 16)
+	_currency_label.add_theme_font_size_override("font_size", 13)
 	_currency_label.add_theme_color_override("font_color", Color(1.0, 0.83, 0.43, 1.0))
 	_currency_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(_currency_label)
 
 	_equipment_label = Label.new()
 	_equipment_label.name = "Equipment"
-	_equipment_label.position = Vector2(965.0, 72.0)
-	_equipment_label.size = Vector2(285.0, 58.0)
-	_equipment_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_equipment_label.add_theme_font_size_override("font_size", 14)
-	_equipment_label.add_theme_color_override("font_color", Color(0.72, 0.91, 1.0, 1.0))
+	_equipment_label.position = Vector2(880.0, 734.0)
+	_equipment_label.size = Vector2(352.0, 20.0)
+	_equipment_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_equipment_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_equipment_label.clip_text = true
+	_equipment_label.add_theme_font_size_override("font_size", 13)
+	_equipment_label.add_theme_color_override("font_color", Color(0.96, 0.82, 0.53, 1.0))
 	_equipment_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(_equipment_label)
 
 	_lives_label = Label.new()
 	_lives_label.name = "Lives"
-	_lives_label.position = Vector2(20.0, 646.0)
-	_lives_label.size = Vector2(365.0, 19.0)
-	_lives_label.add_theme_font_size_override("font_size", 14)
+	_lives_label.position = Vector2(42.0, 734.0)
+	_lives_label.size = Vector2(362.0, 18.0)
+	_lives_label.add_theme_font_size_override("font_size", 13)
 	_lives_label.clip_text = true
 	_lives_label.add_theme_color_override("font_color", Color(1.0, 0.76, 0.46, 1.0))
 	_lives_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -400,7 +514,7 @@ func _create_combat_hud() -> void:
 
 	_boss_health_background = ColorRect.new()
 	_boss_health_background.name = "BossHealth"
-	_boss_health_background.position = Vector2(390.0, 105.0)
+	_boss_health_background.position = Vector2(390.0, 22.0)
 	_boss_health_background.size = Vector2(500.0, 28.0)
 	_boss_health_background.color = Color(0.05, 0.02, 0.03, 0.92)
 	_boss_health_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -422,27 +536,96 @@ func _create_combat_hud() -> void:
 	_boss_health_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_boss_health_background.add_child(_boss_health_label)
 	_boss_health_background.visible = false
+
+	var ability_heading := Label.new()
+	ability_heading.position = Vector2(450.0, 726.0)
+	ability_heading.size = Vector2(380.0, 20.0)
+	ability_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ability_heading.text = "战技  ·  COMBAT ARTS"
+	ability_heading.add_theme_font_size_override("font_size", 12)
+	ability_heading.add_theme_color_override("font_color", Color(0.63, 0.78, 0.98, 0.90))
+	ability_heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(ability_heading)
+
+	_create_weapon_hud(weapon_panel)
 	_create_ability_hud()
+
+
+func _create_weapon_hud(weapon_panel: Panel) -> void:
+	_weapon_slot_panels.clear()
+	_weapon_slot_labels.clear()
+	for weapon_index in range(WeaponCatalog.all_weapon_ids().size()):
+		var slot := Panel.new()
+		slot.name = "WeaponSlot_%d" % weapon_index
+		slot.position = Vector2(18.0 + float(weapon_index) * 92.0, 31.0)
+		slot.size = Vector2(84.0, 58.0)
+		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		weapon_panel.add_child(slot)
+		_weapon_slot_panels.append(slot)
+
+		var slot_label := Label.new()
+		slot_label.name = "Label"
+		slot_label.position = Vector2(4.0, 3.0)
+		slot_label.size = Vector2(76.0, 52.0)
+		slot_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		slot_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		slot_label.add_theme_font_size_override("font_size", 11)
+		slot_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		slot.add_child(slot_label)
+		_weapon_slot_labels.append(slot_label)
+
+	var switch_panel := Panel.new()
+	switch_panel.name = "WeaponSwitch"
+	switch_panel.position = Vector2(296.0, 31.0)
+	switch_panel.size = Vector2(72.0, 58.0)
+	switch_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var switch_style := StyleBoxFlat.new()
+	switch_style.bg_color = Color(0.025, 0.075, 0.098, 0.96)
+	switch_style.border_color = Color(0.37, 0.78, 0.85, 0.70)
+	switch_style.set_border_width_all(1)
+	switch_style.corner_radius_top_left = 6
+	switch_style.corner_radius_top_right = 6
+	switch_style.corner_radius_bottom_left = 6
+	switch_style.corner_radius_bottom_right = 6
+	switch_panel.add_theme_stylebox_override("panel", switch_style)
+	weapon_panel.add_child(switch_panel)
+
+	var switch_label := Label.new()
+	switch_label.position = Vector2(3.0, 3.0)
+	switch_label.size = Vector2(66.0, 52.0)
+	switch_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	switch_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	switch_label.text = "Q\n切换"
+	switch_label.add_theme_font_size_override("font_size", 12)
+	switch_label.add_theme_color_override("font_color", Color(0.65, 0.90, 0.95, 1.0))
+	switch_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	switch_panel.add_child(switch_label)
 
 
 func _create_ability_hud() -> void:
 	var ability_bar := Control.new()
 	ability_bar.name = "AbilityBar"
-	ability_bar.position = Vector2(556.0, 650.0)
-	ability_bar.size = Vector2(168.0, 70.0)
+	ability_bar.position = Vector2(503.0, 752.0)
+	ability_bar.size = Vector2(274.0, 76.0)
 	ability_bar.mouse_filter = Control.MOUSE_FILTER_PASS
 	hud.add_child(ability_bar)
 
+	_attack_slot = ABILITY_SLOT_SCRIPT.new() as Control
+	_attack_slot.name = "AttackAbility"
+	_attack_slot.position = Vector2(0.0, 0.0)
+	_attack_slot.size = Vector2(78.0, 76.0)
+	ability_bar.add_child(_attack_slot)
+
 	_dash_slot = ABILITY_SLOT_SCRIPT.new() as Control
 	_dash_slot.name = "DashAbility"
-	_dash_slot.position = Vector2(0.0, 0.0)
-	_dash_slot.size = Vector2(78.0, 70.0)
+	_dash_slot.position = Vector2(98.0, 0.0)
+	_dash_slot.size = Vector2(78.0, 76.0)
 	ability_bar.add_child(_dash_slot)
 
 	_skill_slot = ABILITY_SLOT_SCRIPT.new() as Control
 	_skill_slot.name = "SkillAbility"
-	_skill_slot.position = Vector2(90.0, 0.0)
-	_skill_slot.size = Vector2(78.0, 70.0)
+	_skill_slot.position = Vector2(196.0, 0.0)
+	_skill_slot.size = Vector2(78.0, 76.0)
 	ability_bar.add_child(_skill_slot)
 	_update_ability_hud()
 
@@ -451,12 +634,12 @@ func _create_upgrade_ui() -> void:
 	_upgrade_overlay = Control.new()
 	_upgrade_overlay.name = "UpgradeChoice"
 	_upgrade_overlay.position = Vector2.ZERO
-	_upgrade_overlay.size = WORLD_SIZE
+	_upgrade_overlay.size = DISPLAY_SIZE
 	_upgrade_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	hud.add_child(_upgrade_overlay)
 
 	var dimmer := ColorRect.new()
-	dimmer.size = WORLD_SIZE
+	dimmer.size = DISPLAY_SIZE
 	dimmer.color = Color(0.015, 0.025, 0.04, 0.82)
 	dimmer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_upgrade_overlay.add_child(dimmer)
@@ -504,12 +687,12 @@ func _create_entry_ui() -> void:
 	_entry_overlay = Control.new()
 	_entry_overlay.name = "EntryFlow"
 	_entry_overlay.position = Vector2.ZERO
-	_entry_overlay.size = WORLD_SIZE
+	_entry_overlay.size = DISPLAY_SIZE
 	_entry_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	hud.add_child(_entry_overlay)
 
 	var background := ColorRect.new()
-	background.size = WORLD_SIZE
+	background.size = DISPLAY_SIZE
 	background.color = Color(0.018, 0.035, 0.06, 0.98)
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_entry_overlay.add_child(background)
@@ -593,13 +776,13 @@ func _create_pause_ui() -> void:
 	_pause_overlay = Control.new()
 	_pause_overlay.name = "PauseMenu"
 	_pause_overlay.position = Vector2.ZERO
-	_pause_overlay.size = WORLD_SIZE
+	_pause_overlay.size = DISPLAY_SIZE
 	_pause_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	_pause_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
 	hud.add_child(_pause_overlay)
 
 	var dimmer := ColorRect.new()
-	dimmer.size = WORLD_SIZE
+	dimmer.size = DISPLAY_SIZE
 	dimmer.color = Color(0.01, 0.02, 0.04, 0.72)
 	dimmer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pause_overlay.add_child(dimmer)
@@ -637,35 +820,45 @@ func _create_settings_ui() -> void:
 	_settings_overlay = Control.new()
 	_settings_overlay.name = "SettingsMenu"
 	_settings_overlay.position = Vector2.ZERO
-	_settings_overlay.size = WORLD_SIZE
+	_settings_overlay.size = DISPLAY_SIZE
 	_settings_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	_settings_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
 	hud.add_child(_settings_overlay)
 
 	var dimmer := ColorRect.new()
-	dimmer.size = WORLD_SIZE
-	dimmer.color = Color(0.01, 0.02, 0.04, 0.82)
+	dimmer.size = DISPLAY_SIZE
+	dimmer.color = Color(0.006, 0.014, 0.028, 0.88)
 	dimmer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_settings_overlay.add_child(dimmer)
-	var panel := ColorRect.new()
-	panel.position = Vector2(130.0, 62.0)
-	panel.size = Vector2(1020.0, 596.0)
-	panel.color = Color(0.045, 0.085, 0.12, 0.99)
+	var panel := Panel.new()
+	panel.position = Vector2(70.0, 30.0)
+	panel.size = Vector2(1140.0, 660.0)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.026, 0.061, 0.092, 0.98)
+	panel_style.border_color = Color(0.26, 0.64, 0.72, 0.72)
+	panel_style.set_border_width_all(2)
+	panel_style.corner_radius_top_left = 14
+	panel_style.corner_radius_top_right = 14
+	panel_style.corner_radius_bottom_left = 14
+	panel_style.corner_radius_bottom_right = 14
+	panel_style.shadow_color = Color(0.0, 0.0, 0.0, 0.52)
+	panel_style.shadow_size = 18
+	panel.add_theme_stylebox_override("panel", panel_style)
 	_settings_overlay.add_child(panel)
 
 	var title := Label.new()
-	title.position = Vector2(175.0, 87.0)
-	title.size = Vector2(930.0, 46.0)
+	title.position = Vector2(100.0, 50.0)
+	title.size = Vector2(1080.0, 46.0)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.text = "设置"
+	title.text = "设置与操作"
 	title.add_theme_font_size_override("font_size", 30)
 	title.add_theme_color_override("font_color", Color(0.85, 0.95, 1.0, 1.0))
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_settings_overlay.add_child(title)
 
 	var volume_label := Label.new()
-	volume_label.position = Vector2(205.0, 150.0)
+	volume_label.position = Vector2(125.0, 123.0)
 	volume_label.size = Vector2(180.0, 30.0)
 	volume_label.text = "主音量"
 	volume_label.add_theme_font_size_override("font_size", 18)
@@ -673,8 +866,8 @@ func _create_settings_ui() -> void:
 	_settings_overlay.add_child(volume_label)
 	_settings_volume_slider = HSlider.new()
 	_settings_volume_slider.name = "MasterVolume"
-	_settings_volume_slider.position = Vector2(330.0, 154.0)
-	_settings_volume_slider.size = Vector2(430.0, 24.0)
+	_settings_volume_slider.position = Vector2(245.0, 127.0)
+	_settings_volume_slider.size = Vector2(390.0, 24.0)
 	_settings_volume_slider.min_value = 0.0
 	_settings_volume_slider.max_value = 1.0
 	_settings_volume_slider.step = 0.05
@@ -682,7 +875,7 @@ func _create_settings_ui() -> void:
 	_settings_overlay.add_child(_settings_volume_slider)
 	_settings_damage_numbers_toggle = CheckButton.new()
 	_settings_damage_numbers_toggle.name = "DamageNumbersToggle"
-	_settings_damage_numbers_toggle.position = Vector2(790.0, 145.0)
+	_settings_damage_numbers_toggle.position = Vector2(680.0, 118.0)
 	_settings_damage_numbers_toggle.size = Vector2(210.0, 34.0)
 	_settings_damage_numbers_toggle.text = "显示伤害数字"
 	_settings_damage_numbers_toggle.add_theme_font_size_override("font_size", 17)
@@ -690,13 +883,40 @@ func _create_settings_ui() -> void:
 	_settings_overlay.add_child(_settings_damage_numbers_toggle)
 
 	var hint := Label.new()
-	hint.position = Vector2(205.0, 194.0)
-	hint.size = Vector2(870.0, 28.0)
+	hint.position = Vector2(125.0, 180.0)
+	hint.size = Vector2(590.0, 32.0)
 	hint.text = "点击键位按钮后按下新的按键；同一个键不会同时分配给多个动作。"
 	hint.add_theme_font_size_override("font_size", 15)
 	hint.add_theme_color_override("font_color", Color(0.58, 0.74, 0.84, 1.0))
 	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_settings_overlay.add_child(hint)
+
+	var guide_panel := Panel.new()
+	guide_panel.name = "OperationGuidePanel"
+	guide_panel.position = Vector2(755.0, 174.0)
+	guide_panel.size = Vector2(405.0, 376.0)
+	guide_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var guide_style := StyleBoxFlat.new()
+	guide_style.bg_color = Color(0.016, 0.038, 0.060, 0.94)
+	guide_style.border_color = Color(0.74, 0.52, 0.22, 0.70)
+	guide_style.set_border_width_all(1)
+	guide_style.corner_radius_top_left = 10
+	guide_style.corner_radius_top_right = 10
+	guide_style.corner_radius_bottom_left = 10
+	guide_style.corner_radius_bottom_right = 10
+	guide_panel.add_theme_stylebox_override("panel", guide_style)
+	_settings_overlay.add_child(guide_panel)
+	_settings_guide_label = RichTextLabel.new()
+	_settings_guide_label.name = "OperationGuide"
+	_settings_guide_label.position = Vector2(782.0, 196.0)
+	_settings_guide_label.size = Vector2(351.0, 334.0)
+	_settings_guide_label.bbcode_enabled = true
+	_settings_guide_label.fit_content = false
+	_settings_guide_label.scroll_active = false
+	_settings_guide_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_settings_guide_label.add_theme_font_size_override("normal_font_size", 15)
+	_settings_guide_label.add_theme_color_override("default_color", Color(0.74, 0.86, 0.91, 1.0))
+	_settings_overlay.add_child(_settings_guide_label)
 
 	var actions := [
 		[&"move_left", "向左"], [ &"move_right", "向右"], [ &"jump", "跳跃"], [ &"attack", "攻击"], [ &"aim_up", "上劈方向"], [ &"aim_down", "下劈方向"],
@@ -705,11 +925,11 @@ func _create_settings_ui() -> void:
 	for action_index in range(actions.size()):
 		var row: int = action_index % 6
 		var column: int = int(action_index / 6)
-		var position := Vector2(205.0 + float(column) * 430.0, 210.0 + float(row) * 52.0)
+		var position := Vector2(125.0 + float(column) * 310.0, 220.0 + float(row) * 50.0)
 		var action_name: StringName = actions[action_index][0]
 		var action_label := Label.new()
 		action_label.position = position
-		action_label.size = Vector2(175.0, 42.0)
+		action_label.size = Vector2(112.0, 40.0)
 		action_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		action_label.text = String(actions[action_index][1])
 		action_label.add_theme_font_size_override("font_size", 17)
@@ -717,19 +937,20 @@ func _create_settings_ui() -> void:
 		_settings_overlay.add_child(action_label)
 		var key_button := Button.new()
 		key_button.name = "Bind_%s" % action_name
-		key_button.position = position + Vector2(190.0, 0.0)
-		key_button.size = Vector2(175.0, 42.0)
+		key_button.position = position + Vector2(118.0, 0.0)
+		key_button.size = Vector2(165.0, 40.0)
 		key_button.add_theme_font_size_override("font_size", 16)
 		key_button.pressed.connect(_begin_rebind.bind(action_name))
 		_settings_overlay.add_child(key_button)
 		_settings_key_buttons[action_name] = key_button
 
-	var reset_button := _create_menu_button("ResetBindings", "恢复默认键位", Vector2(335.0, 560.0), Vector2(250.0, 48.0))
+	var reset_button := _create_menu_button("ResetBindings", "恢复默认键位", Vector2(315.0, 608.0), Vector2(250.0, 48.0))
 	reset_button.pressed.connect(_reset_bindings)
 	_settings_overlay.add_child(reset_button)
-	var back_button := _create_menu_button("CloseSettings", "返回", Vector2(695.0, 560.0), Vector2(250.0, 48.0))
+	var back_button := _create_menu_button("CloseSettings", "返回", Vector2(715.0, 608.0), Vector2(250.0, 48.0))
 	back_button.pressed.connect(_close_settings)
 	_settings_overlay.add_child(back_button)
+	_refresh_settings_operation_guide()
 	_settings_overlay.visible = false
 
 
@@ -799,6 +1020,42 @@ func _refresh_settings_key_buttons() -> void:
 			button.text = "按下新按键…"
 		else:
 			button.text = String(_settings.call(&"get_binding_name", action_name))
+	_refresh_settings_operation_guide()
+
+
+func _refresh_settings_operation_guide() -> void:
+	if not is_instance_valid(_settings_guide_label) or _settings == null:
+		return
+	var left_key: String = String(_settings.call(&"get_binding_name", &"move_left"))
+	var right_key: String = String(_settings.call(&"get_binding_name", &"move_right"))
+	var jump_key: String = String(_settings.call(&"get_binding_name", &"jump"))
+	var attack_key: String = String(_settings.call(&"get_binding_name", &"attack"))
+	var up_key: String = String(_settings.call(&"get_binding_name", &"aim_up"))
+	var down_key: String = String(_settings.call(&"get_binding_name", &"aim_down"))
+	var dash_key: String = String(_settings.call(&"get_binding_name", &"dash"))
+	var skill_key: String = String(_settings.call(&"get_binding_name", &"skill"))
+	var interact_key: String = String(_settings.call(&"get_binding_name", &"interact"))
+	var weapon_key: String = String(_settings.call(&"get_binding_name", &"cycle_weapon"))
+	var restart_key: String = String(_settings.call(&"get_binding_name", &"restart"))
+	var pause_key: String = String(_settings.call(&"get_binding_name", &"pause"))
+	_settings_guide_label.text = (
+		"[font_size=22][color=#f2c66d]操作说明[/color][/font_size]\n"
+		+ "[color=#68d8e8]移动与探索[/color]\n"
+		+ "[color=#ffffff]%s / %s[/color]  左右移动\n" % [left_key, right_key]
+		+ "[color=#ffffff]%s[/color]  跳跃；空中可再次跳跃\n" % jump_key
+		+ "[color=#ffffff]%s[/color]  开宝箱、互动、离开商店\n\n" % interact_key
+		+ "[color=#68d8e8]战斗动作[/color]\n"
+		+ "[color=#ffffff]%s[/color]  普通攻击\n" % attack_key
+		+ "[color=#ffffff]%s + %s[/color]  上劈    [color=#ffffff]%s + %s[/color]  下劈\n"
+		% [up_key, attack_key, down_key, attack_key]
+		+ "[color=#ffffff]%s[/color]  闪避冲刺（短暂无敌）\n" % dash_key
+		+ "[color=#ffffff]%s[/color]  主动技能    [color=#ffffff]%s[/color]  切换武器\n\n"
+		% [skill_key, weapon_key]
+		+ "[color=#68d8e8]系统[/color]\n"
+		+ "[color=#ffffff]1 / 2 / 3[/color]  选择强化或购买商品\n"
+		+ "[color=#ffffff]%s[/color]  暂停与设置    [color=#ffffff]%s[/color]  重新开局"
+		% [pause_key, restart_key]
+	)
 
 
 func _on_master_volume_changed(value: float) -> void:
@@ -837,7 +1094,7 @@ func _show_start_screen() -> void:
 
 func _show_difficulty_selection() -> void:
 	_entry_title.text = "选择难度"
-	_entry_subtitle.text = "难度会随房间推进逐步提升敌人的生命与伤害。"
+	_entry_subtitle.text = "难度会随 20 个房间累计提升敌人的生命、伤害、速度与进攻欲望。"
 	_start_button.visible = false
 	(_entry_overlay.get_node("EntrySettings") as Button).visible = false
 	(_entry_overlay.get_node("EntryQuit") as Button).visible = false
@@ -857,22 +1114,44 @@ func _get_difficulty_health_multiplier() -> float:
 	var room_progress: float = float(maxi(_current_room_index, 0))
 	match _selected_difficulty:
 		Difficulty.EASY:
-			return 0.70 + room_progress * 0.05
+			return 0.70 + room_progress * 0.06
 		Difficulty.HARD:
-			return 1.35 + room_progress * 0.20
+			return 1.35 + room_progress * 0.16
 		_:
-			return 1.0 + room_progress * 0.12
+			return 1.0 + room_progress * 0.115
 
 
 func _get_difficulty_damage_multiplier() -> float:
 	var room_progress: float = float(maxi(_current_room_index, 0))
 	match _selected_difficulty:
 		Difficulty.EASY:
-			return 0.65 + room_progress * 0.045
+			return 0.68 + room_progress * 0.045
 		Difficulty.HARD:
-			return 1.25 + room_progress * 0.17
+			return 1.25 + room_progress * 0.115
 		_:
-			return 1.0 + room_progress * 0.10
+			return 1.0 + room_progress * 0.08
+
+
+func _get_difficulty_speed_multiplier() -> float:
+	var room_progress: float = float(maxi(_current_room_index, 0))
+	match _selected_difficulty:
+		Difficulty.EASY:
+			return 0.92 + room_progress * 0.015
+		Difficulty.HARD:
+			return 1.08 + room_progress * 0.03
+		_:
+			return 1.0 + room_progress * 0.023
+
+
+func _get_difficulty_aggression_multiplier() -> float:
+	var room_progress: float = float(maxi(_current_room_index, 0))
+	match _selected_difficulty:
+		Difficulty.EASY:
+			return 0.90 + room_progress * 0.025
+		Difficulty.HARD:
+			return 1.12 + room_progress * 0.05
+		_:
+			return 1.0 + room_progress * 0.04
 
 
 func get_selected_difficulty_name() -> String:
@@ -939,7 +1218,11 @@ func _load_room(pool_index: int) -> void:
 	_clear_projectiles()
 	_clear_enemies()
 	_clear_platform_colliders()
-	_current_room_data = _room_pool[pool_index]
+	_current_room_data = ROOM_CATALOG_SCRIPT.build_room_variant(
+		_room_pool[pool_index],
+		_rng,
+		_current_room_index + 1
+	)
 	_current_encounter = _get_encounter_for_room(_current_room_index)
 	platform_rects.clear()
 	var room_platforms: Array = _current_room_data.get("platforms", []) as Array
@@ -1019,11 +1302,29 @@ func _spawn_room_enemies() -> void:
 	if _current_encounter == EncounterType.BOSS:
 		_spawn_boss()
 		return
-	var spawn_values: Array = _current_room_data.get("enemies", []) as Array
-	var family: int = _get_enemy_family_for_room(_current_room_index)
+	var base_spawn_values: Array = _current_room_data.get("enemies", []) as Array
+	var spawn_values: Array[Dictionary] = []
+	for spawn_value: Variant in base_spawn_values:
+		spawn_values.append((spawn_value as Dictionary).duplicate(true))
+	var reinforcement_count: int = _get_room_reinforcement_count(_current_room_index)
+	for reinforcement_index in range(reinforcement_count):
+		if platform_rects.is_empty():
+			break
+		var random_surface: int = _rng.randi_range(0, platform_rects.size() - 1)
+		spawn_values.append({
+			"surface": random_surface,
+			"ratio": _rng.randf_range(0.22, 0.78),
+			"role": (
+				ENEMY_ROLE_RANGED
+				if posmod(reinforcement_index + _current_room_index, 3) == 1
+				else ENEMY_ROLE_MELEE
+			),
+		})
+	var elite_count: int = 0
+	if _current_encounter == EncounterType.ELITE:
+		elite_count = 3 if _current_room_index >= FINAL_CHAPTER_START else 2
 	for spawn_index in range(spawn_values.size()):
-		var spawn_value: Variant = spawn_values[spawn_index]
-		var descriptor: Dictionary = spawn_value as Dictionary
+		var descriptor: Dictionary = spawn_values[spawn_index]
 		var surface_index: int = int(descriptor.get("surface", 0))
 		if surface_index < 0 or surface_index >= platform_rects.size():
 			continue
@@ -1035,8 +1336,9 @@ func _spawn_room_enemies() -> void:
 		var horizontal_ratio: float = float(descriptor.get("ratio", 0.5))
 		var role: int = int(descriptor.get("role", ENEMY_ROLE_MELEE))
 		var rank: int = ENEMY_RANK_NORMAL
-		if _current_encounter == EncounterType.ELITE and spawn_index < 2:
+		if spawn_index < elite_count:
 			rank = ENEMY_RANK_ELITE
+		var family: int = _get_enemy_family_for_spawn(_current_room_index, spawn_index)
 		var vertical_offset: float = 28.0 if rank == ENEMY_RANK_ELITE else 22.0
 		_spawn_enemy(
 			Vector2(lerpf(minimum_x, maximum_x, horizontal_ratio), surface.position.y - vertical_offset),
@@ -1091,7 +1393,9 @@ func _spawn_enemy(
 		rank,
 		_get_difficulty_health_multiplier(),
 		_get_difficulty_damage_multiplier(),
-		family
+		family,
+		_get_difficulty_speed_multiplier(),
+		_get_difficulty_aggression_multiplier()
 	)
 	enemy.set_target(player)
 	enemy.defeated.connect(_on_enemy_defeated.bind(enemy))
@@ -1117,15 +1421,41 @@ func _spawn_boss() -> void:
 	var minimum_x: float = maxf(boss_surface.position.x + 85.0, 190.0)
 	var maximum_x: float = minf(boss_surface.end.x - 85.0, WORLD_SIZE.x - 105.0)
 	var spawn_x: float = lerpf(minimum_x, maximum_x, 0.68)
-	var family: int = _get_enemy_family_for_room(_current_room_index)
+	var family: int = _get_primary_enemy_family_for_room(_current_room_index)
 	_spawn_enemy(
-		Vector2(spawn_x, boss_surface.position.y - 42.0),
+		Vector2(spawn_x, boss_surface.position.y - 52.0),
 		minimum_x,
 		maximum_x,
 		ENEMY_ROLE_MELEE,
 		ENEMY_RANK_BOSS,
 		family
 	)
+	if _current_room_index < MIXED_CHAPTER_START:
+		return
+	var escort_family: int = (
+		ENEMY_FAMILY_GOBLIN if family == ENEMY_FAMILY_SLIME else ENEMY_FAMILY_SLIME
+	)
+	var escort_roles: Array[int] = [ENEMY_ROLE_MELEE, ENEMY_ROLE_RANGED]
+	var escort_ratios: Array[float] = [0.28, 0.86]
+	for escort_index in range(escort_roles.size()):
+		var escort_rank: int = (
+			ENEMY_RANK_ELITE
+			if _current_room_index >= FINAL_CHAPTER_START or escort_index == 0
+			else ENEMY_RANK_NORMAL
+		)
+		var escort_x: float = lerpf(
+			minimum_x,
+			maximum_x,
+			escort_ratios[escort_index]
+		)
+		_spawn_enemy(
+			Vector2(escort_x, boss_surface.position.y - 28.0),
+			minimum_x,
+			maximum_x,
+			escort_roles[escort_index],
+			escort_rank,
+			escort_family
+		)
 
 
 func _clear_enemies() -> void:
@@ -1440,12 +1770,16 @@ func _spawn_reward_chest() -> void:
 	_chest = CHEST_SCRIPT.new() as RewardChest
 	_chest.name = "RewardChest"
 	_chest.position = Vector2(chest_x, chest_surface.position.y - 27.0)
-	_chest.setup(24, 24)
+	_chest.setup(
+		24,
+		24,
+		String(_settings.call(&"get_binding_name", &"interact"))
+	)
 	_chest.opened.connect(_on_chest_opened)
 	add_child(_chest)
 	_awaiting_chest = true
 	player.set_input_enabled(true)
-	_status_label.text = "宝箱出现——靠近后按 E 开启"
+	_status_label.text = "宝藏已出现——跟随宝箱上方提示"
 	_update_controls()
 
 
@@ -1515,7 +1849,7 @@ func _on_player_health_changed(current_health: int, maximum_health: int) -> void
 		0.0,
 		1.0
 	)
-	_health_fill.size.x = 228.0 * health_ratio
+	_health_fill.size.x = HEALTH_FILL_WIDTH * health_ratio
 	_health_fill.color = (
 		Color(0.90, 0.24, 0.22, 0.96)
 		if health_ratio <= 0.30
@@ -1542,7 +1876,10 @@ func _on_boss_health_changed(current_health: int, maximum_health: int) -> void:
 		1.0
 	)
 	_boss_health_fill.size.x = 492.0 * health_ratio
-	_boss_health_label.text = "赤晶史莱姆王  %d / %d" % [current_health, maximum_health]
+	var boss_name: String = "赤晶史莱姆王"
+	if is_instance_valid(_boss_enemy) and _boss_enemy.get_enemy_family() == ENEMY_FAMILY_GOBLIN:
+		boss_name = "赤牙战争酋长"
+	_boss_health_label.text = "%s  %d / %d" % [boss_name, current_health, maximum_health]
 
 
 func _on_player_died() -> void:
@@ -1595,25 +1932,10 @@ func _finish_death_sequence(expected_generation: int) -> void:
 
 
 func _update_controls() -> void:
-	var ranged_count: int = 0
-	for enemy in _enemies:
-		if is_instance_valid(enemy) and enemy.is_ranged_enemy():
-			ranged_count += 1
-	var melee_count: int = _enemies.size() - ranged_count
-	if _shopping:
-		controls_label.text = "商店：数字键 1 / 2 / 3 购买    E 离开    R 重开"
-	elif _choosing_upgrade:
-		controls_label.text = "强化选择：数字键 1 / 2 / 3    R：重新开局"
-	elif _awaiting_chest:
-		controls_label.text = "靠近宝箱按 E 开启    L 主动技能    R 重开"
-	elif _run_complete:
-		controls_label.text = "本局已完成    R：随机开启新一局"
-	else:
-		controls_label.text = (
-			"移动 A/D  跳跃 Space  劈砍 J（W/↑ 上劈，S/↓ 下劈）  技能 L  冲刺 K  换武器 Q  重开 R"
-			+ "    敌人 %d（近战 %d / 远程 %d）"
-			% [_enemies.size(), melee_count, ranged_count]
-		)
+	# Context prompts are shown where they are used (cards, overlays, and chest bubble).
+	# The full control reference remains available in Settings without covering gameplay.
+	title_label.visible = false
+	controls_label.visible = false
 
 
 func _update_room_label() -> void:
@@ -1621,21 +1943,16 @@ func _update_room_label() -> void:
 		_room_label.text = ""
 		return
 	var room_title: String = _current_room_data.get("title", "未知房间")
-	var chapter_name := (
-		"赤牙营地"
-		if _get_enemy_family_for_room(_current_room_index) == ENEMY_FAMILY_GOBLIN
-		else "晶史莱姆巢穴"
-	)
+	var chapter_name: String = _get_chapter_name(_current_room_index)
 	if _run_complete:
-		_room_label.text = "第 %d 局\n全房间完成" % _run_number
+		_room_label.text = "轮次完成  ·  RUN %02d\n月蚀回廊已净化" % _run_number
 	else:
-		_room_label.text = "第 %d 局  房间 %d/%d · %s\n%s · %s" % [
-			_run_number,
+		_room_label.text = "房间 %02d / %02d  ·  %s\n%s  ·  %s" % [
 			_current_room_index + 1,
 			ROOMS_PER_RUN,
+			_get_encounter_name(_current_encounter),
 			chapter_name,
 			room_title,
-			_get_encounter_name(_current_encounter),
 		]
 
 
@@ -1652,21 +1969,92 @@ func _update_economy_hud() -> void:
 func _update_equipment_hud() -> void:
 	if not is_instance_valid(_equipment_label) or _progression == null:
 		return
-	var cooldown: float = player.get_skill_cooldown_remaining()
-	var skill_state: String = "就绪" if cooldown <= 0.0 else "%.1f 秒" % cooldown
-	_equipment_label.text = "武器：%s（Q 切换）\n技能：%s（L） %s" % [
-		player.get_weapon_name(),
-		player.get_skill_name(),
-		skill_state,
-	]
+	_equipment_label.text = "武器库  ·  当前：%s" % player.get_weapon_name()
+	_update_weapon_slots()
+
+
+func _update_weapon_slots() -> void:
+	if _progression == null:
+		return
+	var weapon_ids: Array[StringName] = WeaponCatalog.all_weapon_ids()
+	if _weapon_slot_panels.size() != weapon_ids.size() or _weapon_slot_labels.size() != weapon_ids.size():
+		return
+	var unlocked: Array[StringName] = _progression.get_unlocked_weapons()
+	var active_weapon: StringName = player.get_weapon_id()
+	var state_parts: Array[String] = [String(active_weapon)]
+	for weapon_id in weapon_ids:
+		state_parts.append("1" if unlocked.has(weapon_id) else "0")
+	var state_key: String = "|".join(state_parts)
+	if state_key == _weapon_hud_state_key:
+		return
+	_weapon_hud_state_key = state_key
+
+	for weapon_index in range(weapon_ids.size()):
+		var weapon_id: StringName = weapon_ids[weapon_index]
+		var weapon_data: Dictionary = WeaponCatalog.get_weapon(weapon_id)
+		var accent: Color = weapon_data.get("accent", Color("#78d9ef"))
+		var is_unlocked: bool = unlocked.has(weapon_id)
+		var is_active: bool = weapon_id == active_weapon
+		var slot: Panel = _weapon_slot_panels[weapon_index]
+		var slot_label: Label = _weapon_slot_labels[weapon_index]
+		var slot_style := StyleBoxFlat.new()
+		slot_style.bg_color = (
+			Color(accent, 0.20)
+			if is_active
+			else Color(0.026, 0.054, 0.070, 0.98) if is_unlocked
+			else Color(0.018, 0.027, 0.036, 0.96)
+		)
+		slot_style.border_color = (
+			Color(accent, 0.96)
+			if is_active
+			else Color(0.37, 0.55, 0.62, 0.58) if is_unlocked
+			else Color(0.22, 0.27, 0.31, 0.60)
+		)
+		slot_style.set_border_width_all(2 if is_active else 1)
+		slot_style.corner_radius_top_left = 6
+		slot_style.corner_radius_top_right = 6
+		slot_style.corner_radius_bottom_left = 6
+		slot_style.corner_radius_bottom_right = 6
+		if is_active:
+			slot_style.shadow_color = Color(accent, 0.35)
+			slot_style.shadow_size = 5
+		slot.add_theme_stylebox_override("panel", slot_style)
+
+		var slot_state := "未解锁"
+		if is_active:
+			slot_state = "装备中"
+		elif is_unlocked:
+			slot_state = "可切换"
+		var weapon_name: String = WeaponCatalog.get_weapon_name(weapon_id)
+		slot_label.text = "%s\n%s" % [weapon_name, slot_state]
+		slot_label.add_theme_color_override(
+			"font_color",
+			accent.lightened(0.18) if is_active else Color(0.67, 0.76, 0.79, 1.0) if is_unlocked else Color(0.34, 0.39, 0.42, 1.0)
+		)
+		slot.tooltip_text = "%s · %s" % [weapon_name, slot_state]
 
 
 func _update_ability_hud() -> void:
-	if not is_instance_valid(_dash_slot) or not is_instance_valid(_skill_slot):
+	if not is_instance_valid(_attack_slot) or not is_instance_valid(_dash_slot) or not is_instance_valid(_skill_slot):
 		return
-	_dash_slot.call(
+	var weapon_data: Dictionary = WeaponCatalog.get_weapon(player.get_weapon_id())
+	var weapon_accent: Color = weapon_data.get("accent", Color("#78d9ef"))
+	_attack_slot.call(
 		&"configure",
 		0,
+		"普通攻击",
+		"J",
+		"使用%s发动普通攻击，可配合 W / S 改变挥砍方向。" % player.get_weapon_name(),
+		weapon_accent
+	)
+	_attack_slot.call(
+		&"set_cooldown",
+		player.get_attack_cooldown_remaining(),
+		player.get_attack_cooldown_duration()
+	)
+	_dash_slot.call(
+		&"configure",
+		1,
 		"闪避冲刺",
 		"K",
 		"向当前朝向高速闪避。冷却：2.0 秒。",
@@ -1679,11 +2067,11 @@ func _update_ability_hud() -> void:
 	)
 	_skill_slot.call(
 		&"configure",
-		1,
+		2,
 		player.get_skill_name(),
 		"L",
 		"向前突进并释放多重月弧，造成高额范围伤害。",
-		Color("#bf94ff")
+		weapon_accent.lightened(0.12)
 	)
 	_skill_slot.call(
 		&"set_cooldown",
@@ -1743,7 +2131,45 @@ func _get_encounter_for_room(room_index: int) -> int:
 
 
 func _get_enemy_family_for_room(room_index: int) -> int:
-	return ENEMY_FAMILY_GOBLIN if room_index >= GOBLIN_CHAPTER_START else ENEMY_FAMILY_SLIME
+	return _get_primary_enemy_family_for_room(room_index)
+
+
+func _get_primary_enemy_family_for_room(room_index: int) -> int:
+	if room_index < GOBLIN_CHAPTER_START:
+		return ENEMY_FAMILY_SLIME
+	if room_index < MIXED_CHAPTER_START:
+		return ENEMY_FAMILY_GOBLIN
+	if room_index < FINAL_CHAPTER_START:
+		return ENEMY_FAMILY_SLIME
+	return ENEMY_FAMILY_GOBLIN
+
+
+func _get_enemy_family_for_spawn(room_index: int, spawn_index: int) -> int:
+	if room_index < MIXED_CHAPTER_START:
+		return _get_primary_enemy_family_for_room(room_index)
+	return (
+		ENEMY_FAMILY_SLIME
+		if posmod(room_index + spawn_index, 2) == 0
+		else ENEMY_FAMILY_GOBLIN
+	)
+
+
+func _get_room_reinforcement_count(room_index: int) -> int:
+	if room_index >= FINAL_CHAPTER_START:
+		return 2
+	if room_index >= MIXED_CHAPTER_START:
+		return 1
+	return 0
+
+
+func _get_chapter_name(room_index: int) -> String:
+	if room_index < GOBLIN_CHAPTER_START:
+		return "晶史莱姆巢穴"
+	if room_index < MIXED_CHAPTER_START:
+		return "赤牙营地"
+	if room_index < FINAL_CHAPTER_START:
+		return "冲突边境"
+	return "月蚀混战区"
 
 
 func _get_encounter_name(encounter: int) -> String:

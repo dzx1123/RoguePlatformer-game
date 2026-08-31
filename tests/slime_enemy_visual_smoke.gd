@@ -77,10 +77,13 @@ func _run_test() -> void:
 	if not boss_sprite.texture.resource_path.ends_with("red_crystal_slime_boss_sheet.png"):
 		_fail("Slime boss did not use the boss sprite sheet")
 		return
-	if boss_sprite.scale.x <= melee_sprite.scale.x:
-		_fail("Slime boss was not visually larger than normal slimes")
+	if boss_sprite.scale.x < 0.58 or boss_sprite.scale.x < melee_sprite.scale.x * 1.8:
+		_fail("Slime boss was not enlarged enough to read as a room boss")
 		return
-	if not is_equal_approx(boss_sprite.position.y, -13.0):
+	if boss.get_hurtbox_rect().size.x < 140.0:
+		_fail("Enlarged slime boss did not receive a matching hurtbox")
+		return
+	if not is_equal_approx(boss_sprite.position.y, -30.0):
 		_fail("Slime boss sprite baseline was not aligned to its platform collider")
 		return
 

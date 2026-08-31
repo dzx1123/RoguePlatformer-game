@@ -28,6 +28,16 @@ func _run_test() -> void:
 	if melee_enemy == null or ranged_enemy == null:
 		_fail("Initial enemy group did not contain both melee and ranged roles")
 		return
+	var room_surfaces: Array = main.get("platform_rects") as Array
+	var test_surface: Rect2 = room_surfaces[0]
+	for surface_value in room_surfaces:
+		var surface: Rect2 = surface_value
+		if surface.size.x > test_surface.size.x:
+			test_surface = surface
+	var player_x: float = test_surface.position.x + test_surface.size.x * 0.25
+	var ranged_offset: float = minf(260.0, test_surface.size.x * 0.50)
+	player.global_position = Vector2(player_x, test_surface.position.y - 60.0)
+	player.velocity = Vector2.ZERO
 
 	melee_enemy.global_position = player.global_position + Vector2(72.0, 0.0)
 	var melee_health_before: int = melee_enemy.get_current_health()
@@ -71,7 +81,7 @@ func _run_test() -> void:
 		return
 
 	player.set("_hurt_invulnerability_remaining", 0.0)
-	ranged_enemy.global_position = player.global_position + Vector2(260.0, 0.0)
+	ranged_enemy.global_position = player.global_position + Vector2(ranged_offset, 0.0)
 	ranged_enemy.velocity = Vector2.ZERO
 	ranged_enemy.set("_attack_remaining", 0.0)
 	ranged_enemy.set("_attack_cooldown_remaining", 0.0)

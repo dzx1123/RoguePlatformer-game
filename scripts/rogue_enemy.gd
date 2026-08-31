@@ -46,12 +46,14 @@ const PATROL_SPEED := 72.0
 const MELEE_CHASE_SPEED := 145.0
 const RANGED_MOVE_SPEED := 112.0
 const ACCELERATION := 900.0
-const MELEE_DETECTION_RANGE_X := 300.0
-const RANGED_DETECTION_RANGE_X := 470.0
-const DETECTION_RANGE_Y := 150.0
+const MELEE_DETECTION_RANGE_X := 390.0
+const RANGED_DETECTION_RANGE_X := 530.0
+const BOSS_DETECTION_RANGE_X := 1400.0
+const DETECTION_RANGE_Y := 280.0
 const MELEE_ATTACK_REACH_X := 100.0
 const MELEE_ATTACK_REACH_Y := 62.0
 const RANGED_ATTACK_RANGE_X := 430.0
+const RANGED_ATTACK_RANGE_Y := 110.0
 const RANGED_PREFERRED_MIN_X := 180.0
 const RANGED_PREFERRED_MAX_X := 300.0
 const MELEE_ATTACK_DURATION := 0.42
@@ -72,6 +74,11 @@ const HURT_ANIMATION_DURATION := 0.18
 const DEATH_ANIMATION_DURATION := 0.42
 const SPRITE_COLUMNS := 4.0
 const SPRITE_ROWS := 4.0
+const GOBLIN_IDLE_FPS := 4.5
+const GOBLIN_RUN_FPS := 11.0
+const PURSUIT_JUMP_SPEED := 690.0
+const PURSUIT_JUMP_MIN_HEIGHT := 36.0
+const PURSUIT_JUMP_MAX_HEIGHT := 420.0
 
 var _variant: int = 0
 var _role: int = EnemyRole.MELEE
@@ -95,6 +102,9 @@ var _current_health: int = MELEE_MAX_HEALTH
 var _is_defeated: bool = false
 var _difficulty_health_multiplier: float = 1.0
 var _difficulty_damage_multiplier: float = 1.0
+var _difficulty_speed_multiplier: float = 1.0
+var _difficulty_aggression_multiplier: float = 1.0
+var _pursuit_jump_cooldown_remaining: float = 0.0
 var _death_remaining: float = 0.0
 var _enemy_sprite: Sprite2D
 
@@ -105,8 +115,8 @@ func _ready() -> void:
 
 	var body_collision := CollisionShape2D.new()
 	var body_shape := CapsuleShape2D.new()
-	body_shape.radius = 36.0 if is_boss() else (24.0 if is_elite() else 18.0)
-	body_shape.height = 84.0 if is_boss() else (58.0 if is_elite() else 44.0)
+	body_shape.radius = 44.0 if is_boss() else (24.0 if is_elite() else 18.0)
+	body_shape.height = 104.0 if is_boss() else (58.0 if is_elite() else 44.0)
 	body_collision.shape = body_shape
 	add_child(body_collision)
 
@@ -119,11 +129,11 @@ func _ready() -> void:
 	var hurtbox_collision := CollisionShape2D.new()
 	var hurtbox_shape := RectangleShape2D.new()
 	hurtbox_shape.size = (
-		Vector2(112.0, 100.0)
+		Vector2(144.0, 124.0)
 		if is_boss()
 		else (Vector2(72.0, 64.0) if is_elite() else Vector2(58.0, 52.0))
 	)
-	hurtbox_collision.position = Vector2(0.0, -10.0 if is_boss() else -3.0)
+	hurtbox_collision.position = Vector2(0.0, -12.0 if is_boss() else -3.0)
 	hurtbox_collision.shape = hurtbox_shape
 	hurtbox.add_child(hurtbox_collision)
 	add_child(hurtbox)
@@ -148,13 +158,17 @@ func setup(
 	rank: int = EnemyRank.NORMAL,
 	difficulty_health_multiplier: float = 1.0,
 	difficulty_damage_multiplier: float = 1.0,
-	family: int = EnemyFamily.SLIME
+	family: int = EnemyFamily.SLIME,
+	difficulty_speed_multiplier: float = 1.0,
+	difficulty_aggression_multiplier: float = 1.0
 ) -> void:
 	_role = clampi(role, EnemyRole.MELEE, EnemyRole.RANGED)
 	_rank = clampi(rank, EnemyRank.NORMAL, EnemyRank.BOSS)
 	_family = clampi(family, EnemyFamily.SLIME, EnemyFamily.GOBLIN)
 	_difficulty_health_multiplier = maxf(0.1, difficulty_health_multiplier)
 	_difficulty_damage_multiplier = maxf(0.1, difficulty_damage_multiplier)
+	_difficulty_speed_multiplier = clampf(difficulty_speed_multiplier, 0.55, 2.20)
+	_difficulty_aggression_multiplier = clampf(difficulty_aggression_multiplier, 0.55, 2.40)
 	_variant = variant % 3
 	if _role == EnemyRole.RANGED:
 		_variant = 1
@@ -223,9 +237,17 @@ func get_max_health() -> int:
 	return _max_health
 
 
+func get_speed_multiplier() -> float:
+	return _difficulty_speed_multiplier
+
+
+func get_aggression_multiplier() -> float:
+	return _difficulty_aggression_multiplier
+
+
 func get_hurtbox_rect() -> Rect2:
 	if is_boss():
-		return Rect2(global_position - Vector2(56.0, 60.0), Vector2(112.0, 100.0))
+		return Rect2(global_position - Vector2(72.0, 74.0), Vector2(144.0, 124.0))
 	if is_elite():
 		return Rect2(global_position - Vector2(36.0, 35.0), Vector2(72.0, 64.0))
 	return Rect2(global_position - Vector2(29.0, 29.0), Vector2(58.0, 52.0))
@@ -321,6 +343,7 @@ func _physics_process(delta: float) -> void:
 
 	_elapsed += delta
 	_attack_cooldown_remaining = maxf(0.0, _attack_cooldown_remaining - delta)
+	_pursuit_jump_cooldown_remaining = maxf(0.0, _pursuit_jump_cooldown_remaining - delta)
 	_hurt_remaining = maxf(0.0, _hurt_remaining - delta)
 	_hurt_invulnerability_remaining = maxf(0.0, _hurt_invulnerability_remaining - delta)
 
@@ -348,12 +371,13 @@ func _physics_process(delta: float) -> void:
 	velocity.x = move_toward(
 		velocity.x,
 		desired_speed,
-		ACCELERATION * acceleration_scale * delta
+		ACCELERATION * _difficulty_speed_multiplier * acceleration_scale * delta
 	)
 	if not is_on_floor():
 		velocity.y += GRAVITY * delta
 	else:
 		velocity.y = 0.0
+		_try_pursuit_jump()
 
 	move_and_slide()
 	if global_position.y > 820.0:
@@ -370,6 +394,9 @@ func _get_desired_speed() -> float:
 			_facing = signf(target_delta)
 		var distance_x: float = absf(target_delta)
 		if is_ranged_enemy():
+			var target_height: float = global_position.y - _target.global_position.y
+			if target_height > RANGED_ATTACK_RANGE_Y:
+				return _facing * _get_ranged_move_speed()
 			if distance_x < RANGED_PREFERRED_MIN_X:
 				return -_facing * _get_ranged_move_speed()
 			if distance_x > RANGED_PREFERRED_MAX_X:
@@ -388,7 +415,7 @@ func _get_desired_speed() -> float:
 	var patrol_multiplier: float = 1.22 if is_elite() else 1.0
 	if is_boss():
 		patrol_multiplier = 1.35
-	return _patrol_direction * PATROL_SPEED * patrol_multiplier
+	return _patrol_direction * PATROL_SPEED * patrol_multiplier * _difficulty_speed_multiplier
 
 
 func _target_is_visible() -> bool:
@@ -400,8 +427,53 @@ func _target_is_visible() -> bool:
 	var offset: Vector2 = _target.global_position - global_position
 	var detection_x: float = RANGED_DETECTION_RANGE_X if is_ranged_enemy() else MELEE_DETECTION_RANGE_X
 	if is_boss():
-		detection_x = 560.0
-	return absf(offset.x) <= detection_x and absf(offset.y) <= DETECTION_RANGE_Y
+		detection_x = BOSS_DETECTION_RANGE_X
+	detection_x *= clampf(_difficulty_aggression_multiplier, 0.72, 2.20)
+	return absf(offset.x) <= detection_x and absf(offset.y) <= _get_detection_range_y()
+
+
+func _get_detection_range_y() -> float:
+	if is_boss():
+		return 760.0
+	var vertical_scale: float = clampf(
+		0.78 + _difficulty_aggression_multiplier * 0.34,
+		0.95,
+		1.60
+	)
+	return DETECTION_RANGE_Y * vertical_scale
+
+
+func _try_pursuit_jump() -> void:
+	if (
+		_pursuit_jump_cooldown_remaining > 0.0
+		or _attack_remaining > 0.0
+		or _hurt_remaining > 0.0
+		or not _target_is_visible()
+	):
+		return
+	var target_offset: Vector2 = _target.global_position - global_position
+	var height_to_target: float = -target_offset.y
+	if height_to_target < PURSUIT_JUMP_MIN_HEIGHT or height_to_target > PURSUIT_JUMP_MAX_HEIGHT:
+		return
+	var aggression_progress: float = clampf(
+		(_difficulty_aggression_multiplier - 0.8) / 1.4,
+		0.0,
+		1.0
+	)
+	var horizontal_reach: float = lerpf(260.0, 560.0, aggression_progress)
+	if absf(target_offset.x) > horizontal_reach:
+		return
+	var jump_speed_scale: float = clampf(sqrt(_difficulty_speed_multiplier), 0.90, 1.16)
+	if is_boss():
+		jump_speed_scale *= 1.18
+	elif is_elite():
+		jump_speed_scale *= 1.08
+	velocity.y = -PURSUIT_JUMP_SPEED * jump_speed_scale
+	_pursuit_jump_cooldown_remaining = clampf(
+		1.25 / _difficulty_aggression_multiplier,
+		0.48,
+		1.30
+	)
 
 
 func _target_in_attack_range() -> bool:
@@ -413,12 +485,12 @@ func _target_in_attack_range() -> bool:
 		_facing = signf(offset.x)
 	if is_boss():
 		if _family == EnemyFamily.GOBLIN:
-			return absf(offset.x) <= 138.0 and absf(offset.y) <= 88.0
-		return absf(offset.x) <= 450.0 and absf(offset.y) <= 190.0
+			return absf(offset.x) <= 168.0 and absf(offset.y) <= 96.0
+		return absf(offset.x) <= 250.0 and absf(offset.y) <= 96.0
 	if is_ranged_enemy():
 		return (
 			absf(offset.x) <= RANGED_ATTACK_RANGE_X
-			and absf(offset.y) <= DETECTION_RANGE_Y
+			and absf(offset.y) <= RANGED_ATTACK_RANGE_Y
 		)
 	return (
 		absf(offset.x) <= MELEE_ATTACK_REACH_X
@@ -450,21 +522,27 @@ func _get_attack_action_delay() -> float:
 
 
 func _get_attack_cooldown() -> float:
+	var base_cooldown: float
 	if is_boss():
-		return 0.82
-	if is_elite():
-		return (RANGED_ATTACK_COOLDOWN if is_ranged_enemy() else MELEE_ATTACK_COOLDOWN) * 0.78
-	return RANGED_ATTACK_COOLDOWN if is_ranged_enemy() else MELEE_ATTACK_COOLDOWN
+		base_cooldown = 0.82
+	elif is_elite():
+		base_cooldown = (
+			(RANGED_ATTACK_COOLDOWN if is_ranged_enemy() else MELEE_ATTACK_COOLDOWN) * 0.78
+		)
+	else:
+		base_cooldown = RANGED_ATTACK_COOLDOWN if is_ranged_enemy() else MELEE_ATTACK_COOLDOWN
+	var aggression_scale: float = clampf(_difficulty_aggression_multiplier, 0.70, 2.20)
+	return maxf(0.40 if is_boss() else 0.46, base_cooldown / aggression_scale)
 
 
 func _get_melee_chase_speed() -> float:
 	if is_boss():
-		return MELEE_CHASE_SPEED * 1.18
-	return MELEE_CHASE_SPEED * (1.16 if is_elite() else 1.0)
+		return MELEE_CHASE_SPEED * 1.18 * _difficulty_speed_multiplier
+	return MELEE_CHASE_SPEED * (1.16 if is_elite() else 1.0) * _difficulty_speed_multiplier
 
 
 func _get_ranged_move_speed() -> float:
-	return RANGED_MOVE_SPEED * (1.18 if is_elite() else 1.0)
+	return RANGED_MOVE_SPEED * (1.18 if is_elite() else 1.0) * _difficulty_speed_multiplier
 
 
 func _hit_target_if_still_close() -> void:
@@ -472,7 +550,7 @@ func _hit_target_if_still_close() -> void:
 		return
 	if is_boss():
 		var boss_melee_offset: Vector2 = _target.global_position - global_position
-		if absf(boss_melee_offset.x) > 130.0 or absf(boss_melee_offset.y) > 82.0:
+		if absf(boss_melee_offset.x) > 166.0 or absf(boss_melee_offset.y) > 100.0:
 			return
 	elif not _target_in_attack_range():
 		return
@@ -494,7 +572,11 @@ func _fire_projectile() -> void:
 	var projectile_damage: int = _get_scaled_damage(
 		20 if is_boss() else (18 if is_elite() else RANGED_DAMAGE)
 	)
-	var projectile_speed: float = RANGED_PROJECTILE_SPEED * (1.12 if is_boss() else 1.0)
+	var projectile_speed: float = (
+		RANGED_PROJECTILE_SPEED
+		* (1.12 if is_boss() else 1.0)
+		* clampf(_difficulty_speed_multiplier, 0.80, 1.65)
+	)
 	var projectile_style := (
 		ProjectileStyle.ARROW
 		if _family == EnemyFamily.GOBLIN and is_ranged_enemy()
@@ -538,12 +620,12 @@ func _get_sprite_sheet() -> Texture2D:
 func _get_sprite_scale() -> float:
 	if _family == EnemyFamily.GOBLIN:
 		if is_boss():
-			return 0.38
+			return 0.54
 		if is_elite():
 			return 0.30
 		return 0.25 if is_ranged_enemy() else 0.26
 	if is_boss():
-		return 0.43
+		return 0.60
 	if is_elite():
 		return 0.36
 	return 0.29
@@ -554,12 +636,12 @@ func _get_sprite_baseline_offset() -> float:
 	# the collision body's floor contact so every platform uses the same visual baseline.
 	if _family == EnemyFamily.GOBLIN:
 		if is_boss():
-			return -11.0
+			return -28.0
 		if is_elite():
 			return -14.0
 		return -14.0 if is_ranged_enemy() else -15.0
 	if is_boss():
-		return -13.0
+		return -30.0
 	if is_elite():
 		return -19.0 if is_ranged_enemy() else -17.0
 	return -17.0 if is_ranged_enemy() else -15.0
@@ -579,20 +661,142 @@ func _set_sprite_cell(column: int, row: int) -> void:
 	)
 
 
+func _get_goblin_loop_column(is_running: bool) -> int:
+	var frames_per_second: float = GOBLIN_RUN_FPS if is_running else GOBLIN_IDLE_FPS
+	var frame_number: int = int(floor(_elapsed * frames_per_second + _phase))
+	if is_running:
+		# A mirrored return avoids the harsh frame 3 -> frame 0 teleport in the source.
+		var run_cycle_index: int = posmod(frame_number, 6)
+		match run_cycle_index:
+			0:
+				return 0
+			1:
+				return 1
+			2:
+				return 2
+			3:
+				return 3
+			4:
+				return 2
+			_:
+				return 1
+
+	# Idle breathes through the neutral pose instead of snapping from frame 3 to 0.
+	var idle_cycle_index: int = posmod(frame_number, 4)
+	match idle_cycle_index:
+		0:
+			return 0
+		1:
+			return 1
+		2:
+			return 2
+		_:
+			return 1
+
+
+func _get_goblin_attack_column(attack_progress: float) -> int:
+	if is_ranged_enemy():
+		# Hold the drawn bow until the projectile is emitted at roughly 48%.
+		if attack_progress < 0.18:
+			return 0
+		if attack_progress < 0.48:
+			return 1
+		if attack_progress < 0.70:
+			return 2
+		return 3
+
+	# Club attacks get a readable anticipation, impact and recovery pose.
+	if attack_progress < 0.20:
+		return 0
+	if attack_progress < 0.40:
+		return 1
+	if attack_progress < 0.68:
+		return 2
+	return 3
+
+
+func _apply_goblin_sprite_motion(
+	animation_row: int,
+	attack_progress: float,
+	hurt_progress: float,
+	death_progress: float
+) -> void:
+	var sprite_scale: float = _get_sprite_scale()
+	if animation_row == 0:
+		var breath_phase: float = _elapsed * TAU * 1.05 + _phase
+		var breath: float = sin(breath_phase)
+		_enemy_sprite.scale = Vector2(
+			sprite_scale * (1.0 - breath * 0.008),
+			sprite_scale * (1.0 + breath * 0.008)
+		)
+		_enemy_sprite.position.y -= breath * 0.28
+	elif animation_row == 1:
+		var run_cycle: float = fposmod(
+			_elapsed * GOBLIN_RUN_FPS + _phase,
+			6.0
+		) / 6.0
+		var run_phase: float = run_cycle * TAU
+		var stride: float = sin(run_phase)
+		var lift: float = absf(stride) * (1.45 if is_elite() or is_boss() else 1.15)
+		var squash: float = cos(run_phase * 2.0) * 0.010
+		_enemy_sprite.position.y -= lift
+		_enemy_sprite.rotation = stride * _facing * 0.018
+		_enemy_sprite.scale = Vector2(
+			sprite_scale * (1.0 + squash),
+			sprite_scale * (1.0 - squash)
+		)
+	elif animation_row == 2:
+		if is_ranged_enemy():
+			var bow_draw: float = smoothstep(0.02, 0.45, attack_progress)
+			var bow_release: float = (
+				smoothstep(0.46, 0.55, attack_progress)
+				* (1.0 - smoothstep(0.60, 0.88, attack_progress))
+			)
+			_enemy_sprite.position.x = _facing * (-1.8 * bow_draw + 4.0 * bow_release)
+			_enemy_sprite.position.y -= bow_release * 0.8
+			_enemy_sprite.rotation = _facing * (-0.012 * bow_draw + 0.028 * bow_release)
+		else:
+			var windup: float = (
+				smoothstep(0.0, 0.16, attack_progress)
+				* (1.0 - smoothstep(0.22, 0.40, attack_progress))
+			)
+			var strike: float = (
+				smoothstep(0.28, 0.48, attack_progress)
+				* (1.0 - smoothstep(0.64, 1.0, attack_progress))
+			)
+			var lunge_distance: float = 13.0 if is_boss() else (10.5 if is_elite() else 9.0)
+			_enemy_sprite.position.x = _facing * (-2.4 * windup + lunge_distance * strike)
+			_enemy_sprite.position.y -= strike * 1.1
+			_enemy_sprite.rotation = _facing * (-0.022 * windup + 0.034 * strike)
+	elif animation_row == 3:
+		if _is_defeated:
+			_enemy_sprite.position.y += smoothstep(0.0, 0.72, death_progress) * 1.4
+		else:
+			var hurt_weight: float = 1.0 - smoothstep(0.0, 1.0, hurt_progress)
+			_enemy_sprite.position.x -= _facing * hurt_weight * 2.4
+			_enemy_sprite.rotation = -_facing * hurt_weight * 0.045
+
+
 func _update_sprite_animation() -> void:
 	if not is_instance_valid(_enemy_sprite):
 		return
 
 	var animation_row: int = 0
-	var animation_column: int = int(floor(_elapsed * 6.0 + _phase)) % 4
+	var animation_column: int = (
+		_get_goblin_loop_column(false)
+		if _family == EnemyFamily.GOBLIN
+		else int(floor(_elapsed * 6.0 + _phase)) % 4
+	)
 	var attack_progress: float = 0.0
+	var hurt_progress: float = 0.0
+	var death_progress: float = 0.0
 	if _is_defeated:
 		animation_row = 3
-		var death_progress: float = 1.0 - _death_remaining / DEATH_ANIMATION_DURATION
+		death_progress = 1.0 - _death_remaining / DEATH_ANIMATION_DURATION
 		animation_column = 2 + mini(1, int(floor(death_progress * 2.0)))
 	elif _hurt_remaining > 0.0:
 		animation_row = 3
-		var hurt_progress: float = 1.0 - _hurt_remaining / HURT_ANIMATION_DURATION
+		hurt_progress = 1.0 - _hurt_remaining / HURT_ANIMATION_DURATION
 		animation_column = mini(1, int(floor(hurt_progress * 2.0)))
 	elif _attack_remaining > 0.0:
 		animation_row = 2
@@ -601,7 +805,9 @@ func _update_sprite_animation() -> void:
 			0.0,
 			0.999
 		)
-		if is_boss():
+		if _family == EnemyFamily.GOBLIN:
+			animation_column = _get_goblin_attack_column(attack_progress)
+		elif is_boss():
 			animation_column = (
 				2 + mini(1, int(floor(attack_progress * 2.0)))
 				if _boss_attack_uses_projectile
@@ -611,26 +817,38 @@ func _update_sprite_animation() -> void:
 			animation_column = mini(3, int(floor(attack_progress * 4.0)))
 	elif absf(velocity.x) > 8.0:
 		animation_row = 1
-		animation_column = int(floor(_elapsed * 10.0 + _phase)) % 4
+		animation_column = (
+			_get_goblin_loop_column(true)
+			if _family == EnemyFamily.GOBLIN
+			else int(floor(_elapsed * 10.0 + _phase)) % 4
+		)
 
 	_set_sprite_cell(animation_column, animation_row)
 	_enemy_sprite.flip_h = _facing > 0.0
 	var sprite_scale := _get_sprite_scale()
 	_enemy_sprite.scale = Vector2.ONE * sprite_scale
 	_enemy_sprite.position = Vector2(0.0, _get_sprite_baseline_offset())
+	_enemy_sprite.rotation = 0.0
 	_enemy_sprite.modulate = Color.WHITE
-	if _attack_remaining > 0.0:
+	if _family == EnemyFamily.GOBLIN:
+		_apply_goblin_sprite_motion(
+			animation_row,
+			attack_progress,
+			hurt_progress,
+			death_progress
+		)
+	elif _attack_remaining > 0.0:
 		var lunge_distance: float = 5.0 if is_ranged_enemy() else (13.0 if is_boss() else 9.0)
 		_enemy_sprite.position.x = sin(attack_progress * PI) * _facing * lunge_distance
-	elif _is_defeated:
+	if _is_defeated:
 		var fade_progress: float = 1.0 - _death_remaining / DEATH_ANIMATION_DURATION
 		_enemy_sprite.modulate.a = 1.0 - smoothstep(0.72, 1.0, fade_progress)
 
 
 func _draw() -> void:
 	if is_boss():
-		draw_circle(Vector2(0.0, -13.0), 57.0 + sin(_elapsed * 3.0) * 2.0, Color(0.98, 0.12, 0.20, 0.10))
-		draw_arc(Vector2(0.0, -13.0), 55.0, 0.0, TAU, 32, Color(0.98, 0.28, 0.22, 0.44), 2.0)
+		draw_circle(Vector2(0.0, -22.0), 76.0 + sin(_elapsed * 3.0) * 2.5, Color(0.98, 0.12, 0.20, 0.10))
+		draw_arc(Vector2(0.0, -22.0), 73.0, 0.0, TAU, 38, Color(0.98, 0.28, 0.22, 0.44), 2.4)
 	elif is_elite():
 		draw_circle(Vector2(0.0, -7.0), 37.0 + sin(_elapsed * 4.0), Color(0.68, 0.30, 1.0, 0.10))
 		draw_arc(Vector2(0.0, -7.0), 36.0, 0.0, TAU, 26, Color(0.76, 0.44, 1.0, 0.46), 2.0)
@@ -647,8 +865,8 @@ func _draw() -> void:
 
 	if _current_health < _max_health and not _is_defeated:
 		var health_ratio: float = float(_current_health) / float(maxi(_max_health, 1))
-		var bar_width: float = 96.0 if is_boss() else (64.0 if is_elite() else 48.0)
-		var bar_y: float = -84.0 if is_boss() else (-56.0 if is_elite() else -43.0)
+		var bar_width: float = 126.0 if is_boss() else (64.0 if is_elite() else 48.0)
+		var bar_y: float = -112.0 if is_boss() else (-56.0 if is_elite() else -43.0)
 		draw_rect(Rect2(-bar_width * 0.5, bar_y, bar_width, 6.0), Color(0.03, 0.07, 0.10, 0.88))
 		draw_rect(
 			Rect2(-bar_width * 0.5 + 2.0, bar_y + 2.0, (bar_width - 4.0) * health_ratio, 2.0),

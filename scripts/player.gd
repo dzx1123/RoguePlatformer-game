@@ -583,6 +583,14 @@ func get_weapon_name() -> String:
 	return _weapon_name
 
 
+func get_attack_cooldown_remaining() -> float:
+	return _attack_cooldown_remaining
+
+
+func get_attack_cooldown_duration() -> float:
+	return maxf(0.01, attack_cooldown_duration)
+
+
 func get_skill_name() -> String:
 	return _skill_name
 

@@ -14,13 +14,13 @@ func _run_test() -> void:
 	await _wait_physics_frames(12)
 
 	var sequence_ids: Array[StringName] = main.call(&"get_room_sequence_ids") as Array[StringName]
-	if sequence_ids.size() != 10:
-		_fail("Run did not assemble exactly ten rooms")
+	if sequence_ids.size() != 20:
+		_fail("Run did not assemble exactly twenty rooms")
 		return
 	var unique_ids: Dictionary = {}
 	for room_id in sequence_ids:
 		unique_ids[room_id] = true
-	if unique_ids.size() < 4:
+	if unique_ids.size() < 10:
 		_fail("Random room route repeated too many layouts")
 		return
 	if int(main.call(&"get_current_room_number")) != 1:
@@ -77,7 +77,7 @@ func _run_test() -> void:
 		_fail("Run upgrades were not reset after death")
 		return
 
-	for room_number in range(1, 11):
+	for room_number in range(1, 21):
 		_defeat_current_room(main)
 		await _wait_physics_frames(32)
 		if bool(main.call(&"is_awaiting_chest")):
@@ -85,7 +85,7 @@ func _run_test() -> void:
 				_fail("Treasure room chest could not be opened")
 				return
 			await _wait_physics_frames(5)
-		if room_number < 10:
+		if room_number < 20:
 			if not bool(main.call(&"is_choosing_upgrade")):
 				_fail("Room %d did not lead to an upgrade choice" % room_number)
 				return
@@ -103,7 +103,7 @@ func _run_test() -> void:
 				return
 		else:
 			if not bool(main.call(&"is_run_complete")):
-				_fail("Clearing the tenth room did not complete the run")
+				_fail("Clearing the twentieth room did not complete the run")
 				return
 
 	main.queue_free()

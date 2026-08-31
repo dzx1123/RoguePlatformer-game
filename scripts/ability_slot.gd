@@ -3,11 +3,12 @@ extends Control
 ## Compact bottom-HUD ability icon with hover help and a cooldown mask.
 
 enum IconType {
+	ATTACK,
 	DASH,
 	SKILL,
 }
 
-var _icon_type: int = IconType.DASH
+var _icon_type: int = IconType.ATTACK
 var _title: String = "技能"
 var _hotkey: String = "K"
 var _description: String = ""
@@ -96,8 +97,12 @@ func _draw() -> void:
 	var slot_rect := Rect2(Vector2.ZERO, size)
 	var glow_alpha: float = 0.30 if _is_hovered else 0.14
 	draw_rect(slot_rect.grow(3.0), Color(_accent, glow_alpha), false, 2.0)
-	draw_rect(slot_rect, Color(0.025, 0.06, 0.10, 0.94), true)
+	draw_rect(slot_rect, Color(0.018, 0.046, 0.070, 0.98), true)
+	draw_rect(Rect2(3.0, 3.0, size.x - 6.0, 3.0), Color(_accent, 0.32), true)
+	draw_rect(Rect2(3.0, size.y - 23.0, size.x - 6.0, 20.0), Color(0.006, 0.018, 0.030, 0.78), true)
 	draw_rect(slot_rect, Color(_accent, 0.70), false, 2.0)
+	draw_rect(Rect2(5.0, 4.0, 20.0, 18.0), Color(0.01, 0.025, 0.04, 0.94), true)
+	draw_rect(Rect2(5.0, 4.0, 20.0, 18.0), Color(_accent, 0.54), false, 1.0)
 	_draw_icon()
 	var icon_height: float = size.y - 21.0
 	if _cooldown_remaining > 0.0:
@@ -110,7 +115,20 @@ func _draw() -> void:
 func _draw_icon() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2(size.x / 100.0, 0.75))
 	var center := Vector2(50.0, 35.0)
-	if _icon_type == IconType.DASH:
+	if _icon_type == IconType.ATTACK:
+		var blade := PackedVector2Array([
+			Vector2(66.0, 14.0),
+			Vector2(61.0, 35.0),
+			Vector2(43.0, 48.0),
+			Vector2(39.0, 44.0),
+			Vector2(53.0, 27.0),
+		])
+		draw_colored_polygon(blade, Color(0.87, 0.97, 1.0, 0.94))
+		draw_polyline(PackedVector2Array([Vector2(66.0, 14.0), Vector2(61.0, 35.0), Vector2(43.0, 48.0)]), _accent, 2.0, true)
+		draw_line(Vector2(34.0, 39.0), Vector2(47.0, 52.0), Color(0.95, 0.75, 0.32, 1.0), 4.0, true)
+		draw_line(Vector2(39.0, 48.0), Vector2(30.0, 57.0), Color(_accent, 0.92), 5.0, true)
+		draw_circle(Vector2(29.0, 58.0), 3.0, Color(0.95, 0.75, 0.32, 1.0))
+	elif _icon_type == IconType.DASH:
 		for trail_index in range(3):
 			var offset := float(trail_index) * 10.0
 			draw_line(Vector2(19.0 - offset * 0.35, 40.0 - offset * 0.20), Vector2(61.0 - offset * 0.15, 40.0 - offset * 0.20), Color(_accent, 0.22 + float(trail_index) * 0.15), 3.0, true)

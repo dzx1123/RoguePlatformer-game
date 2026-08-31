@@ -67,8 +67,23 @@ func _run_test() -> void:
 	if not bool(main.call(&"is_awaiting_chest")):
 		_fail("Treasure room did not spawn a reward chest")
 		return
+	var reward_chest: RewardChest = main.get("_chest") as RewardChest
+	var prompt_bubble: Control = reward_chest.get_node("PromptBubble") as Control
+	var prompt_text: Label = reward_chest.get_node("PromptBubble/PromptText") as Label
+	var prompt_key: Label = reward_chest.get_node("PromptBubble/PromptKey/KeyText") as Label
+	if (
+		not prompt_bubble.visible
+		or prompt_bubble.position.y > -70.0
+		or not prompt_text.text.contains("宝箱")
+		or prompt_key.text.is_empty()
+	):
+		_fail("Reward chest did not show its animated interaction bubble")
+		return
 	if not bool(main.call(&"open_current_chest_for_test")):
 		_fail("Reward chest could not be opened")
+		return
+	if not prompt_text.text.contains("金币 +24") or not prompt_text.text.contains("生命 +24"):
+		_fail("Opening the chest did not transform the prompt into a reward bubble")
 		return
 	await _wait_physics_frames(5)
 	if int(main.call(&"get_gold")) < gold_before_treasure + 24:
@@ -153,13 +168,13 @@ func _run_test() -> void:
 			_fail("Room six still contained a slime enemy")
 			return
 
-	for room_number in range(6, 11):
+	for room_number in range(6, 21):
 		if room_number == 10:
-			var final_enemies: Array = main.get("_enemies") as Array
-			if final_enemies.size() != 1:
+			var chapter_boss_enemies: Array = main.get("_enemies") as Array
+			if chapter_boss_enemies.size() != 1:
 				_fail("Goblin chief room did not contain exactly one boss")
 				return
-			var goblin_chief := final_enemies[0] as RogueEnemy
+			var goblin_chief := chapter_boss_enemies[0] as RogueEnemy
 			var chief_sprite := goblin_chief.get_node("EnemySprite") as Sprite2D
 			if (
 				not goblin_chief.is_boss()
@@ -168,21 +183,44 @@ func _run_test() -> void:
 			):
 				_fail("The final boss did not use the elite Red Fang design")
 				return
+		if room_number >= 11 and room_number not in [14, 19]:
+			if not _verify_mixed_enemy_room(main, room_number):
+				return
+		if room_number in [15, 20]:
+			var mixed_boss_enemies: Array = main.get("_enemies") as Array
+			var boss_count: int = 0
+			var mixed_boss_family: int = RogueEnemy.EnemyFamily.SLIME
+			for enemy_value in mixed_boss_enemies:
+				var mixed_enemy := enemy_value as RogueEnemy
+				if mixed_enemy.is_boss():
+					boss_count += 1
+					mixed_boss_family = mixed_enemy.get_enemy_family()
+			if boss_count != 1 or mixed_boss_enemies.size() < 3:
+				_fail("Mixed boss room %d did not spawn one leader with escorts" % room_number)
+				return
+			var expected_boss_family: int = (
+				RogueEnemy.EnemyFamily.GOBLIN
+				if room_number == 20
+				else RogueEnemy.EnemyFamily.SLIME
+			)
+			if mixed_boss_family != expected_boss_family:
+				_fail("Mixed boss room %d used the wrong chapter leader" % room_number)
+				return
 		_defeat_current_room(main)
 		await _wait_physics_frames(36)
 		if bool(main.call(&"is_awaiting_chest")):
 			main.call(&"open_current_chest_for_test")
 			await _wait_physics_frames(5)
-		if room_number < 10:
+		if room_number < 20:
 			if bool(main.call(&"is_shopping")):
 				main.call(&"_leave_shop")
 			elif not bool(main.call(&"choose_upgrade", 0)):
-				_fail("Goblin chapter room %d did not advance" % room_number)
+				_fail("Room %d did not advance in the twenty-room run" % room_number)
 				return
 			await _wait_physics_frames(5)
 
 	if not bool(main.call(&"is_run_complete")):
-		_fail("Defeating the goblin chief did not complete the run")
+		_fail("Defeating the twentieth-room war chief did not complete the run")
 		return
 	var in_memory_progress: Dictionary = main.call(&"get_progression_snapshot") as Dictionary
 	if int(in_memory_progress.get("runs_completed", 0)) != 1:
@@ -199,6 +237,22 @@ func _run_test() -> void:
 	main.queue_free()
 	print("content_expansion_smoke: PASS")
 	quit(0)
+
+
+func _verify_mixed_enemy_room(main: Node2D, room_number: int) -> bool:
+	var enemies: Array = main.get("_enemies") as Array
+	var has_slime: bool = false
+	var has_goblin: bool = false
+	for enemy_value in enemies:
+		var enemy := enemy_value as RogueEnemy
+		if enemy.get_enemy_family() == RogueEnemy.EnemyFamily.GOBLIN:
+			has_goblin = true
+		else:
+			has_slime = true
+	if not has_slime or not has_goblin:
+		_fail("Room %d did not contain both slime and goblin enemies" % room_number)
+		return false
+	return true
 
 
 func _verify_save_round_trip() -> bool:

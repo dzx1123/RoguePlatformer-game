@@ -15,8 +15,8 @@ layer = 10
 [node name="Title" type="Label" parent="HUD" unique_id=1377092095]
 offset_left = 28.0
 offset_top = 20.0
-offset_right = 690.0
-offset_bottom = 56.0
+offset_right = 714.0
+offset_bottom = 108.0
 theme_override_colors/font_color = Color(0.86, 0.95, 1, 1)
 theme_override_font_sizes/font_size = 26
 text = "ROGUE PLATFORMER  /  PROTOTYPE 01"
