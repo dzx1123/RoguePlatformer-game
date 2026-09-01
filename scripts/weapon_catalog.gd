@@ -28,6 +28,8 @@ static func get_weapon(weapon_id: StringName) -> Dictionary:
 				"skill_multiplier": 1.75,
 				"skill_reach": 1.35,
 				"skill_lunge": 155.0,
+				"skill_hit_progresses": [0.18, 0.48, 0.78],
+				"skill_hit_weights": [0.30, 0.32, 0.38],
 				"accent": Color("#b48cff"),
 			}
 		GREATSWORD:
@@ -44,6 +46,8 @@ static func get_weapon(weapon_id: StringName) -> Dictionary:
 				"skill_multiplier": 2.20,
 				"skill_reach": 1.90,
 				"skill_lunge": 65.0,
+				"skill_hit_progresses": [0.62],
+				"skill_hit_weights": [1.0],
 				"accent": Color("#ff9b62"),
 			}
 		_:
@@ -55,11 +59,13 @@ static func get_weapon(weapon_id: StringName) -> Dictionary:
 				"attack_cooldown": 0.38,
 				"reach": 1.00,
 				"skill_name": "月轮斩",
-				"skill_duration": 0.50,
+				"skill_duration": 0.68,
 				"skill_cooldown": 2.80,
 				"skill_multiplier": 1.90,
 				"skill_reach": 1.62,
 				"skill_lunge": 105.0,
+				"skill_hit_progresses": [0.70],
+				"skill_hit_weights": [1.0],
 				"accent": Color("#78d9ef"),
 			}
 

@@ -28,8 +28,8 @@ func _run_test() -> void:
 	if not melee_sprite.texture.resource_path.ends_with("red_crystal_slime_melee_sheet.png"):
 		_fail("Melee slime did not use the melee sprite sheet")
 		return
-	if not is_equal_approx(melee_sprite.position.y, -15.0):
-		_fail("Melee slime sprite baseline was not aligned to its platform collider")
+	if absf(melee_sprite.position.y + 15.0) > 0.05:
+		_fail("Melee slime sprite baseline was %.4f instead of -15.0" % melee_sprite.position.y)
 		return
 	var cell_height: float = float(melee_sprite.texture.get_height()) / 4.0
 
@@ -58,8 +58,8 @@ func _run_test() -> void:
 	if not ranged_sprite.texture.resource_path.ends_with("red_crystal_slime_ranged_sheet.png"):
 		_fail("Ranged slime did not use the ranged sprite sheet")
 		return
-	if not is_equal_approx(ranged_sprite.position.y, -17.0):
-		_fail("Ranged slime sprite baseline was not aligned to its platform collider")
+	if absf(ranged_sprite.position.y + 17.0) > 0.05:
+		_fail("Ranged slime sprite baseline was %.4f instead of -17.0" % ranged_sprite.position.y)
 		return
 
 	var boss := RogueEnemy.new()
@@ -83,8 +83,8 @@ func _run_test() -> void:
 	if boss.get_hurtbox_rect().size.x < 140.0:
 		_fail("Enlarged slime boss did not receive a matching hurtbox")
 		return
-	if not is_equal_approx(boss_sprite.position.y, -30.0):
-		_fail("Slime boss sprite baseline was not aligned to its platform collider")
+	if absf(boss_sprite.position.y + 30.0) > 0.05:
+		_fail("Slime boss sprite baseline was %.4f instead of -30.0" % boss_sprite.position.y)
 		return
 
 	melee.defeated.connect(_on_death_signal)

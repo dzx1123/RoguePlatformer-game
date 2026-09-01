@@ -187,7 +187,11 @@ func _run_test() -> void:
 			):
 				_fail("The final boss did not use the elite Red Fang design")
 				return
-		if room_number >= 11 and room_number not in [14, 19]:
+		if (
+			room_number >= 11
+			and room_number not in [15, 20]
+			and not bool(main.call(&"is_shopping"))
+		):
 			if not _verify_mixed_enemy_room(main, room_number):
 				return
 		if room_number in [15, 20]:

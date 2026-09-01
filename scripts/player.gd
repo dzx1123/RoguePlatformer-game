@@ -18,6 +18,7 @@ enum VisualState {
 	LAND,
 	ATTACK,
 	SKILL,
+	SKILL_RECOVERY,
 	DASH,
 	HURT,
 	DEAD,
@@ -52,20 +53,22 @@ const HERO_SLASH_UP_FOLLOWTHROUGH: Texture2D = preload("res://assets/characters/
 const HERO_SLASH_DOWN_WINDUP: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down_windup.png")
 const HERO_SLASH_DOWN: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down.png")
 const HERO_SLASH_DOWN_FOLLOWTHROUGH: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down_followthrough.png")
-const HERO_SKILL_FULLMOON_SHEET: Texture2D = preload("res://assets/characters/frames_polished/hero_skill_fullmoon_sheet_v2.png")
 const DASH_ECHO_SCRIPT := preload("res://scripts/dash_echo.gd")
+const MOON_WHEEL_GEOMETRY := preload("res://scripts/moon_wheel_geometry.gd")
+const UPGRADE_CATALOG := preload("res://scripts/upgrade_catalog.gd")
 
 const HERO_FRAME_SIZE := Vector2(640.0, 416.0)
 const HERO_SCALE := 0.22
 const RUN_FRAME_COUNT := 8.0
-const SKILL_SHEET_COLUMNS := 3.0
-const SKILL_SHEET_ROWS := 2.0
-const SKILL_FRAME_COUNT := 6
+const RUN_PIXELS_PER_FRAME := 19.0
+const RUN_SETTLE_FRAMES_PER_SECOND := 20.0
 const LANDING_SQUASH_DURATION := 0.20
 const ATTACK_HIT_PROGRESS := 0.38
 const ATTACK_FAILSAFE_MARGIN := 0.08
-const SKILL_HIT_PROGRESS := 0.42
+const SKILL_HIT_PROGRESS := 0.70
 const SKILL_FAILSAFE_MARGIN := 0.10
+const SKILL_EXIT_BLEND_DURATION := 0.11
+const SKILL_POSE_ECHO_DURATION := 0.075
 const DEATH_DURATION := 0.85
 const RESPAWN_INVULNERABILITY := 1.0
 const DASH_COOLDOWN := 2.0
@@ -92,6 +95,9 @@ const DROP_THROUGH_DURATION := 0.20
 @export var auto_respawn: bool = true
 
 @onready var hero_sprite: Sprite2D = $HeroSprite
+@onready var skill_pose_echo: Sprite2D = $SkillPoseEcho
+@onready var skill_effect: MoonWheelEffect = $MoonWheelEffect
+@onready var weapon_skill_effect: WeaponSkillEffect = $WeaponSkillEffect
 
 var _air_jumps_used: int = 0
 var _facing: float = 1.0
@@ -109,9 +115,19 @@ var _skill_remaining: float = 0.0
 var _skill_cooldown_remaining: float = 0.0
 var _skill_elapsed: float = 0.0
 var _skill_hit_emitted: bool = false
+var _skill_hit_index: int = 0
+var _skill_last_emitted_index: int = -1
+var _skill_hit_progresses: Array[float] = [SKILL_HIT_PROGRESS]
+var _skill_hit_weights: Array[float] = [1.0]
+var _skill_exit_blend_remaining: float = 0.0
+var _skill_pose_echo_remaining: float = 0.0
+var _skill_pose_echo_origin := Vector2.ZERO
 var _spawn_point := Vector2.ZERO
 var _visual_time: float = 0.0
 var _run_cycle: float = 0.0
+var _run_settle_target: float = 0.0
+var _run_is_settling: bool = false
+var _run_has_settled: bool = true
 var _movement_blend: float = 0.0
 var _landing_squash_remaining: float = 0.0
 var _airborne_time: float = 0.0
@@ -136,13 +152,16 @@ var _weapon_base_damage: int = 34
 var _weapon_base_cooldown: float = 0.46
 var _run_damage_bonus: int = 0
 var _run_attack_cooldown_multiplier: float = 1.0
+var _run_upgrade_counts: Dictionary = {}
 var _skill_name: String = "月轮斩"
-var _skill_duration: float = 0.50
+var _skill_duration: float = 0.68
 var _skill_cooldown_duration: float = 2.80
 var _skill_damage_multiplier: float = 1.90
 var _skill_reach: float = 1.62
 var _skill_lunge: float = 105.0
 var _visual_state: int = VisualState.IDLE
+var _visual_state_elapsed: float = 0.0
+var _sprite_pose_initialized: bool = false
 var _current_texture: Texture2D
 
 
@@ -181,8 +200,22 @@ func _physics_process(delta: float) -> void:
 	var input_direction: float = 0.0
 	if _input_enabled:
 		input_direction = Input.get_axis(&"move_left", &"move_right")
+	var requested_facing: float = 0.0
 	if not is_zero_approx(input_direction):
-		_facing = signf(input_direction)
+		requested_facing = signf(input_direction)
+		# During a ground reversal the body keeps facing its actual travel direction
+		# until it has nearly stopped. This removes the brief moonwalk before turning.
+		if (
+			_skill_remaining <= 0.0
+			and _attack_remaining <= 0.0
+			and _dash_remaining <= 0.0
+			and (
+				not was_on_floor
+				or absf(velocity.x) <= 52.0
+				or signf(velocity.x) == requested_facing
+			)
+		):
+			_facing = requested_facing
 
 	if (
 		_input_enabled
@@ -206,9 +239,13 @@ func _physics_process(delta: float) -> void:
 		and _skill_remaining <= 0.0
 		and _hurt_remaining <= 0.0
 	):
+		if not is_zero_approx(requested_facing):
+			_facing = requested_facing
 		_start_dash()
 
 	if _input_enabled and Input.is_action_just_pressed(&"skill"):
+		if not is_zero_approx(requested_facing):
+			_facing = requested_facing
 		_start_skill()
 
 	var attack_button_pressed: bool = _input_enabled and Input.is_action_pressed(&"attack")
@@ -216,6 +253,8 @@ func _physics_process(delta: float) -> void:
 		_attack_button_latched = false
 	elif not _attack_button_latched:
 		_attack_button_latched = true
+		if not is_zero_approx(requested_facing):
+			_facing = requested_facing
 		_start_attack(_get_directional_attack_type())
 
 	if _dash_remaining > 0.0:
@@ -229,6 +268,13 @@ func _physics_process(delta: float) -> void:
 		elif _hurt_remaining > 0.0:
 			movement_scale = 0.15
 		var target_speed: float = input_direction * run_speed * movement_scale
+		if _skill_remaining > 0.0:
+			var skill_progress := clampf(
+				1.0 - _skill_remaining / maxf(_skill_duration, 0.001),
+				0.0,
+				1.0
+			)
+			target_speed += _facing * _get_skill_lunge_speed(skill_progress)
 		var acceleration: float = ground_acceleration if was_on_floor else air_acceleration
 		velocity.x = move_toward(velocity.x, target_speed, acceleration * delta)
 
@@ -253,18 +299,30 @@ func _physics_process(delta: float) -> void:
 	var target_visual_motion: float = speed_ratio
 	if _dash_remaining > 0.0:
 		target_visual_motion = 1.15
-	_movement_blend = move_toward(_movement_blend, target_visual_motion, delta * 10.0)
+	var movement_blend_rate: float = 14.0 if target_visual_motion > _movement_blend else 5.0
+	_movement_blend = move_toward(
+		_movement_blend,
+		target_visual_motion,
+		delta * movement_blend_rate
+	)
 
 	if (
 		now_on_floor
 		and speed_ratio > 0.04
 		and _attack_remaining <= 0.0
 		and _skill_remaining <= 0.0
+		and _skill_exit_blend_remaining <= 0.0
 	):
-		var run_frames_per_second: float = lerpf(9.0, 15.0, speed_ratio)
-		_run_cycle = fposmod(_run_cycle + delta * run_frames_per_second, RUN_FRAME_COUNT)
+		_run_cycle = fposmod(
+			_run_cycle + delta * absf(velocity.x) / RUN_PIXELS_PER_FRAME,
+			RUN_FRAME_COUNT
+		)
+		_run_is_settling = false
+		_run_has_settled = false
+	elif now_on_floor and _movement_blend > 0.03:
+		_settle_run_cycle(delta)
 
-	_update_hero_visuals()
+	_update_hero_visuals(delta)
 	queue_redraw()
 
 
@@ -288,14 +346,25 @@ func respawn() -> void:
 	_skill_cooldown_remaining = 0.0
 	_skill_elapsed = 0.0
 	_skill_hit_emitted = false
+	_skill_hit_index = 0
+	_skill_last_emitted_index = -1
+	_skill_exit_blend_remaining = 0.0
+	_skill_pose_echo_remaining = 0.0
+	skill_pose_echo.visible = false
 	_air_jumps_used = 0
 	_run_cycle = 0.0
+	_run_settle_target = 0.0
+	_run_is_settling = false
+	_run_has_settled = true
 	_movement_blend = 0.0
 	_landing_squash_remaining = 0.0
 	_airborne_time = 0.0
 	_hurt_remaining = 0.0
 	_hurt_invulnerability_remaining = RESPAWN_INVULNERABILITY
 	_drop_through_remaining = 0.0
+	_visual_state = VisualState.IDLE
+	_visual_state_elapsed = 0.0
+	_sprite_pose_initialized = false
 	set_collision_mask_value(1, true)
 	health_changed.emit(_current_health, maxi(1, max_health))
 	_update_hero_visuals()
@@ -308,6 +377,7 @@ func reset_run_progression() -> void:
 	dash_speed = _base_dash_speed
 	_run_damage_bonus = 0
 	_run_attack_cooldown_multiplier = 1.0
+	_run_upgrade_counts.clear()
 	configure_weapon(_weapon_id)
 	respawn()
 
@@ -325,6 +395,18 @@ func set_base_ground_surface_y(surface_y: float) -> void:
 
 
 func apply_run_upgrade(upgrade_id: StringName) -> bool:
+	var upgrade: Dictionary = UPGRADE_CATALOG.get_upgrade(upgrade_id)
+	if upgrade.is_empty():
+		return false
+	var required_weapon: StringName = upgrade.get("weapon", &"")
+	if not required_weapon.is_empty() and required_weapon != _weapon_id:
+		return false
+	var current_stacks: int = get_run_upgrade_count(upgrade_id)
+	var max_stacks: int = int(upgrade.get("max_stacks", 1))
+	if current_stacks >= max_stacks:
+		return false
+	_run_upgrade_counts[upgrade_id] = current_stacks + 1
+
 	match upgrade_id:
 		&"tempered_edge":
 			_run_damage_bonus += 8
@@ -343,7 +425,18 @@ func apply_run_upgrade(upgrade_id: StringName) -> bool:
 				0.20,
 				_weapon_base_cooldown * _run_attack_cooldown_multiplier
 			)
+		&"second_wind":
+			heal(35)
+		&"resonant_focus", &"extended_guard":
+			configure_weapon(_weapon_id)
+		&"moon_expansion", &"moon_rupture", &"lunar_cycle", &"eclipse_guard":
+			configure_weapon(_weapon_id)
+		&"woven_momentum", &"threaded_edge", &"quicksilver", &"shadowstep":
+			configure_weapon(_weapon_id)
+		&"fault_line", &"starfall_core", &"meteor_rhythm", &"adamant_stance":
+			configure_weapon(_weapon_id)
 		_:
+			_run_upgrade_counts.erase(upgrade_id)
 			return false
 	return true
 
@@ -362,13 +455,70 @@ func configure_weapon(weapon_id: StringName) -> bool:
 		0.20,
 		_weapon_base_cooldown * _run_attack_cooldown_multiplier
 	)
-	_weapon_reach = float(weapon.get("reach", 1.0))
+	_weapon_reach = (
+		float(weapon.get("reach", 1.0))
+		* (1.0 + 0.10 * float(get_run_upgrade_count(&"extended_guard")))
+	)
 	_skill_name = String(weapon.get("skill_name", "月轮斩"))
 	_skill_duration = float(weapon.get("skill_duration", 0.50))
-	_skill_cooldown_duration = float(weapon.get("skill_cooldown", 2.80))
-	_skill_damage_multiplier = float(weapon.get("skill_multiplier", 1.90))
-	_skill_reach = float(weapon.get("skill_reach", 1.62))
-	_skill_lunge = float(weapon.get("skill_lunge", 105.0))
+	var skill_cooldown_multiplier: float = pow(
+		0.86,
+		float(get_run_upgrade_count(&"resonant_focus"))
+	)
+	var skill_damage_bonus: float = 0.0
+	var skill_reach_bonus: float = 0.0
+	var skill_lunge_bonus: float = 0.0
+	match _weapon_id:
+		WeaponCatalog.SWORD:
+			skill_cooldown_multiplier *= pow(
+				0.84,
+				float(get_run_upgrade_count(&"lunar_cycle"))
+			)
+			skill_damage_bonus = 0.18 * float(
+				get_run_upgrade_count(&"moon_rupture")
+			)
+			skill_reach_bonus = 0.12 * float(
+				get_run_upgrade_count(&"moon_expansion")
+			)
+		WeaponCatalog.TWIN_BLADES:
+			skill_cooldown_multiplier *= pow(
+				0.86,
+				float(get_run_upgrade_count(&"quicksilver"))
+			)
+			skill_damage_bonus = 0.12 * float(
+				get_run_upgrade_count(&"threaded_edge")
+			)
+			skill_lunge_bonus = 0.18 * float(
+				get_run_upgrade_count(&"woven_momentum")
+			)
+		WeaponCatalog.GREATSWORD:
+			skill_cooldown_multiplier *= pow(
+				0.88,
+				float(get_run_upgrade_count(&"meteor_rhythm"))
+			)
+			skill_damage_bonus = 0.20 * float(
+				get_run_upgrade_count(&"starfall_core")
+			)
+			skill_reach_bonus = 0.12 * float(
+				get_run_upgrade_count(&"fault_line")
+			)
+	_skill_cooldown_duration = maxf(
+		0.60,
+		float(weapon.get("skill_cooldown", 2.80)) * skill_cooldown_multiplier
+	)
+	_skill_damage_multiplier = (
+		float(weapon.get("skill_multiplier", 1.90))
+		* (1.0 + skill_damage_bonus)
+	)
+	_skill_reach = (
+		float(weapon.get("skill_reach", 1.62))
+		* (1.0 + skill_reach_bonus)
+	)
+	_skill_lunge = (
+		float(weapon.get("skill_lunge", 105.0))
+		* (1.0 + skill_lunge_bonus)
+	)
+	_configure_skill_hit_sequence(weapon)
 	_weapon_accent = weapon.get("accent", Color("#78d9ef"))
 	_finish_attack()
 	_finish_skill()
@@ -377,6 +527,78 @@ func configure_weapon(weapon_id: StringName) -> bool:
 	_update_hero_visuals()
 	queue_redraw()
 	return true
+
+
+func _configure_skill_hit_sequence(weapon: Dictionary) -> void:
+	_skill_hit_progresses.clear()
+	_skill_hit_weights.clear()
+	var progress_values: Array = weapon.get(
+		"skill_hit_progresses",
+		[SKILL_HIT_PROGRESS]
+	) as Array
+	var weight_values: Array = weapon.get("skill_hit_weights", [1.0]) as Array
+	for progress_value: Variant in progress_values:
+		_skill_hit_progresses.append(clampf(float(progress_value), 0.01, 0.99))
+	for weight_value: Variant in weight_values:
+		_skill_hit_weights.append(maxf(0.01, float(weight_value)))
+	if _skill_hit_progresses.is_empty():
+		_skill_hit_progresses.append(SKILL_HIT_PROGRESS)
+	if _skill_hit_weights.size() != _skill_hit_progresses.size():
+		_skill_hit_weights.clear()
+		var equal_weight: float = 1.0 / float(_skill_hit_progresses.size())
+		for _hit_index in range(_skill_hit_progresses.size()):
+			_skill_hit_weights.append(equal_weight)
+
+
+func _get_skill_lunge_speed(skill_progress: float) -> float:
+	var safe_progress: float = clampf(skill_progress, 0.0, 1.0)
+	match _weapon_id:
+		WeaponCatalog.TWIN_BLADES:
+			var burst_strength: float = maxf(
+				_skill_motion_pulse(safe_progress, 0.18, 0.16),
+				maxf(
+					_skill_motion_pulse(safe_progress, 0.48, 0.16),
+					_skill_motion_pulse(safe_progress, 0.78, 0.16)
+				)
+			)
+			var exit_fade: float = 1.0 - smoothstep(
+				0.0,
+				1.0,
+				clampf((safe_progress - 0.82) / 0.16, 0.0, 1.0)
+			)
+			return _skill_lunge * (0.34 + burst_strength * 1.04) * exit_fade
+		WeaponCatalog.GREATSWORD:
+			var commit: float = smoothstep(
+				0.0,
+				1.0,
+				clampf((safe_progress - 0.38) / 0.18, 0.0, 1.0)
+			)
+			var recovery_fade: float = 1.0 - smoothstep(
+				0.0,
+				1.0,
+				clampf((safe_progress - 0.66) / 0.18, 0.0, 1.0)
+			)
+			return _skill_lunge * commit * recovery_fade
+		_:
+			var lunge_envelope: float = 1.0 - smoothstep(
+				0.0,
+				1.0,
+				clampf((safe_progress - 0.10) / 0.58, 0.0, 1.0)
+			)
+			return _skill_lunge * lunge_envelope
+
+
+func _skill_motion_pulse(
+	skill_progress: float,
+	pulse_center: float,
+	pulse_radius: float
+) -> float:
+	var distance: float = absf(skill_progress - pulse_center)
+	return 1.0 - smoothstep(
+		0.0,
+		1.0,
+		clampf(distance / maxf(pulse_radius, 0.001), 0.0, 1.0)
+	)
 
 
 func heal(amount: int) -> int:
@@ -406,8 +628,29 @@ func get_run_stats() -> Dictionary:
 		"run_speed": run_speed,
 		"dash_speed": dash_speed,
 		"attack_cooldown": attack_cooldown_duration,
+		"attack_reach": _weapon_reach,
+		"skill_cooldown": _skill_cooldown_duration,
+		"skill_damage_multiplier": _skill_damage_multiplier,
+		"skill_reach": _skill_reach,
+		"skill_lunge": _skill_lunge,
+		"run_upgrade_count": get_total_run_upgrade_count(),
 		"weapon_id": _weapon_id,
 	}
+
+
+func get_run_upgrade_count(upgrade_id: StringName) -> int:
+	return maxi(0, int(_run_upgrade_counts.get(upgrade_id, 0)))
+
+
+func get_run_upgrade_counts() -> Dictionary:
+	return _run_upgrade_counts.duplicate(true)
+
+
+func get_total_run_upgrade_count() -> int:
+	var total: int = 0
+	for count_value: Variant in _run_upgrade_counts.values():
+		total += maxi(0, int(count_value))
+	return total
 
 
 func _jump() -> void:
@@ -493,18 +736,35 @@ func _start_skill() -> void:
 		or _is_dead
 	):
 		return
+	_skill_exit_blend_remaining = 0.0
+	_skill_pose_echo_remaining = 0.0
+	skill_pose_echo.visible = false
 	_skill_remaining = maxf(_skill_duration, 0.01)
 	_skill_cooldown_remaining = _skill_cooldown_duration
 	_skill_elapsed = 0.0
 	_skill_hit_emitted = false
-	velocity.x = _facing * _skill_lunge
+	_skill_hit_index = 0
+	_skill_last_emitted_index = -1
+	velocity.x = _facing * _get_skill_lunge_speed(0.0)
 	action_started.emit(&"skill")
 
 
 func _finish_skill() -> void:
+	var should_blend_out: bool = (
+		_skill_elapsed > 0.0
+		and not _is_dead
+		and _hurt_remaining <= 0.0
+	)
 	_skill_remaining = 0.0
 	_skill_elapsed = 0.0
 	_skill_hit_emitted = false
+	_skill_hit_index = 0
+	if should_blend_out:
+		_skill_exit_blend_remaining = SKILL_EXIT_BLEND_DURATION
+		_run_cycle = 0.0
+		_run_settle_target = 0.0
+		_run_is_settling = false
+		_run_has_settled = true
 
 
 func _finish_attack() -> void:
@@ -519,9 +779,33 @@ func receive_enemy_attack(attacker_position: Vector2, damage: int = 20) -> bool:
 	# The dash is an intentional i-frame window: enemy contact and projectiles do no damage.
 	if _is_dead or _dash_remaining > 0.0 or _hurt_invulnerability_remaining > 0.0:
 		return false
+	if (
+		_skill_remaining > 0.0
+		and _weapon_id == WeaponCatalog.TWIN_BLADES
+		and get_run_upgrade_count(&"shadowstep") > 0
+	):
+		return false
 
 	var attack_in_progress: bool = _attack_remaining > 0.0 or _skill_remaining > 0.0
-	_current_health = maxi(0, _current_health - maxi(0, damage))
+	var damage_multiplier: float = 1.0
+	var skill_knockback_multiplier: float = 1.0
+	if _skill_remaining > 0.0:
+		if (
+			_weapon_id == WeaponCatalog.SWORD
+			and get_run_upgrade_count(&"eclipse_guard") > 0
+		):
+			damage_multiplier = 0.65
+		elif (
+			_weapon_id == WeaponCatalog.GREATSWORD
+			and get_run_upgrade_count(&"adamant_stance") > 0
+		):
+			damage_multiplier = 0.55
+			skill_knockback_multiplier = 0.55
+	var resolved_damage: int = maxi(
+		0,
+		int(round(float(maxi(0, damage)) * damage_multiplier))
+	)
+	_current_health = maxi(0, _current_health - resolved_damage)
 	health_changed.emit(_current_health, maxi(1, max_health))
 	if _current_health <= 0:
 		_die(attacker_position)
@@ -538,7 +822,10 @@ func receive_enemy_attack(attacker_position: Vector2, damage: int = 20) -> bool:
 	if is_zero_approx(knockback_direction):
 		knockback_direction = -_facing
 	if attack_in_progress:
-		velocity = Vector2(knockback_direction * 90.0, minf(velocity.y, -70.0))
+		velocity = Vector2(
+			knockback_direction * 90.0 * skill_knockback_multiplier,
+			minf(velocity.y, -70.0 * skill_knockback_multiplier)
+		)
 	else:
 		velocity = Vector2(knockback_direction * 270.0, -220.0)
 	_movement_blend = 0.0
@@ -565,6 +852,14 @@ func get_attack_reach() -> float:
 
 func get_attack_type() -> int:
 	return _attack_type
+
+
+func get_skill_hit_center() -> Vector2:
+	return MOON_WHEEL_GEOMETRY.get_world_center(global_position, _facing)
+
+
+func get_skill_hit_radii() -> Vector2:
+	return MOON_WHEEL_GEOMETRY.get_radii(_skill_reach)
 
 
 func confirm_attack_connected() -> void:
@@ -607,6 +902,24 @@ func get_skill_cooldown_duration() -> float:
 	return maxf(0.01, _skill_cooldown_duration)
 
 
+func get_skill_hit_index() -> int:
+	return _skill_last_emitted_index
+
+
+func get_skill_hit_count() -> int:
+	return _skill_hit_progresses.size()
+
+
+func get_skill_impact_scale() -> float:
+	match _weapon_id:
+		WeaponCatalog.TWIN_BLADES:
+			return 0.72
+		WeaponCatalog.GREATSWORD:
+			return 1.48
+		_:
+			return 1.20
+
+
 func get_dash_cooldown_remaining() -> float:
 	return _dash_cooldown_remaining
 
@@ -627,6 +940,9 @@ func _die(attacker_position: Vector2) -> void:
 	_dash_remaining = 0.0
 	_finish_attack()
 	_finish_skill()
+	_skill_exit_blend_remaining = 0.0
+	_skill_pose_echo_remaining = 0.0
+	skill_pose_echo.visible = false
 	_hurt_remaining = 0.0
 	_hurt_invulnerability_remaining = DEATH_DURATION
 	var death_direction: float = signf(global_position.x - attacker_position.x)
@@ -660,6 +976,7 @@ func _update_timers(delta: float) -> void:
 	_dash_cooldown_remaining = maxf(0.0, _dash_cooldown_remaining - delta)
 	_attack_cooldown_remaining = maxf(0.0, _attack_cooldown_remaining - delta)
 	_skill_cooldown_remaining = maxf(0.0, _skill_cooldown_remaining - delta)
+	_skill_exit_blend_remaining = maxf(0.0, _skill_exit_blend_remaining - delta)
 	_hurt_remaining = maxf(0.0, _hurt_remaining - delta)
 	_hurt_invulnerability_remaining = maxf(0.0, _hurt_invulnerability_remaining - delta)
 	_landing_squash_remaining = maxf(0.0, _landing_squash_remaining - delta)
@@ -683,13 +1000,23 @@ func _update_timers(delta: float) -> void:
 		_skill_elapsed += delta
 		_skill_remaining = maxf(0.0, _skill_remaining - delta)
 		var skill_progress: float = 1.0 - _skill_remaining / maxf(_skill_duration, 0.001)
-		if not _skill_hit_emitted and skill_progress >= SKILL_HIT_PROGRESS:
+		while (
+			_skill_hit_index < _skill_hit_progresses.size()
+			and skill_progress >= _skill_hit_progresses[_skill_hit_index]
+		):
+			_skill_last_emitted_index = _skill_hit_index
 			_skill_hit_emitted = true
+			var hit_weight: float = _skill_hit_weights[_skill_hit_index]
 			var skill_damage: int = maxi(
 				1,
-				int(round(float(get_attack_damage()) * _skill_damage_multiplier))
+				int(round(
+					float(get_attack_damage())
+					* _skill_damage_multiplier
+					* hit_weight
+				))
 			)
 			skill_hit.emit(global_position, _facing, skill_damage, _skill_reach)
+			_skill_hit_index += 1
 		if (
 			_skill_remaining <= 0.0
 			or _skill_elapsed >= maxf(_skill_duration, 0.01) + SKILL_FAILSAFE_MARGIN
@@ -713,6 +1040,26 @@ func _update_dash_echoes(delta: float) -> void:
 	echo.call(&"setup", hero_sprite.texture, _facing, hero_sprite.global_scale)
 
 
+func _settle_run_cycle(delta: float) -> void:
+	if _run_has_settled:
+		return
+	if not _run_is_settling:
+		var current_cycle: float = fposmod(_run_cycle, RUN_FRAME_COUNT)
+		_run_settle_target = ceil(current_cycle / 4.0) * 4.0
+		if _run_settle_target - current_cycle < 0.08:
+			_run_settle_target += 4.0
+		_run_is_settling = true
+	_run_cycle = move_toward(
+		_run_cycle,
+		_run_settle_target,
+		delta * RUN_SETTLE_FRAMES_PER_SECOND
+	)
+	if is_equal_approx(_run_cycle, _run_settle_target):
+		_run_cycle = fposmod(_run_settle_target, RUN_FRAME_COUNT)
+		_run_is_settling = false
+		_run_has_settled = true
+
+
 func _resolve_visual_state() -> int:
 	if _is_dead:
 		return VisualState.DEAD
@@ -724,17 +1071,33 @@ func _resolve_visual_state() -> int:
 		return VisualState.ATTACK
 	if _dash_remaining > 0.0:
 		return VisualState.DASH
+	if _skill_exit_blend_remaining > 0.0:
+		return VisualState.SKILL_RECOVERY
 	if not is_on_floor():
 		return VisualState.JUMP_RISE if velocity.y < 0.0 else VisualState.JUMP_FALL
 	if _landing_squash_remaining > 0.0:
 		return VisualState.LAND
-	if _movement_blend > 0.08:
+	if _movement_blend > 0.04:
 		return VisualState.RUN
 	return VisualState.IDLE
 
 
-func _update_hero_visuals() -> void:
-	_visual_state = _resolve_visual_state()
+func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
+	_update_skill_pose_echo(delta)
+	var previous_visual_state: int = _visual_state
+	var next_visual_state: int = _resolve_visual_state()
+	var state_changed: bool = next_visual_state != _visual_state
+	if state_changed:
+		_visual_state = next_visual_state
+		_visual_state_elapsed = 0.0
+	else:
+		_visual_state_elapsed += maxf(0.0, delta)
+
+	var previous_position: Vector2 = hero_sprite.position
+	var previous_scale: Vector2 = hero_sprite.scale
+	var previous_rotation: float = hero_sprite.rotation
+	var previous_texture: Texture2D = _current_texture
+	var previous_flip_h: bool = hero_sprite.flip_h
 	_reset_sprite_pose()
 
 	match _visual_state:
@@ -750,6 +1113,8 @@ func _update_hero_visuals() -> void:
 			_animate_attack()
 		VisualState.SKILL:
 			_animate_skill()
+		VisualState.SKILL_RECOVERY:
+			_animate_skill_recovery()
 		VisualState.DASH:
 			_animate_dash()
 		VisualState.HURT:
@@ -759,14 +1124,77 @@ func _update_hero_visuals() -> void:
 		_:
 			_animate_idle()
 
+	var target_position: Vector2 = hero_sprite.position
+	var target_scale: Vector2 = hero_sprite.scale
+	var target_rotation: float = hero_sprite.rotation
+	if _sprite_pose_initialized:
+		var smoothing_rate: float = _get_pose_smoothing_rate(_visual_state)
+		var pose_blend: float = 1.0 - exp(-smoothing_rate * maxf(delta, 0.0001))
+		if state_changed:
+			var minimum_transition_blend: float = (
+				0.56
+				if _visual_state in [
+					VisualState.ATTACK,
+					VisualState.SKILL,
+					VisualState.SKILL_RECOVERY,
+					VisualState.DASH,
+				]
+				else 0.40
+			)
+			pose_blend = maxf(pose_blend, minimum_transition_blend)
+		hero_sprite.position = previous_position.lerp(target_position, pose_blend)
+		hero_sprite.scale = previous_scale.lerp(target_scale, pose_blend)
+		hero_sprite.rotation = lerp_angle(previous_rotation, target_rotation, pose_blend)
+	else:
+		_sprite_pose_initialized = true
+
+	if (
+		(
+			_visual_state in [VisualState.SKILL, VisualState.SKILL_RECOVERY]
+			or previous_visual_state == VisualState.SKILL_RECOVERY
+		)
+		and previous_texture != null
+		and previous_texture != _current_texture
+	):
+		_start_skill_pose_echo(
+			previous_texture,
+			previous_position,
+			previous_scale,
+			previous_rotation,
+			previous_flip_h
+		)
+
 	var visual_modulate := Color.WHITE
 	if _is_dead:
 		visual_modulate = Color(0.56, 0.64, 0.72, 0.72)
 	elif _hurt_remaining > 0.0:
 		visual_modulate = Color(1.0, 0.42, 0.42, 1.0)
-	elif _hurt_invulnerability_remaining > 0.0 and int(_visual_time * 20.0) % 2 == 0:
-		visual_modulate = Color(1.0, 1.0, 1.0, 0.52)
+	elif _hurt_invulnerability_remaining > 0.0:
+		# A hard on/off blink made otherwise smooth movement read as dropped frames.
+		# Keep the protection readable with a continuous cool pulse instead.
+		var invulnerability_pulse: float = 0.5 + 0.5 * sin(_visual_time * TAU * 4.2)
+		visual_modulate = Color(
+			lerpf(0.82, 1.0, invulnerability_pulse),
+			lerpf(0.92, 1.0, invulnerability_pulse),
+			1.0,
+			lerpf(0.78, 0.96, invulnerability_pulse)
+		)
 	hero_sprite.modulate = visual_modulate
+	_update_skill_effect()
+
+
+func _get_pose_smoothing_rate(visual_state: int) -> float:
+	match visual_state:
+		VisualState.ATTACK, VisualState.SKILL, VisualState.SKILL_RECOVERY, VisualState.DASH:
+			return 36.0
+		VisualState.LAND, VisualState.HURT:
+			return 32.0
+		VisualState.RUN:
+			return 25.0
+		VisualState.JUMP_RISE, VisualState.JUMP_FALL:
+			return 23.0
+		_:
+			return 18.0
 
 
 func _reset_sprite_pose() -> void:
@@ -783,19 +1211,6 @@ func _set_texture(texture: Texture2D) -> void:
 		return
 	_current_texture = texture
 	hero_sprite.texture = texture
-
-
-func _set_skill_frame(frame_index: int) -> void:
-	_set_texture(HERO_SKILL_FULLMOON_SHEET)
-	hero_sprite.region_enabled = true
-	var cell_size := Vector2(
-		float(HERO_SKILL_FULLMOON_SHEET.get_width()) / SKILL_SHEET_COLUMNS,
-		float(HERO_SKILL_FULLMOON_SHEET.get_height()) / SKILL_SHEET_ROWS
-	)
-	var resolved_frame: int = clampi(frame_index, 0, SKILL_FRAME_COUNT - 1)
-	var column: int = resolved_frame % int(SKILL_SHEET_COLUMNS)
-	var row: int = floori(float(resolved_frame) / SKILL_SHEET_COLUMNS)
-	hero_sprite.region_rect = Rect2(Vector2(column, row) * cell_size, cell_size)
 
 
 func _run_texture(frame_index: int = -1) -> Texture2D:
@@ -834,9 +1249,17 @@ func _animate_run() -> void:
 	_set_texture(_run_texture(current_frame))
 	var cycle_phase: float = _run_cycle / RUN_FRAME_COUNT * TAU
 	var speed_ratio: float = clampf(_movement_blend, 0.0, 1.0)
-	var step_lift: float = absf(sin(cycle_phase)) * 0.28 * speed_ratio
+	var step_lift: float = absf(sin(cycle_phase)) * 1.05 * speed_ratio
+	var contact_weight: float = 0.5 + 0.5 * cos(cycle_phase * 2.0)
 	hero_sprite.position.y -= step_lift
-	hero_sprite.rotation = -_facing * lerpf(0.004, 0.014, speed_ratio)
+	hero_sprite.rotation = -_facing * (
+		lerpf(0.003, 0.017, speed_ratio)
+		+ sin(cycle_phase) * 0.005 * speed_ratio
+	)
+	hero_sprite.scale = Vector2(
+		HERO_SCALE * (1.0 + contact_weight * 0.006 * speed_ratio),
+		HERO_SCALE * (1.0 - contact_weight * 0.005 * speed_ratio)
+	)
 
 
 func _animate_jump_rise() -> void:
@@ -888,17 +1311,36 @@ func _animate_land() -> void:
 
 
 func _animate_dash() -> void:
-	_set_texture(HERO_RUN_4)
-	hero_sprite.position += Vector2(_facing * 5.0, 1.0)
-	hero_sprite.rotation = -_facing * 0.025
-	hero_sprite.scale = Vector2(HERO_SCALE * 1.14, HERO_SCALE * 0.86)
+	var dash_progress: float = clampf(
+		1.0 - _dash_remaining / maxf(dash_duration, 0.001),
+		0.0,
+		1.0
+	)
+	if dash_progress < 0.24:
+		_set_texture(HERO_RUN_2)
+	elif dash_progress < 0.74:
+		_set_texture(HERO_RUN_4)
+	else:
+		_set_texture(HERO_RUN_6)
+	var dash_punch: float = sin(dash_progress * PI)
+	hero_sprite.position += Vector2(_facing * (4.0 + dash_punch * 3.0), 1.0)
+	hero_sprite.rotation = -_facing * lerpf(0.018, 0.034, dash_punch)
+	hero_sprite.scale = Vector2(
+		HERO_SCALE * (1.10 + dash_punch * 0.08),
+		HERO_SCALE * (0.90 - dash_punch * 0.05)
+	)
 
 
 func _animate_hurt() -> void:
 	_set_texture(HERO_IDLE)
-	hero_sprite.position += Vector2(-_facing * 3.0, 1.0)
-	hero_sprite.rotation = _facing * 0.07
-	hero_sprite.scale = Vector2(HERO_SCALE * 1.04, HERO_SCALE * 0.96)
+	var hurt_progress: float = clampf(1.0 - _hurt_remaining / 0.18, 0.0, 1.0)
+	var recoil_weight: float = 1.0 - smoothstep(0.0, 1.0, hurt_progress)
+	hero_sprite.position += Vector2(-_facing * 4.0 * recoil_weight, recoil_weight)
+	hero_sprite.rotation = _facing * 0.085 * recoil_weight
+	hero_sprite.scale = Vector2(
+		HERO_SCALE * (1.0 + 0.05 * recoil_weight),
+		HERO_SCALE * (1.0 - 0.04 * recoil_weight)
+	)
 
 
 func _animate_dead() -> void:
@@ -1020,25 +1462,397 @@ func _animate_skill() -> void:
 	var skill_progress: float = clampf(
 		1.0 - _skill_remaining / maxf(_skill_duration, 0.001),
 		0.0,
-		0.999
+		1.0
 	)
-	var frame_index: int = mini(
-		SKILL_FRAME_COUNT - 1,
-		int(floor(skill_progress * float(SKILL_FRAME_COUNT)))
+	match _weapon_id:
+		WeaponCatalog.TWIN_BLADES:
+			_animate_twin_blades_skill(skill_progress)
+		WeaponCatalog.GREATSWORD:
+			_animate_greatsword_skill(skill_progress)
+		_:
+			_animate_moon_wheel_skill(skill_progress)
+
+
+func _animate_moon_wheel_skill(skill_progress: float) -> void:
+	# DNF-inspired cadence: one-handed rising slash draws the moon, a brief turn
+	# darkens it, then a committed downward cut shatters it at the hit frame.
+	# Every pose still comes from the canonical hero set, so the body never swaps.
+	if skill_progress < 0.15:
+		var anticipation := smoothstep(0.0, 1.0, skill_progress / 0.15)
+		_set_texture(HERO_WINDUP)
+		hero_sprite.position += Vector2(
+			-_facing * 4.0 * anticipation,
+			1.5 * anticipation
+		)
+		hero_sprite.rotation = -_facing * 0.07 * anticipation
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * lerpf(1.0, 0.975, anticipation),
+			HERO_SCALE * lerpf(1.0, 1.035, anticipation)
+		)
+	elif skill_progress < 0.30:
+		var coil := smoothstep(0.0, 1.0, (skill_progress - 0.15) / 0.15)
+		_set_texture(HERO_SLASH_UP_WINDUP)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(-4.0, -2.0, coil),
+			lerpf(1.5, 2.5, coil)
+		)
+		hero_sprite.rotation = -_facing * lerpf(0.07, 0.035, coil)
+		hero_sprite.scale = Vector2(HERO_SCALE * 0.975, HERO_SCALE * 1.035)
+	elif skill_progress < 0.47:
+		var rising_cut := smoothstep(0.0, 1.0, (skill_progress - 0.30) / 0.17)
+		var rising_impact := sin(rising_cut * PI)
+		_set_texture(HERO_SLASH_UP)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(-2.0, 4.0, rising_cut),
+			lerpf(2.5, -5.5, rising_cut)
+		)
+		hero_sprite.rotation = _facing * lerpf(-0.035, 0.04, rising_cut)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * (0.98 + rising_impact * 0.06),
+			HERO_SCALE * (1.03 - rising_impact * 0.05)
+		)
+	elif skill_progress < 0.55:
+		var moon_followthrough := smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.47) / 0.08
+		)
+		_set_texture(HERO_SLASH_UP_FOLLOWTHROUGH)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(4.0, 3.0, moon_followthrough),
+			lerpf(-5.5, -4.2, moon_followthrough)
+		)
+		hero_sprite.rotation = _facing * lerpf(0.04, 0.018, moon_followthrough)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * lerpf(1.015, 1.0, moon_followthrough),
+			HERO_SCALE * lerpf(0.985, 1.01, moon_followthrough)
+		)
+	elif skill_progress < 0.64:
+		var dark_moon_turn := smoothstep(0.0, 1.0, (skill_progress - 0.55) / 0.09)
+		_set_texture(HERO_SLASH_DOWN_WINDUP)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(3.0, -1.0, dark_moon_turn),
+			lerpf(-4.2, -3.0, dark_moon_turn)
+		)
+		hero_sprite.rotation = _facing * lerpf(0.018, 0.025, dark_moon_turn)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * lerpf(1.0, 0.985, dark_moon_turn),
+			HERO_SCALE * lerpf(1.0, 1.035, dark_moon_turn)
+		)
+	elif skill_progress < 0.76:
+		var shatter_cut := smoothstep(0.0, 1.0, (skill_progress - 0.64) / 0.12)
+		var shatter_impact := sin(shatter_cut * PI)
+		_set_texture(HERO_SLASH_DOWN)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(-1.0, 5.0, shatter_cut),
+			lerpf(-3.0, 4.0, shatter_cut)
+		)
+		hero_sprite.rotation = _facing * lerpf(0.025, -0.05, shatter_cut)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * (0.985 + shatter_impact * 0.075),
+			HERO_SCALE * (1.035 - shatter_impact * 0.065)
+		)
+	elif skill_progress < 0.88:
+		var followthrough := smoothstep(0.0, 1.0, (skill_progress - 0.76) / 0.12)
+		_set_texture(HERO_SLASH_DOWN_FOLLOWTHROUGH)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(5.0, 3.0, followthrough),
+			lerpf(4.0, 2.0, followthrough)
+		)
+		hero_sprite.rotation = _facing * lerpf(-0.05, -0.016, followthrough)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * lerpf(1.02, 1.0, followthrough),
+			HERO_SCALE * lerpf(0.98, 1.01, followthrough)
+		)
+	else:
+		var recovery := smoothstep(0.0, 1.0, (skill_progress - 0.88) / 0.12)
+		_set_texture(HERO_RECOVERY)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(3.0, 0.0, recovery),
+			lerpf(2.0, 0.0, recovery)
+		)
+		hero_sprite.rotation = _facing * lerpf(-0.016, 0.0, recovery)
+
+
+func _animate_twin_blades_skill(skill_progress: float) -> void:
+	if skill_progress < 0.10:
+		var anticipation: float = smoothstep(0.0, 1.0, skill_progress / 0.10)
+		_set_texture(HERO_WINDUP)
+		hero_sprite.position += Vector2(
+			-_facing * 2.5 * anticipation,
+			1.0 * anticipation
+		)
+		hero_sprite.rotation = -_facing * 0.035 * anticipation
+	elif skill_progress < 0.30:
+		var first_cut: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.10) / 0.20
+		)
+		var first_impact: float = sin(first_cut * PI)
+		_set_texture(HERO_SLASH)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(-2.5, 5.0, first_cut),
+			lerpf(1.0, -1.0, first_cut)
+		)
+		hero_sprite.rotation = _facing * lerpf(-0.035, 0.045, first_cut)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * (1.0 + first_impact * 0.055),
+			HERO_SCALE * (1.0 - first_impact * 0.045)
+		)
+	elif skill_progress < 0.42:
+		var first_follow: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.30) / 0.12
+		)
+		_set_texture(HERO_SLASH_FOLLOWTHROUGH)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(5.0, 2.0, first_follow),
+			lerpf(-1.0, 1.0, first_follow)
+		)
+		hero_sprite.rotation = _facing * lerpf(0.045, -0.018, first_follow)
+	elif skill_progress < 0.60:
+		var second_cut: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.42) / 0.18
+		)
+		var second_impact: float = sin(second_cut * PI)
+		_set_texture(HERO_SLASH_UP)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(-1.0, 6.0, second_cut),
+			lerpf(2.0, -3.5, second_cut)
+		)
+		hero_sprite.rotation = _facing * lerpf(-0.03, 0.052, second_cut)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * (1.0 + second_impact * 0.06),
+			HERO_SCALE * (1.0 - second_impact * 0.05)
+		)
+	elif skill_progress < 0.72:
+		var second_follow: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.60) / 0.12
+		)
+		_set_texture(HERO_SLASH_UP_FOLLOWTHROUGH)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(6.0, 2.0, second_follow),
+			lerpf(-3.5, -1.0, second_follow)
+		)
+		hero_sprite.rotation = _facing * lerpf(0.052, 0.012, second_follow)
+	elif skill_progress < 0.86:
+		var third_cut: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.72) / 0.14
+		)
+		var third_impact: float = sin(third_cut * PI)
+		_set_texture(HERO_SLASH_DOWN)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(-1.0, 7.0, third_cut),
+			lerpf(-2.0, 3.5, third_cut)
+		)
+		hero_sprite.rotation = _facing * lerpf(0.03, -0.065, third_cut)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * (1.0 + third_impact * 0.07),
+			HERO_SCALE * (1.0 - third_impact * 0.055)
+		)
+	elif skill_progress < 0.94:
+		var final_follow: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.86) / 0.08
+		)
+		_set_texture(HERO_SLASH_DOWN_FOLLOWTHROUGH)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(7.0, 3.0, final_follow),
+			lerpf(3.5, 2.0, final_follow)
+		)
+		hero_sprite.rotation = _facing * lerpf(-0.065, -0.018, final_follow)
+	else:
+		var recovery: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.94) / 0.06
+		)
+		_set_texture(HERO_RECOVERY)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(3.0, 0.0, recovery),
+			lerpf(2.0, 0.0, recovery)
+		)
+		hero_sprite.rotation = _facing * lerpf(-0.018, 0.0, recovery)
+
+
+func _animate_greatsword_skill(skill_progress: float) -> void:
+	if skill_progress < 0.18:
+		var brace: float = smoothstep(0.0, 1.0, skill_progress / 0.18)
+		_set_texture(HERO_WINDUP)
+		hero_sprite.position += Vector2(
+			-_facing * 4.0 * brace,
+			2.0 * brace
+		)
+		hero_sprite.rotation = -_facing * 0.08 * brace
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * lerpf(1.0, 0.96, brace),
+			HERO_SCALE * lerpf(1.0, 1.05, brace)
+		)
+	elif skill_progress < 0.44:
+		var raise_blade: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.18) / 0.26
+		)
+		_set_texture(HERO_SLASH_UP_WINDUP)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(-4.0, -1.0, raise_blade),
+			lerpf(2.0, -4.0, raise_blade)
+		)
+		hero_sprite.rotation = _facing * lerpf(-0.08, 0.04, raise_blade)
+		hero_sprite.scale = Vector2(HERO_SCALE * 0.96, HERO_SCALE * 1.05)
+	elif skill_progress < 0.60:
+		var overhead_hold: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.44) / 0.16
+		)
+		_set_texture(HERO_SLASH_DOWN_WINDUP)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(-1.0, -2.0, overhead_hold),
+			lerpf(-4.0, -3.0, overhead_hold)
+		)
+		hero_sprite.rotation = _facing * lerpf(0.04, 0.055, overhead_hold)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * lerpf(0.96, 0.95, overhead_hold),
+			HERO_SCALE * lerpf(1.05, 1.065, overhead_hold)
+		)
+	elif skill_progress < 0.74:
+		var ground_cut: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.60) / 0.14
+		)
+		var heavy_impact: float = sin(ground_cut * PI)
+		_set_texture(HERO_SLASH_DOWN)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(-2.0, 6.0, ground_cut),
+			lerpf(-3.0, 5.0, ground_cut)
+		)
+		hero_sprite.rotation = _facing * lerpf(0.055, -0.072, ground_cut)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * (0.95 + heavy_impact * 0.12),
+			HERO_SCALE * (1.065 - heavy_impact * 0.10)
+		)
+	elif skill_progress < 0.88:
+		var followthrough: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.74) / 0.14
+		)
+		_set_texture(HERO_SLASH_DOWN_FOLLOWTHROUGH)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(6.0, 3.0, followthrough),
+			lerpf(5.0, 2.0, followthrough)
+		)
+		hero_sprite.rotation = _facing * lerpf(-0.072, -0.018, followthrough)
+		hero_sprite.scale = Vector2(
+			HERO_SCALE * lerpf(1.03, 1.0, followthrough),
+			HERO_SCALE * lerpf(0.98, 1.01, followthrough)
+		)
+	else:
+		var recovery: float = smoothstep(
+			0.0,
+			1.0,
+			(skill_progress - 0.88) / 0.12
+		)
+		_set_texture(HERO_RECOVERY)
+		hero_sprite.position += Vector2(
+			_facing * lerpf(3.0, 0.0, recovery),
+			lerpf(2.0, 0.0, recovery)
+		)
+		hero_sprite.rotation = _facing * lerpf(-0.018, 0.0, recovery)
+
+
+func _animate_skill_recovery() -> void:
+	# Hold the planted recovery anchor for a few frames. Even sub-pixel rebound
+	# reads as a one-pixel shake with nearest-filtered character art.
+	_set_texture(HERO_RECOVERY)
+
+
+func _start_skill_pose_echo(
+	texture: Texture2D,
+	pose_position: Vector2,
+	pose_scale: Vector2,
+	pose_rotation: float,
+	pose_flip_h: bool
+) -> void:
+	skill_pose_echo.texture = texture
+	skill_pose_echo.region_enabled = false
+	skill_pose_echo.position = pose_position
+	skill_pose_echo.scale = pose_scale
+	skill_pose_echo.rotation = pose_rotation
+	skill_pose_echo.flip_h = pose_flip_h
+	skill_pose_echo.modulate = Color(
+		_weapon_accent.r,
+		_weapon_accent.g,
+		_weapon_accent.b,
+		0.14
 	)
-	_set_skill_frame(frame_index)
-	# Each frame contains the complete character pose and painted moon trail. Small
-	# registration offsets keep the feet stable while the uppercut rises overhead.
-	var frame_offsets: Array[Vector2] = [
-		Vector2(-2.0, 1.0),
-		Vector2(-1.0, 0.0),
-		Vector2(1.0, -1.5),
-		Vector2(2.0, -2.5),
-		Vector2(2.0, -1.0),
-		Vector2(0.0, 0.0),
-	]
-	var offset := frame_offsets[frame_index]
-	hero_sprite.position += Vector2(offset.x * _facing, offset.y)
+	skill_pose_echo.visible = true
+	_skill_pose_echo_origin = pose_position
+	_skill_pose_echo_remaining = SKILL_POSE_ECHO_DURATION
+
+
+func _update_skill_pose_echo(delta: float) -> void:
+	if _skill_pose_echo_remaining <= 0.0:
+		skill_pose_echo.visible = false
+		return
+	_skill_pose_echo_remaining = maxf(0.0, _skill_pose_echo_remaining - delta)
+	var echo_progress: float = clampf(
+		1.0 - _skill_pose_echo_remaining / SKILL_POSE_ECHO_DURATION,
+		0.0,
+		1.0
+	)
+	var echo_alpha: float = 0.14 * pow(1.0 - echo_progress, 1.7)
+	skill_pose_echo.position = _skill_pose_echo_origin + Vector2(
+		-_facing * echo_progress * 2.0,
+		-echo_progress * 0.6
+	)
+	skill_pose_echo.modulate = Color(
+		_weapon_accent.r,
+		_weapon_accent.g,
+		_weapon_accent.b,
+		echo_alpha
+	)
+	if _skill_pose_echo_remaining <= 0.0:
+		skill_pose_echo.visible = false
+
+
+func _update_skill_effect() -> void:
+	var active: bool = _skill_remaining > 0.0 and not _is_dead
+	var progress: float = 0.0
+	if active:
+		progress = clampf(
+			1.0 - _skill_remaining / maxf(_skill_duration, 0.001),
+			0.0,
+			1.0
+		)
+	var moon_wheel_active: bool = active and _weapon_id == WeaponCatalog.SWORD
+	skill_effect.set_skill_state(
+		moon_wheel_active,
+		progress,
+		_facing,
+		get_skill_hit_radii(),
+		_weapon_accent
+	)
+	weapon_skill_effect.set_skill_state(
+		active,
+		progress,
+		_facing,
+		_weapon_id,
+		_skill_reach,
+		_weapon_accent
+	)
 
 
 func _draw() -> void:

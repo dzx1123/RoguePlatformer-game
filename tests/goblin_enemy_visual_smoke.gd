@@ -68,9 +68,11 @@ func _run_test() -> void:
 		return
 
 	club.velocity.x = 100.0
+	club.set("_locomotion_active", true)
 	var run_frames_seen: Dictionary = {}
 	for frame_index in range(8):
-		club.set("_elapsed", (float(frame_index) + 0.01) / 11.0)
+		club.set("_locomotion_cycle", float(frame_index) + 0.01)
+		club.set("_sprite_pose_initialized", false)
 		club.call(&"_update_sprite_animation")
 		if not club_sprite.texture.resource_path.ends_with("red_fang_goblin_club_run_sheet_v2.png"):
 			_fail("Ordinary goblin did not switch to its authored run sheet")
@@ -89,17 +91,24 @@ func _run_test() -> void:
 		return
 
 	elite.velocity.x = 100.0
+	elite.set("_locomotion_cycle", 0.01)
+	elite.set("_sprite_pose_initialized", false)
 	elite.call(&"_update_sprite_animation")
 	if not elite_sprite.texture.resource_path.ends_with("red_fang_goblin_elite_run_sheet_v2.png"):
 		_fail("Elite goblin did not switch to its authored run sheet")
 		return
 	archer.velocity.x = 100.0
+	archer.set("_locomotion_cycle", 0.01)
+	archer.set("_sprite_pose_initialized", false)
 	archer.call(&"_update_sprite_animation")
 	if not archer_sprite.texture.resource_path.ends_with("red_fang_goblin_archer_run_sheet_v2.png"):
 		_fail("Archer goblin did not switch to its authored run sheet")
 		return
 
 	club.velocity.x = 0.0
+	club.set("_locomotion_active", false)
+	club.set("_locomotion_blend", 0.0)
+	club.set("_sprite_pose_initialized", false)
 	club.call(&"_update_sprite_animation")
 	var cell_width: float = float(club_sprite.texture.get_width()) / 4.0
 	var cell_height: float = float(club_sprite.texture.get_height()) / 4.0

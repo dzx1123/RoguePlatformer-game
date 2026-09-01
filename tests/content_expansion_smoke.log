@@ -1,0 +1,9 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+ERROR: Room 12 did not contain both slime and goblin enemies
+   at: push_error (core/variant/variant_utility.cpp:1023)
+   GDScript backtrace (most recent call first):
+       [0] _fail (res://tests/content_expansion_smoke.gd:324)
+       [1] _verify_mixed_enemy_room (res://tests/content_expansion_smoke.gd:257)
+       [2] _run_test (res://tests/content_expansion_smoke.gd:191)
+       [3] _wait_physics_frames (res://tests/content_expansion_smoke.gd:313)

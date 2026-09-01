@@ -46,7 +46,11 @@ func _run_test() -> void:
 		"res://assets/characters/frames_polished/hero_slash.png",
 		"res://assets/characters/frames_polished/hero_slash_followthrough.png",
 		"res://assets/characters/frames_polished/hero_recovery.png",
+		"res://assets/characters/frames_polished/hero_slash_up_windup.png",
+		"res://assets/characters/frames_polished/hero_slash_up.png",
 		"res://assets/characters/frames_polished/hero_slash_up_followthrough.png",
+		"res://assets/characters/frames_polished/hero_slash_down_windup.png",
+		"res://assets/characters/frames_polished/hero_slash_down.png",
 		"res://assets/characters/frames_polished/hero_slash_down_followthrough.png",
 	]
 	for texture_path in texture_paths:
@@ -54,13 +58,6 @@ func _run_test() -> void:
 		if texture.get_size() != expected_size:
 			_fail("Unexpected frame size for %s: %s" % [texture_path, texture.get_size()])
 			return
-	var skill_sheet := load(
-		"res://assets/characters/frames_polished/hero_skill_fullmoon_sheet_v2.png"
-	) as Texture2D
-	if skill_sheet == null or skill_sheet.get_width() % 3 != 0 or skill_sheet.get_height() % 2 != 0:
-		_fail("Full-moon skill sheet is not a valid 3x2 animation grid")
-		return
-
 	var hero_sprite: Sprite2D = player.get_node("HeroSprite") as Sprite2D
 	var run_texture_paths: Dictionary = {}
 	for run_frame_index in range(8):
@@ -71,6 +68,17 @@ func _run_test() -> void:
 		run_texture_paths[hero_sprite.texture.resource_path] = true
 	if run_texture_paths.size() != 8:
 		_fail("Same-character run cycle used %d poses instead of 8" % run_texture_paths.size())
+		return
+	player.set("_run_cycle", 2.35)
+	player.set("_run_is_settling", false)
+	player.set("_run_has_settled", false)
+	for _settle_frame in range(20):
+		player.call(&"_settle_run_cycle", 1.0 / 60.0)
+	if (
+		not bool(player.get("_run_has_settled"))
+		or absf(float(player.get("_run_cycle")) - 4.0) > 0.01
+	):
+		_fail("Run stop did not settle onto the next planted-foot pose")
 		return
 	if player.get_node_or_null("RunBlendSprite") != null:
 		_fail("Run animation still contains the double-exposure layer that caused white flashing")
@@ -111,6 +119,18 @@ func _run_test() -> void:
 		_fail("Landing did not finish in the standing pose")
 		return
 
+	var dash_texture_paths: Dictionary = {}
+	var dash_duration: float = float(player.get("dash_duration"))
+	for remaining_ratio in [0.90, 0.50, 0.10]:
+		player.set("_dash_remaining", dash_duration * float(remaining_ratio))
+		player.call(&"_reset_sprite_pose")
+		player.call(&"_animate_dash")
+		dash_texture_paths[hero_sprite.texture.resource_path] = true
+	player.set("_dash_remaining", 0.0)
+	if dash_texture_paths.size() != 3:
+		_fail("Dash did not progress through anticipation, travel and exit poses")
+		return
+
 	player.call(&"_start_attack")
 	var seen_windup: bool = false
 	var seen_slash: bool = false
@@ -130,22 +150,37 @@ func _run_test() -> void:
 		_fail("Attack hit signal count was %d instead of 1" % _attack_hit_count)
 		return
 
-	var skill_regions: Dictionary = {}
 	var skill_duration: float = float(player.get("_skill_duration"))
-	for frame_index in range(6):
-		var progress: float = (float(frame_index) + 0.01) / 6.0
+	var skill_progress_samples: Array[float] = [0.08, 0.22, 0.40, 0.50, 0.59, 0.70, 0.82, 0.94]
+	var expected_skill_frames: Array[String] = [
+		"hero_windup.png",
+		"hero_slash_up_windup.png",
+		"hero_slash_up.png",
+		"hero_slash_up_followthrough.png",
+		"hero_slash_down_windup.png",
+		"hero_slash_down.png",
+		"hero_slash_down_followthrough.png",
+		"hero_recovery.png",
+	]
+	var seen_skill_frames: Dictionary = {}
+	for frame_index in range(skill_progress_samples.size()):
+		var progress: float = skill_progress_samples[frame_index]
 		player.set("_skill_remaining", skill_duration * (1.0 - progress))
 		player.call(&"_reset_sprite_pose")
 		player.call(&"_animate_skill")
-		if not hero_sprite.texture.resource_path.ends_with("hero_skill_fullmoon_sheet_v2.png"):
-			_fail("Skill did not use the painted full-moon animation")
+		var skill_path: String = hero_sprite.texture.resource_path
+		if not skill_path.ends_with(expected_skill_frames[frame_index]):
+			_fail("Skill phase %d used the wrong canonical hero pose: %s" % [frame_index, skill_path])
 			return
-		if not hero_sprite.region_enabled:
-			_fail("Skill sprite sheet region was not enabled")
+		if hero_sprite.region_enabled:
+			_fail("Skill enabled a mismatched sprite-sheet region")
 			return
-		skill_regions[hero_sprite.region_rect.position] = true
-	if skill_regions.size() != 6:
-		_fail("Full-moon skill did not expose all six animation frames")
+		if hero_sprite.texture.get_size() != expected_size:
+			_fail("Skill phase changed the canonical hero canvas size")
+			return
+		seen_skill_frames[skill_path] = true
+	if seen_skill_frames.size() != 8:
+		_fail("Moon-wheel skill did not visit all eight canonical poses")
 		return
 	player.set("_skill_remaining", 0.0)
 	player.call(&"_reset_sprite_pose")

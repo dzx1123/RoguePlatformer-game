@@ -1,6 +1,8 @@
 [gd_scene format=3 uid="uid://ch47n3c02j78e"]
 
 [ext_resource type="Script" uid="uid://ct2jpfkqg33k7" path="res://scripts/player.gd" id="1_player"]
+[ext_resource type="Script" uid="uid://bhfbcywoy3vse" path="res://scripts/moon_wheel_effect.gd" id="2_moon_wheel"]
+[ext_resource type="Script" path="res://scripts/weapon_skill_effect.gd" id="3_weapon_skill"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape_player"]
 radius = 18.0
@@ -19,6 +21,18 @@ texture_filter = 1
 position = Vector2(0, -15)
 scale = Vector2(0.22, 0.22)
 
+[node name="SkillPoseEcho" type="Sprite2D" parent="."]
+visible = false
+texture_filter = 1
+position = Vector2(0, -15)
+scale = Vector2(0.22, 0.22)
+
+[node name="MoonWheelEffect" type="Node2D" parent="." unique_id=45084483]
+script = ExtResource("2_moon_wheel")
+
+[node name="WeaponSkillEffect" type="Node2D" parent="."]
+script = ExtResource("3_weapon_skill")
+
 [node name="Camera2D" type="Camera2D" parent="." unique_id=338405928]
 limit_left = 0
 limit_top = 0
@@ -26,3 +40,5 @@ limit_right = 2200
 limit_bottom = 720
 position_smoothing_enabled = true
 position_smoothing_speed = 7.0
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="." unique_id=580487360]

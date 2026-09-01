@@ -14,6 +14,7 @@ const SOUNDSCAPE_SCRIPT := preload("res://scripts/soundscape.gd")
 const ABILITY_SLOT_SCRIPT := preload("res://scripts/ability_slot.gd")
 const SETTINGS_STORE_SCRIPT := preload("res://scripts/settings_store.gd")
 const PAUSE_INPUT_HANDLER_SCRIPT := preload("res://scripts/pause_input_handler.gd")
+const UPGRADE_CATALOG_SCRIPT := preload("res://scripts/upgrade_catalog.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
 const BUILD_LABEL := "月蚀混战扩展版 2026.08.31C"
 const ROOMS_PER_RUN := 20
@@ -56,10 +57,15 @@ enum Difficulty {
 var platform_rects: Array[Rect2] = []
 var _platform_bodies: Array[StaticBody2D] = []
 var _rng := RandomNumberGenerator.new()
+var _visual_rng := RandomNumberGenerator.new()
+var _seed_rng := RandomNumberGenerator.new()
 var _enemies: Array[RogueEnemy] = []
 var _projectiles: Array[Area2D] = []
 var _room_pool: Array[Dictionary] = []
 var _room_sequence: Array[int] = []
+var _encounter_sequence: Array[int] = []
+var _run_seed: int = 0
+var _next_run_seed: int = -1
 var _current_room_index: int = -1
 var _current_room_data: Dictionary = {}
 var _run_generation: int = 0
@@ -130,6 +136,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
 	hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	_rng.randomize()
+	_visual_rng.randomize()
+	_seed_rng.randomize()
 	_settings = SETTINGS_STORE_SCRIPT.new() as RefCounted
 	_settings.call(&"load_settings")
 	_soundscape = SOUNDSCAPE_SCRIPT.new() as RogueSoundscape
@@ -311,8 +319,8 @@ func _update_camera_shake(delta: float) -> void:
 	_camera_shake_remaining = maxf(0.0, _camera_shake_remaining - delta)
 	var intensity: float = _camera_shake_strength * (_camera_shake_remaining / _camera_shake_duration)
 	camera.position = _camera_base_position + Vector2(
-		_rng.randf_range(-intensity, intensity),
-		_rng.randf_range(-intensity, intensity)
+		_visual_rng.randf_range(-intensity, intensity),
+		_visual_rng.randf_range(-intensity, intensity)
 	)
 	if _camera_shake_remaining <= 0.0:
 		camera.position = _camera_base_position
@@ -1167,6 +1175,12 @@ func get_selected_difficulty_name() -> String:
 func _start_new_run() -> void:
 	_run_generation += 1
 	_run_number += 1
+	if _next_run_seed >= 0:
+		_run_seed = clampi(absi(_next_run_seed), 1, 999999)
+		_next_run_seed = -1
+	else:
+		_run_seed = _seed_rng.randi_range(1, 999999)
+	_rng.seed = _run_seed
 	_run_active = false
 	_choosing_upgrade = false
 	_run_complete = false
@@ -1186,6 +1200,7 @@ func _start_new_run() -> void:
 	player.configure_weapon(_progression.get_selected_weapon())
 	player.reset_run_progression()
 	_boss_health_background.visible = false
+	_encounter_sequence = _build_encounter_sequence()
 	_room_sequence = ROOM_CATALOG_SCRIPT.build_room_sequence(
 		_room_pool.size(),
 		ROOMS_PER_RUN,
@@ -1195,6 +1210,35 @@ func _start_new_run() -> void:
 	_current_room_data = {}
 	_update_economy_hud()
 	_advance_to_next_room()
+
+
+func _build_encounter_sequence() -> Array[int]:
+	var sequence: Array[int] = []
+	var chapter_count: int = ceili(float(ROOMS_PER_RUN) / 5.0)
+	for chapter_index in range(chapter_count):
+		sequence.append(EncounterType.NORMAL)
+		var chapter_specials: Array[int] = [
+			EncounterType.TREASURE,
+			EncounterType.ELITE,
+			EncounterType.SHOP,
+		]
+		# The first chapter remains a stable onboarding cadence. Later chapters
+		# preserve one of each reward/risk room but conceal their order.
+		if chapter_index > 0:
+			_shuffle_encounters(chapter_specials)
+		for encounter: int in chapter_specials:
+			sequence.append(encounter)
+		sequence.append(EncounterType.BOSS)
+	sequence.resize(ROOMS_PER_RUN)
+	return sequence
+
+
+func _shuffle_encounters(encounters: Array[int]) -> void:
+	for encounter_index in range(encounters.size() - 1, 0, -1):
+		var swap_index: int = _rng.randi_range(0, encounter_index)
+		var held_encounter: int = encounters[encounter_index]
+		encounters[encounter_index] = encounters[swap_index]
+		encounters[swap_index] = held_encounter
 
 
 func _advance_to_next_room() -> void:
@@ -1499,8 +1543,25 @@ func _on_player_skill_hit(
 		if not is_instance_valid(enemy):
 			_enemies.erase(enemy)
 			continue
-		if enemy.receive_player_attack(origin, facing, damage, reach_scale):
-			_spawn_hit_vfx(enemy.global_position, facing, enemy, 1.20, damage)
+		if enemy.receive_player_weapon_skill(
+			origin,
+			facing,
+			damage,
+			reach_scale,
+			player.get_weapon_id(),
+			player.get_skill_hit_index(),
+			player.get_skill_hit_count()
+		):
+			var impact_facing := signf(enemy.global_position.x - origin.x)
+			if is_zero_approx(impact_facing):
+				impact_facing = facing
+			_spawn_hit_vfx(
+				enemy.global_position,
+				impact_facing,
+				enemy,
+				player.get_skill_impact_scale(),
+				damage
+			)
 
 
 func _on_enemy_defeated(enemy: RogueEnemy) -> void:
@@ -1608,8 +1669,9 @@ func _show_upgrade_choice() -> void:
 		var choice: Dictionary = _upgrade_choices[choice_index]
 		button.visible = true
 		button.disabled = false
-		button.text = "[%d]  %s\n\n%s" % [
+		button.text = "[%d]  [%s] %s\n\n%s" % [
 			choice_index + 1,
+			String(choice.get("rarity_name", "普通")),
 			String(choice.get("name", "强化")),
 			String(choice.get("description", "")),
 		]
@@ -1634,8 +1696,9 @@ func _show_shop() -> void:
 		var cost: int = int(choice.get("cost", 0))
 		button.visible = true
 		button.disabled = _gold < cost
-		button.text = "[%d]  %s\n\n%s\n\n%d 金币" % [
+		button.text = "[%d]  [%s] %s\n\n%s\n\n%d 金币" % [
 			choice_index + 1,
+			String(choice.get("rarity_name", "普通")),
 			String(choice.get("name", "商品")),
 			String(choice.get("description", "")),
 			cost,
@@ -1662,33 +1725,10 @@ func _pick_upgrade_choices() -> Array[Dictionary]:
 
 
 func _create_upgrade_pool() -> Array[Dictionary]:
-	return [
-		{
-			"id": &"tempered_edge",
-			"name": "锋刃磨砺",
-			"description": "攻击伤害 +8",
-		},
-		{
-			"id": &"vitality_rune",
-			"name": "生命铸纹",
-			"description": "最大生命 +20，并恢复 20",
-		},
-		{
-			"id": &"swift_step",
-			"name": "迅捷步法",
-			"description": "移动速度 +32",
-		},
-		{
-			"id": &"dash_core",
-			"name": "冲刺核心",
-			"description": "冲刺速度 +90",
-		},
-		{
-			"id": &"battle_rhythm",
-			"name": "战斗节奏",
-			"description": "攻击冷却缩短 12%",
-		},
-	]
+	return UPGRADE_CATALOG_SCRIPT.create_available_pool(
+		player.get_weapon_id(),
+		player.get_run_upgrade_counts()
+	)
 
 
 func _on_upgrade_button_pressed(choice_index: int) -> void:
@@ -1945,12 +1985,16 @@ func _update_room_label() -> void:
 	var room_title: String = _current_room_data.get("title", "未知房间")
 	var chapter_name: String = _get_chapter_name(_current_room_index)
 	if _run_complete:
-		_room_label.text = "轮次完成  ·  RUN %02d\n月蚀回廊已净化" % _run_number
+		_room_label.text = "轮次完成 · RUN %02d · S%06d\n月蚀回廊已净化" % [
+			_run_number,
+			_run_seed,
+		]
 	else:
-		_room_label.text = "房间 %02d / %02d  ·  %s\n%s  ·  %s" % [
+		_room_label.text = "房间 %02d/%02d · %s · S%06d\n%s · %s" % [
 			_current_room_index + 1,
 			ROOMS_PER_RUN,
 			_get_encounter_name(_current_encounter),
+			_run_seed,
 			chapter_name,
 			room_title,
 		]
@@ -2117,6 +2161,8 @@ func _bank_run_progress(victory: bool) -> String:
 
 
 func _get_encounter_for_room(room_index: int) -> int:
+	if room_index >= 0 and room_index < _encounter_sequence.size():
+		return _encounter_sequence[room_index]
 	match posmod(room_index, 5):
 		1:
 			return EncounterType.TREASURE
@@ -2193,6 +2239,18 @@ func get_room_sequence_ids() -> Array[StringName]:
 		var room_id: StringName = room.get("id", &"")
 		room_ids.append(room_id)
 	return room_ids
+
+
+func set_next_run_seed(seed_value: int) -> void:
+	_next_run_seed = clampi(absi(seed_value), 1, 999999)
+
+
+func get_run_seed() -> int:
+	return _run_seed
+
+
+func get_encounter_sequence() -> Array[int]:
+	return _encounter_sequence.duplicate()
 
 
 func get_current_room_number() -> int:

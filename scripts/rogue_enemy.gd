@@ -22,6 +22,8 @@ const GOBLIN_ARCHER_SHEET := preload("res://assets/enemies/red_fang_goblin_arche
 const GOBLIN_CLUB_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_club_run_sheet_v2.png")
 const GOBLIN_ELITE_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_run_sheet_v2.png")
 const GOBLIN_ARCHER_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_run_sheet_v2.png")
+const MOON_WHEEL_GEOMETRY := preload("res://scripts/moon_wheel_geometry.gd")
+const WEAPON_SKILL_GEOMETRY := preload("res://scripts/weapon_skill_geometry.gd")
 
 enum EnemyRole {
 	MELEE,
@@ -82,6 +84,19 @@ const GOBLIN_RUN_FPS := 11.0
 const GOBLIN_RUN_COLUMNS := 4.0
 const GOBLIN_RUN_ROWS := 2.0
 const GOBLIN_RUN_FRAME_COUNT := 8
+const SLIME_RUN_FRAME_COUNT := 4
+const SLIME_RUN_FPS := 10.0
+const LOCOMOTION_SETTLE_FPS := 18.0
+const LANDING_MOTION_DURATION := 0.16
+# Generated run sheets use different internal frame registration. These measured
+# anchors keep the head centered and the feet on one floor line before adding a
+# small controlled runtime bounce.
+const GOBLIN_CLUB_RUN_HEAD_X := [181.58, 167.84, 146.50, 165.55, 183.62, 159.71, 141.06, 154.83]
+const GOBLIN_CLUB_RUN_BOTTOM := [415.0, 417.0, 410.0, 396.0, 357.0, 361.0, 341.0, 341.0]
+const GOBLIN_ARCHER_RUN_HEAD_X := [205.87, 173.87, 178.71, 149.49, 199.83, 175.79, 157.49, 140.36]
+const GOBLIN_ARCHER_RUN_BOTTOM := [446.0, 445.0, 447.0, 447.0, 351.0, 351.0, 354.0, 354.0]
+const GOBLIN_ELITE_RUN_HEAD_X := [266.35, 234.95, 206.30, 170.48, 253.48, 223.68, 200.29, 170.03]
+const GOBLIN_ELITE_RUN_BOTTOM := [398.0, 397.0, 398.0, 362.0, 367.0, 361.0, 364.0, 339.0]
 const PURSUIT_JUMP_SPEED := 690.0
 const PURSUIT_JUMP_MIN_HEIGHT := 36.0
 const PURSUIT_JUMP_MAX_HEIGHT := 420.0
@@ -112,6 +127,13 @@ var _difficulty_speed_multiplier: float = 1.0
 var _difficulty_aggression_multiplier: float = 1.0
 var _pursuit_jump_cooldown_remaining: float = 0.0
 var _death_remaining: float = 0.0
+var _locomotion_cycle: float = 0.0
+var _locomotion_blend: float = 0.0
+var _locomotion_active: bool = false
+var _locomotion_is_settling: bool = false
+var _locomotion_settle_target: float = 0.0
+var _landing_motion_remaining: float = 0.0
+var _sprite_pose_initialized: bool = false
 var _enemy_sprite: Sprite2D
 
 
@@ -181,6 +203,11 @@ func setup(
 	elif _variant == 1:
 		_variant = 0
 	_phase = phase
+	_locomotion_cycle = 0.0 if sin(phase) < 0.0 else 4.0
+	_locomotion_blend = 0.0
+	_locomotion_active = false
+	_locomotion_is_settling = false
+	_landing_motion_remaining = 0.0
 	_patrol_left = patrol_left
 	_patrol_right = patrol_right
 	_patrol_direction = -1.0 if sin(phase) < 0.0 else 1.0
@@ -313,17 +340,120 @@ func receive_player_attack(
 ) -> bool:
 	if not is_hit_by_attack(attack_origin, facing, reach_scale, attack_type):
 		return false
+	return _apply_player_hit(attack_origin, facing, damage)
+
+
+func is_hit_by_skill(
+	skill_origin: Vector2,
+	facing: float,
+	reach_scale: float = 1.0
+) -> bool:
+	if _is_defeated or _hurt_invulnerability_remaining > 0.0:
+		return false
+	var hit_center: Vector2 = MOON_WHEEL_GEOMETRY.get_world_center(skill_origin, facing)
+	var hit_radii: Vector2 = MOON_WHEEL_GEOMETRY.get_radii(reach_scale)
+	return MOON_WHEEL_GEOMETRY.rect_intersects_ellipse(
+		get_hurtbox_rect(),
+		hit_center,
+		hit_radii
+	)
+
+
+func receive_player_skill(
+	skill_origin: Vector2,
+	facing: float,
+	damage: int,
+	reach_scale: float = 1.0
+) -> bool:
+	if not is_hit_by_skill(skill_origin, facing, reach_scale):
+		return false
+	return _apply_player_hit(skill_origin, facing, damage)
+
+
+func is_hit_by_weapon_skill(
+	skill_origin: Vector2,
+	facing: float,
+	reach_scale: float,
+	weapon_id: StringName
+) -> bool:
+	if _is_defeated:
+		return false
+	if weapon_id == WeaponCatalog.SWORD:
+		return is_hit_by_skill(skill_origin, facing, reach_scale)
+	# Twin-blade pulses intentionally bypass the ordinary 100 ms hurt lock so all
+	# three authored strikes can connect during one 420 ms skill.
+	if (
+		weapon_id != WeaponCatalog.TWIN_BLADES
+		and _hurt_invulnerability_remaining > 0.0
+	):
+		return false
+	var hit_rect: Rect2
+	if weapon_id == WeaponCatalog.GREATSWORD:
+		hit_rect = WEAPON_SKILL_GEOMETRY.get_greatsword_rect(
+			skill_origin,
+			facing,
+			reach_scale
+		)
+	else:
+		hit_rect = WEAPON_SKILL_GEOMETRY.get_twin_blades_rect(
+			skill_origin,
+			facing,
+			reach_scale
+		)
+	return hit_rect.intersects(get_hurtbox_rect())
+
+
+func receive_player_weapon_skill(
+	skill_origin: Vector2,
+	facing: float,
+	damage: int,
+	reach_scale: float,
+	weapon_id: StringName,
+	hit_index: int,
+	hit_count: int
+) -> bool:
+	if weapon_id == WeaponCatalog.SWORD:
+		return receive_player_skill(skill_origin, facing, damage, reach_scale)
+	if not is_hit_by_weapon_skill(skill_origin, facing, reach_scale, weapon_id):
+		return false
+	var hurt_invulnerability: float = HURT_INVULNERABILITY
+	var knockback_multiplier: float = 1.0
+	if weapon_id == WeaponCatalog.TWIN_BLADES:
+		var is_final_hit: bool = hit_index >= maxi(1, hit_count) - 1
+		hurt_invulnerability = 0.0
+		knockback_multiplier = 0.92 if is_final_hit else 0.28
+	elif weapon_id == WeaponCatalog.GREATSWORD:
+		knockback_multiplier = 1.48
+	return _apply_player_hit(
+		skill_origin,
+		facing,
+		damage,
+		hurt_invulnerability,
+		knockback_multiplier
+	)
+
+
+func _apply_player_hit(
+	attack_origin: Vector2,
+	facing: float,
+	damage: int,
+	hurt_invulnerability: float = HURT_INVULNERABILITY,
+	knockback_multiplier: float = 1.0
+) -> bool:
 
 	_current_health = maxi(0, _current_health - maxi(1, damage))
 	_hurt_remaining = 0.18
-	_hurt_invulnerability_remaining = HURT_INVULNERABILITY
+	_hurt_invulnerability_remaining = maxf(0.0, hurt_invulnerability)
 	_attack_remaining = 0.0
 	_attack_action_performed = false
 	var knockback_direction: float = signf(global_position.x - attack_origin.x)
 	if is_zero_approx(knockback_direction):
 		knockback_direction = facing
 	var knockback_scale: float = 0.20 if is_boss() else (0.58 if is_elite() else 1.0)
-	velocity = Vector2(knockback_direction * 330.0 * knockback_scale, -180.0 * knockback_scale)
+	velocity = Vector2(
+		knockback_direction * 330.0 * knockback_scale * knockback_multiplier,
+		-180.0 * knockback_scale * knockback_multiplier
+	)
 	health_changed.emit(_current_health, _max_health)
 	queue_redraw()
 	if _current_health <= 0:
@@ -351,13 +481,14 @@ func _physics_process(delta: float) -> void:
 	if _is_defeated:
 		_elapsed += delta
 		_death_remaining = maxf(0.0, _death_remaining - delta)
-		_update_sprite_animation()
+		_update_sprite_animation(delta)
 		queue_redraw()
 		if _death_remaining <= 0.0:
 			defeated.emit()
 			queue_free()
 		return
 
+	var was_on_floor: bool = is_on_floor()
 	_elapsed += delta
 	_attack_cooldown_remaining = maxf(0.0, _attack_cooldown_remaining - delta)
 	_pursuit_jump_cooldown_remaining = maxf(0.0, _pursuit_jump_cooldown_remaining - delta)
@@ -397,30 +528,41 @@ func _physics_process(delta: float) -> void:
 		_try_pursuit_jump()
 
 	move_and_slide()
+	var now_on_floor: bool = is_on_floor()
+	if now_on_floor and not was_on_floor:
+		_landing_motion_remaining = LANDING_MOTION_DURATION
+	if (
+		_attack_remaining <= 0.0
+		and _hurt_remaining <= 0.0
+		and absf(velocity.x) > 8.0
+	):
+		_facing = signf(velocity.x)
+	_update_locomotion_animation(delta)
 	if global_position.y > 820.0:
 		defeat()
 		return
-	_update_sprite_animation()
+	_update_sprite_animation(delta)
 	queue_redraw()
 
 
 func _get_desired_speed() -> float:
 	if _target_is_visible():
 		var target_delta: float = _target.global_position.x - global_position.x
-		if not is_zero_approx(target_delta):
-			_facing = signf(target_delta)
+		var target_direction: float = _facing
+		if absf(target_delta) > 6.0:
+			target_direction = signf(target_delta)
 		var distance_x: float = absf(target_delta)
 		if is_ranged_enemy():
 			var target_height: float = global_position.y - _target.global_position.y
 			if target_height > RANGED_ATTACK_RANGE_Y:
-				return _facing * _get_ranged_move_speed()
+				return target_direction * _get_ranged_move_speed()
 			if distance_x < RANGED_PREFERRED_MIN_X:
-				return -_facing * _get_ranged_move_speed()
+				return -target_direction * _get_ranged_move_speed()
 			if distance_x > RANGED_PREFERRED_MAX_X:
-				return _facing * _get_ranged_move_speed()
+				return target_direction * _get_ranged_move_speed()
 			return 0.0
 		if distance_x > MELEE_ATTACK_REACH_X:
-			return _facing * _get_melee_chase_speed()
+			return target_direction * _get_melee_chase_speed()
 		return 0.0
 
 	if global_position.x <= _patrol_left:
@@ -428,7 +570,6 @@ func _get_desired_speed() -> float:
 	elif global_position.x >= _patrol_right:
 		_patrol_direction = -1.0
 
-	_facing = _patrol_direction
 	var patrol_multiplier: float = 1.22 if is_elite() else 1.0
 	if is_boss():
 		patrol_multiplier = 1.35
@@ -500,7 +641,7 @@ func _target_in_attack_range() -> bool:
 		return false
 
 	var offset: Vector2 = _target.global_position - global_position
-	if not is_zero_approx(offset.x):
+	if absf(offset.x) > 6.0:
 		_facing = signf(offset.x)
 	if is_boss():
 		if _family == EnemyFamily.GOBLIN:
@@ -518,6 +659,10 @@ func _target_in_attack_range() -> bool:
 
 
 func _start_attack() -> void:
+	if is_instance_valid(_target):
+		var target_delta_x: float = _target.global_position.x - global_position.x
+		if absf(target_delta_x) > 6.0:
+			_facing = signf(target_delta_x)
 	if is_boss() and is_instance_valid(_target):
 		_boss_attack_uses_projectile = (
 			_family == EnemyFamily.SLIME
@@ -625,6 +770,73 @@ func _get_scaled_damage(base_damage: int) -> int:
 	return maxi(1, int(round(float(base_damage) * _difficulty_damage_multiplier)))
 
 
+func _update_locomotion_animation(delta: float) -> void:
+	_landing_motion_remaining = maxf(0.0, _landing_motion_remaining - delta)
+	var horizontal_speed: float = absf(velocity.x)
+	var reference_speed: float = (
+		_get_ranged_move_speed()
+		if is_ranged_enemy()
+		else _get_melee_chase_speed()
+	)
+	var speed_ratio: float = clampf(
+		horizontal_speed / maxf(reference_speed, 1.0),
+		0.0,
+		1.35
+	)
+	var can_stride: bool = (
+		horizontal_speed > 8.0
+		and _attack_remaining <= 0.0
+		and _hurt_remaining <= 0.0
+		and not _is_defeated
+	)
+	var target_blend: float = minf(1.0, speed_ratio) if can_stride else 0.0
+	var blend_rate: float = 9.0 if target_blend > _locomotion_blend else 5.0
+	_locomotion_blend = move_toward(
+		_locomotion_blend,
+		target_blend,
+		delta * blend_rate
+	)
+
+	var frame_count: float = (
+		float(GOBLIN_RUN_FRAME_COUNT)
+		if _family == EnemyFamily.GOBLIN
+		else float(SLIME_RUN_FRAME_COUNT)
+	)
+	if can_stride:
+		var maximum_fps: float = (
+			GOBLIN_RUN_FPS
+			if _family == EnemyFamily.GOBLIN
+			else SLIME_RUN_FPS
+		)
+		var stride_fps: float = maximum_fps * clampf(speed_ratio, 0.24, 1.35)
+		_locomotion_cycle = fposmod(
+			_locomotion_cycle + delta * stride_fps,
+			frame_count
+		)
+		_locomotion_active = true
+		_locomotion_is_settling = false
+		return
+
+	if not _locomotion_active:
+		return
+	if not _locomotion_is_settling:
+		var current_cycle: float = fposmod(_locomotion_cycle, frame_count)
+		_locomotion_settle_target = ceil(current_cycle / 4.0) * 4.0
+		_locomotion_is_settling = true
+	_locomotion_cycle = move_toward(
+		_locomotion_cycle,
+		_locomotion_settle_target,
+		delta * LOCOMOTION_SETTLE_FPS
+	)
+	if (
+		is_equal_approx(_locomotion_cycle, _locomotion_settle_target)
+		and _locomotion_blend <= 0.10
+	):
+		_locomotion_cycle = fposmod(_locomotion_settle_target, frame_count)
+		_locomotion_active = false
+		_locomotion_is_settling = false
+
+
 func _get_sprite_sheet() -> Texture2D:
 	if _family == EnemyFamily.GOBLIN:
 		if is_ranged_enemy():
@@ -667,6 +879,36 @@ func _get_goblin_run_scale() -> float:
 	if is_elite():
 		return 0.25
 	return 0.21 if is_ranged_enemy() else 0.23
+
+
+func _get_goblin_run_registration(frame_index: int) -> Vector2:
+	var head_values: Array
+	var bottom_values: Array
+	var target_head_x: float
+	var target_bottom: float
+	if is_ranged_enemy():
+		head_values = GOBLIN_ARCHER_RUN_HEAD_X
+		bottom_values = GOBLIN_ARCHER_RUN_BOTTOM
+		target_head_x = 172.68
+		target_bottom = 447.0
+	elif is_elite() or is_boss():
+		head_values = GOBLIN_ELITE_RUN_HEAD_X
+		bottom_values = GOBLIN_ELITE_RUN_BOTTOM
+		target_head_x = 215.69
+		target_bottom = 398.0
+	else:
+		head_values = GOBLIN_CLUB_RUN_HEAD_X
+		bottom_values = GOBLIN_CLUB_RUN_BOTTOM
+		target_head_x = 162.58
+		target_bottom = 417.0
+	var resolved_frame: int = posmod(frame_index, GOBLIN_RUN_FRAME_COUNT)
+	var source_head_x: float = float(head_values[resolved_frame])
+	var source_bottom: float = float(bottom_values[resolved_frame])
+	var run_scale: float = _get_goblin_run_scale()
+	return Vector2(
+		(source_head_x - target_head_x) * run_scale * _facing,
+		(target_bottom - source_bottom) * run_scale
+	)
 
 
 func _get_sprite_baseline_offset() -> float:
@@ -714,10 +956,9 @@ func _set_goblin_run_frame(frame_index: int) -> void:
 
 
 func _get_goblin_loop_column(is_running: bool) -> int:
-	var frames_per_second: float = GOBLIN_RUN_FPS if is_running else GOBLIN_IDLE_FPS
-	var frame_number: int = int(floor(_elapsed * frames_per_second + _phase))
 	if is_running:
-		return posmod(frame_number, GOBLIN_RUN_FRAME_COUNT)
+		return posmod(int(floor(_locomotion_cycle)), GOBLIN_RUN_FRAME_COUNT)
+	var frame_number: int = int(floor(_elapsed * GOBLIN_IDLE_FPS + _phase))
 
 	# Idle breathes through the neutral pose instead of snapping from frame 3 to 0.
 	var idle_cycle_index: int = posmod(frame_number, 4)
@@ -755,6 +996,7 @@ func _get_goblin_attack_column(attack_progress: float) -> int:
 
 func _apply_goblin_sprite_motion(
 	animation_row: int,
+	animation_column: int,
 	attack_progress: float,
 	hurt_progress: float,
 	death_progress: float
@@ -767,17 +1009,25 @@ func _apply_goblin_sprite_motion(
 			sprite_scale * (1.0 - breath * 0.008),
 			sprite_scale * (1.0 + breath * 0.008)
 		)
-		_enemy_sprite.position.y -= breath * 0.28
 	elif animation_row == 1:
+		var registration: Vector2 = _get_goblin_run_registration(animation_column)
+		_enemy_sprite.position += registration
 		var run_cycle: float = fposmod(
-			_elapsed * GOBLIN_RUN_FPS + _phase,
+			_locomotion_cycle,
 			float(GOBLIN_RUN_FRAME_COUNT)
 		) / float(GOBLIN_RUN_FRAME_COUNT)
 		var run_phase: float = run_cycle * TAU
-		# The eight authored poses already carry the arm/leg weight shift. Keep the
-		# runtime motion as restrained as the hero run to avoid jitter and wobble.
-		_enemy_sprite.position.y -= absf(sin(run_phase)) * 0.28
-		_enemy_sprite.rotation = -_facing * 0.010
+		var stride_weight: float = clampf(_locomotion_blend, 0.0, 1.0)
+		var run_scale: float = _get_goblin_run_scale()
+		var contact_weight: float = 0.5 + 0.5 * cos(run_phase * 2.0)
+		_enemy_sprite.position.y -= absf(sin(run_phase)) * 0.90 * stride_weight
+		_enemy_sprite.rotation = -_facing * (
+			0.008 + sin(run_phase) * 0.004
+		) * stride_weight
+		_enemy_sprite.scale = Vector2(
+			run_scale * (1.0 + contact_weight * 0.008 * stride_weight),
+			run_scale * (1.0 - contact_weight * 0.007 * stride_weight)
+		)
 	elif animation_row == 2:
 		if is_ranged_enemy():
 			var bow_draw: float = smoothstep(0.02, 0.45, attack_progress)
@@ -788,6 +1038,10 @@ func _apply_goblin_sprite_motion(
 			_enemy_sprite.position.x = _facing * (-1.8 * bow_draw + 4.0 * bow_release)
 			_enemy_sprite.position.y -= bow_release * 0.8
 			_enemy_sprite.rotation = _facing * (-0.012 * bow_draw + 0.028 * bow_release)
+			_enemy_sprite.scale = Vector2(
+				sprite_scale * (1.0 + bow_release * 0.035),
+				sprite_scale * (1.0 - bow_draw * 0.025)
+			)
 		else:
 			var windup: float = (
 				smoothstep(0.0, 0.16, attack_progress)
@@ -801,19 +1055,129 @@ func _apply_goblin_sprite_motion(
 			_enemy_sprite.position.x = _facing * (-2.4 * windup + lunge_distance * strike)
 			_enemy_sprite.position.y -= strike * 1.1
 			_enemy_sprite.rotation = _facing * (-0.022 * windup + 0.034 * strike)
+			_enemy_sprite.scale = Vector2(
+				sprite_scale * (1.0 + strike * 0.045),
+				sprite_scale * (1.0 - strike * 0.035 + windup * 0.025)
+			)
 	elif animation_row == 3:
 		if _is_defeated:
-			_enemy_sprite.position.y += smoothstep(0.0, 0.72, death_progress) * 1.4
+			var collapse: float = smoothstep(0.0, 0.72, death_progress)
+			_enemy_sprite.position.y += collapse * 3.0
+			_enemy_sprite.rotation = -_facing * collapse * 0.10
+			_enemy_sprite.scale = Vector2(
+				sprite_scale * (1.0 + collapse * 0.06),
+				sprite_scale * (1.0 - collapse * 0.10)
+			)
 		else:
 			var hurt_weight: float = 1.0 - smoothstep(0.0, 1.0, hurt_progress)
-			_enemy_sprite.position.x -= _facing * hurt_weight * 2.4
-			_enemy_sprite.rotation = -_facing * hurt_weight * 0.045
+			_enemy_sprite.position.x -= _facing * hurt_weight * 3.8
+			_enemy_sprite.rotation = -_facing * hurt_weight * 0.065
+			_enemy_sprite.scale = Vector2(
+				sprite_scale * (1.0 + hurt_weight * 0.045),
+				sprite_scale * (1.0 - hurt_weight * 0.035)
+			)
 
 
-func _update_sprite_animation() -> void:
+func _apply_slime_sprite_motion(
+	animation_row: int,
+	attack_progress: float,
+	hurt_progress: float,
+	death_progress: float
+) -> void:
+	var sprite_scale: float = _get_sprite_scale()
+	if animation_row == 0:
+		var breath: float = sin(_elapsed * TAU * 0.92 + _phase)
+		_enemy_sprite.scale = Vector2(
+			sprite_scale * (1.0 + breath * 0.016),
+			sprite_scale * (1.0 - breath * 0.020)
+		)
+	elif animation_row == 1:
+		var run_phase: float = fposmod(
+			_locomotion_cycle,
+			float(SLIME_RUN_FRAME_COUNT)
+		) / float(SLIME_RUN_FRAME_COUNT) * TAU
+		var stride_weight: float = clampf(_locomotion_blend, 0.0, 1.0)
+		var hop: float = absf(sin(run_phase)) * stride_weight
+		_enemy_sprite.position.y -= hop * (2.0 if is_boss() else 1.25)
+		_enemy_sprite.scale = Vector2(
+			sprite_scale * (1.0 + hop * 0.035),
+			sprite_scale * (1.0 - hop * 0.045)
+		)
+	elif animation_row == 2:
+		var anticipation: float = (
+			smoothstep(0.0, 0.22, attack_progress)
+			* (1.0 - smoothstep(0.26, 0.42, attack_progress))
+		)
+		var strike: float = (
+			smoothstep(0.24, 0.48, attack_progress)
+			* (1.0 - smoothstep(0.72, 1.0, attack_progress))
+		)
+		var lunge_distance: float = 5.0 if is_ranged_enemy() else (13.0 if is_boss() else 9.0)
+		_enemy_sprite.position.x += _facing * (-2.5 * anticipation + lunge_distance * strike)
+		_enemy_sprite.position.y += anticipation * 1.6 - strike * 1.2
+		_enemy_sprite.scale = Vector2(
+			sprite_scale * (1.0 + anticipation * 0.09 + strike * 0.06),
+			sprite_scale * (1.0 - anticipation * 0.11 - strike * 0.04)
+		)
+	elif animation_row == 3:
+		if _is_defeated:
+			var dissolve: float = smoothstep(0.0, 0.78, death_progress)
+			_enemy_sprite.position.y += dissolve * 3.5
+			_enemy_sprite.scale = Vector2(
+				sprite_scale * (1.0 + dissolve * 0.16),
+				sprite_scale * (1.0 - dissolve * 0.28)
+			)
+		else:
+			var recoil: float = 1.0 - smoothstep(0.0, 1.0, hurt_progress)
+			_enemy_sprite.position.x -= _facing * recoil * 3.2
+			_enemy_sprite.rotation = -_facing * recoil * 0.045
+			_enemy_sprite.scale = Vector2(
+				sprite_scale * (1.0 + recoil * 0.10),
+				sprite_scale * (1.0 - recoil * 0.12)
+			)
+
+
+func _apply_airborne_sprite_motion() -> void:
+	if is_on_floor() or absf(velocity.y) < 30.0:
+		return
+	var vertical_blend: float = clampf(absf(velocity.y) / PURSUIT_JUMP_SPEED, 0.0, 1.0)
+	var sprite_scale: float = _enemy_sprite.scale.x
+	if _family == EnemyFamily.SLIME:
+		_enemy_sprite.scale = Vector2(
+			sprite_scale * (1.0 - vertical_blend * 0.08),
+			sprite_scale * (1.0 + vertical_blend * 0.12)
+		)
+	else:
+		_enemy_sprite.rotation += -_facing * signf(velocity.y) * 0.035 * vertical_blend
+		_enemy_sprite.position.y -= vertical_blend * 1.4
+
+
+func _apply_landing_sprite_motion() -> void:
+	if _landing_motion_remaining <= 0.0 or not is_on_floor():
+		return
+	if _attack_remaining > 0.0 or _hurt_remaining > 0.0 or _is_defeated:
+		return
+	var landing_progress: float = clampf(
+		1.0 - _landing_motion_remaining / LANDING_MOTION_DURATION,
+		0.0,
+		1.0
+	)
+	var squash: float = sin(landing_progress * PI)
+	var squash_amount: float = 0.055 if _family == EnemyFamily.GOBLIN else 0.11
+	_enemy_sprite.position.y += squash * (1.4 if is_boss() else 0.9)
+	_enemy_sprite.scale *= Vector2(
+		1.0 + squash * squash_amount,
+		1.0 - squash * squash_amount
+	)
+
+
+func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 	if not is_instance_valid(_enemy_sprite):
 		return
 
+	var previous_position: Vector2 = _enemy_sprite.position
+	var previous_scale: Vector2 = _enemy_sprite.scale
+	var previous_rotation: float = _enemy_sprite.rotation
 	var animation_row: int = 0
 	var animation_column: int = (
 		_get_goblin_loop_column(false)
@@ -824,6 +1188,12 @@ func _update_sprite_animation() -> void:
 	var hurt_progress: float = 0.0
 	var death_progress: float = 0.0
 	var using_goblin_run_sheet: bool = false
+	var airborne_motion: bool = (
+		not is_on_floor()
+		and absf(velocity.y) >= 30.0
+		and _attack_remaining <= 0.0
+		and _hurt_remaining <= 0.0
+	)
 	if _is_defeated:
 		animation_row = 3
 		death_progress = 1.0 - _death_remaining / DEATH_ANIMATION_DURATION
@@ -849,13 +1219,20 @@ func _update_sprite_animation() -> void:
 			)
 		else:
 			animation_column = mini(3, int(floor(attack_progress * 4.0)))
-	elif absf(velocity.x) > 8.0:
+	elif airborne_motion:
+		animation_row = 1
+		using_goblin_run_sheet = _family == EnemyFamily.GOBLIN
+		if _family == EnemyFamily.GOBLIN:
+			animation_column = 1 if velocity.y < 0.0 else 5
+		else:
+			animation_column = 2 if velocity.y < 0.0 else 3
+	elif _locomotion_active or absf(velocity.x) > 8.0:
 		animation_row = 1
 		using_goblin_run_sheet = _family == EnemyFamily.GOBLIN
 		animation_column = (
 			_get_goblin_loop_column(true)
 			if _family == EnemyFamily.GOBLIN
-			else int(floor(_elapsed * 10.0 + _phase)) % 4
+			else posmod(int(floor(_locomotion_cycle)), SLIME_RUN_FRAME_COUNT)
 		)
 
 	if using_goblin_run_sheet:
@@ -875,13 +1252,41 @@ func _update_sprite_animation() -> void:
 	if _family == EnemyFamily.GOBLIN:
 		_apply_goblin_sprite_motion(
 			animation_row,
+			animation_column,
 			attack_progress,
 			hurt_progress,
 			death_progress
 		)
-	elif _attack_remaining > 0.0:
-		var lunge_distance: float = 5.0 if is_ranged_enemy() else (13.0 if is_boss() else 9.0)
-		_enemy_sprite.position.x = sin(attack_progress * PI) * _facing * lunge_distance
+	else:
+		_apply_slime_sprite_motion(
+			animation_row,
+			attack_progress,
+			hurt_progress,
+			death_progress
+		)
+	if airborne_motion:
+		_apply_airborne_sprite_motion()
+	_apply_landing_sprite_motion()
+
+	var target_position: Vector2 = _enemy_sprite.position
+	var target_scale: Vector2 = _enemy_sprite.scale
+	var target_rotation: float = _enemy_sprite.rotation
+	if _sprite_pose_initialized:
+		var smoothing_rate: float = 28.0 if animation_row in [2, 3] else (24.0 if animation_row == 1 else 18.0)
+		var pose_blend: float = 1.0 - exp(-smoothing_rate * maxf(delta, 0.0001))
+		# Authored goblin run frames are not registered to one internal origin. Their
+		# measured frame correction must land immediately with the texture change;
+		# interpolating that correction makes the feet and head visibly drift even
+		# though the body collider is moving smoothly.
+		_enemy_sprite.position = (
+			target_position
+			if using_goblin_run_sheet
+			else previous_position.lerp(target_position, pose_blend)
+		)
+		_enemy_sprite.scale = previous_scale.lerp(target_scale, pose_blend)
+		_enemy_sprite.rotation = lerp_angle(previous_rotation, target_rotation, pose_blend)
+	else:
+		_sprite_pose_initialized = true
 	if _is_defeated:
 		var fade_progress: float = 1.0 - _death_remaining / DEATH_ANIMATION_DURATION
 		_enemy_sprite.modulate.a = 1.0 - smoothstep(0.72, 1.0, fade_progress)
