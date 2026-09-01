@@ -78,6 +78,19 @@ func _run_test() -> void:
 		return
 
 	for room_number in range(1, 21):
+		if bool(main.call(&"is_event_active")):
+			if not bool(main.call(&"choose_upgrade", 0)):
+				_fail("Event room %d could not resolve its choice" % room_number)
+				return
+			await _wait_physics_frames(5)
+			continue
+		if bool(main.call(&"is_awaiting_chest")):
+			var entry_chest: RewardChest = main.get("_chest") as RewardChest
+			if entry_chest != null and entry_chest.is_risk_chest():
+				if not bool(main.call(&"open_current_chest_for_test")):
+					_fail("Risk room chest could not be opened")
+					return
+				await _wait_physics_frames(3)
 		_defeat_current_room(main)
 		await _wait_physics_frames(32)
 		if bool(main.call(&"is_awaiting_chest")):

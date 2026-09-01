@@ -13,6 +13,8 @@ const DAMAGE_NUMBER_SCRIPT := preload("res://scripts/damage_number.gd")
 const SOUNDSCAPE_SCRIPT := preload("res://scripts/soundscape.gd")
 const ABILITY_SLOT_SCRIPT := preload("res://scripts/ability_slot.gd")
 const SETTINGS_STORE_SCRIPT := preload("res://scripts/settings_store.gd")
+const RUN_TELEMETRY_SCRIPT := preload("res://scripts/run_telemetry.gd")
+const COMBAT_BUDGET_SCRIPT := preload("res://scripts/combat_budget.gd")
 const PAUSE_INPUT_HANDLER_SCRIPT := preload("res://scripts/pause_input_handler.gd")
 const UPGRADE_CATALOG_SCRIPT := preload("res://scripts/upgrade_catalog.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
@@ -39,6 +41,9 @@ enum EncounterType {
 	ELITE,
 	SHOP,
 	BOSS,
+	EVENT,
+	CHALLENGE,
+	RISK_CHEST,
 }
 
 enum Difficulty {
@@ -76,12 +81,19 @@ var _run_complete: bool = false
 var _death_restart_pending: bool = false
 var _last_upgrade_name: String = ""
 var _current_encounter: int = EncounterType.NORMAL
+var _current_combat_profile: Dictionary = {}
 var _chest: RewardChest
 var _awaiting_chest: bool = false
 var _shopping: bool = false
+var _event_active: bool = false
+var _risk_ambush_active: bool = false
+var _pending_risk_gold: int = 0
+var _pending_risk_heal: int = 0
+var _challenge_reward_granted: bool = false
 var _gold: int = 10
 var _run_shards: int = 0
 var _progression: ProgressionStore
+var _telemetry
 var _boss_enemy: RogueEnemy
 
 var _health_label: Label
@@ -158,10 +170,21 @@ func _ready() -> void:
 	player.action_started.connect(_on_player_action_started)
 	player.vocal_requested.connect(_on_player_vocal_requested)
 	player.health_changed.connect(_on_player_health_changed)
+	player.damage_received.connect(_on_player_damage_received)
 	player.died.connect(_on_player_died)
 	_progression = ProgressionStore.new()
+	_telemetry = RUN_TELEMETRY_SCRIPT.new(
+		RUN_TELEMETRY_SCRIPT.DEFAULT_SAVE_PATH,
+		save_enabled
+	)
 	if save_enabled:
 		_progression.load_progress()
+		if _telemetry.load_data() and _telemetry.is_run_active():
+			var interrupted_run: Dictionary = _telemetry.get_current_run_snapshot()
+			var interrupted_weapon := StringName(String(
+				interrupted_run.get("ending_weapon_id", WeaponCatalog.SWORD)
+			))
+			_telemetry.finish_run(false, interrupted_weapon, &"interrupted")
 	_room_pool = ROOM_CATALOG_SCRIPT.create_room_pool()
 	_lives_remaining = MAX_RUN_LIVES
 	if save_enabled:
@@ -174,6 +197,8 @@ func _process(_delta: float) -> void:
 	_update_camera_shake(_delta)
 	if _is_game_paused:
 		return
+	if _telemetry != null:
+		_telemetry.tick(_delta)
 	if not _entry_flow_active and Input.is_action_just_pressed(&"restart"):
 		_start_new_run()
 		return
@@ -1102,7 +1127,7 @@ func _show_start_screen() -> void:
 
 func _show_difficulty_selection() -> void:
 	_entry_title.text = "选择难度"
-	_entry_subtitle.text = "难度会随 20 个房间累计提升敌人的生命、伤害、速度与进攻欲望。"
+	_entry_subtitle.text = "难度会改变每房战斗预算、精英与远程比例和敌人行为；前期克制，后期逐步升级。"
 	_start_button.visible = false
 	(_entry_overlay.get_node("EntrySettings") as Button).visible = false
 	(_entry_overlay.get_node("EntryQuit") as Button).visible = false
@@ -1119,47 +1144,27 @@ func _start_game_with_difficulty(difficulty: int) -> void:
 
 
 func _get_difficulty_health_multiplier() -> float:
-	var room_progress: float = float(maxi(_current_room_index, 0))
-	match _selected_difficulty:
-		Difficulty.EASY:
-			return 0.65 + room_progress * 0.032
-		Difficulty.HARD:
-			return 1.35 + room_progress * 0.16
-		_:
-			return 1.0 + room_progress * 0.115
+	return float(_get_combat_profile().get("health_multiplier", 1.0))
 
 
 func _get_difficulty_damage_multiplier() -> float:
-	var room_progress: float = float(maxi(_current_room_index, 0))
-	match _selected_difficulty:
-		Difficulty.EASY:
-			return 0.55 + room_progress * 0.020
-		Difficulty.HARD:
-			return 1.25 + room_progress * 0.115
-		_:
-			return 1.0 + room_progress * 0.08
+	return float(_get_combat_profile().get("damage_multiplier", 1.0))
 
 
 func _get_difficulty_speed_multiplier() -> float:
-	var room_progress: float = float(maxi(_current_room_index, 0))
-	match _selected_difficulty:
-		Difficulty.EASY:
-			return 0.78 + room_progress * 0.010
-		Difficulty.HARD:
-			return 1.08 + room_progress * 0.03
-		_:
-			return 1.0 + room_progress * 0.023
+	return float(_get_combat_profile().get("speed_multiplier", 1.0))
 
 
 func _get_difficulty_aggression_multiplier() -> float:
-	var room_progress: float = float(maxi(_current_room_index, 0))
-	match _selected_difficulty:
-		Difficulty.EASY:
-			return 0.55 + room_progress * 0.020
-		Difficulty.HARD:
-			return 1.12 + room_progress * 0.05
-		_:
-			return 1.0 + room_progress * 0.04
+	return float(_get_combat_profile().get("awareness_multiplier", 1.0))
+
+
+func _get_combat_profile() -> Dictionary:
+	return COMBAT_BUDGET_SCRIPT.create_profile(
+		_selected_difficulty,
+		maxi(_current_room_index, 0),
+		_current_encounter
+	)
 
 
 func get_selected_difficulty_name() -> String:
@@ -1173,6 +1178,8 @@ func get_selected_difficulty_name() -> String:
 
 
 func _start_new_run() -> void:
+	if _telemetry != null and _telemetry.is_run_active():
+		_telemetry.finish_run(false, player.get_weapon_id(), &"manual_restart")
 	_run_generation += 1
 	_run_number += 1
 	if _next_run_seed >= 0:
@@ -1187,6 +1194,7 @@ func _start_new_run() -> void:
 	_death_restart_pending = false
 	_last_upgrade_name = ""
 	_current_encounter = EncounterType.NORMAL
+	_current_combat_profile.clear()
 	_awaiting_chest = false
 	_shopping = false
 	_gold = 10
@@ -1208,6 +1216,12 @@ func _start_new_run() -> void:
 	)
 	_current_room_index = -1
 	_current_room_data = {}
+	if _telemetry != null:
+		_telemetry.begin_run(
+			_run_seed,
+			get_selected_difficulty_name(),
+			player.get_weapon_id()
+		)
 	_update_economy_hud()
 	_advance_to_next_room()
 
@@ -1217,20 +1231,92 @@ func _build_encounter_sequence() -> Array[int]:
 	var chapter_count: int = ceili(float(ROOMS_PER_RUN) / 5.0)
 	for chapter_index in range(chapter_count):
 		sequence.append(EncounterType.NORMAL)
-		var chapter_specials: Array[int] = [
-			EncounterType.TREASURE,
-			EncounterType.ELITE,
-			EncounterType.SHOP,
-		]
-		# The first chapter remains a stable onboarding cadence. Later chapters
-		# preserve one of each reward/risk room but conceal their order.
-		if chapter_index > 0:
-			_shuffle_encounters(chapter_specials)
+		var chapter_specials: Array[int]
+		if chapter_index == 0:
+			chapter_specials = [
+				EncounterType.TREASURE,
+				EncounterType.ELITE,
+				EncounterType.SHOP,
+			]
+		else:
+			chapter_specials = _build_weighted_chapter_specials(chapter_index)
 		for encounter: int in chapter_specials:
 			sequence.append(encounter)
 		sequence.append(EncounterType.BOSS)
 	sequence.resize(ROOMS_PER_RUN)
 	return sequence
+
+
+func _build_weighted_chapter_specials(chapter_index: int) -> Array[int]:
+	# Each later chapter guarantees one new room archetype. The other two slots are
+	# weighted without replacement, with at least one recovery/economy room.
+	var required_new_types: Array[int] = [
+		EncounterType.EVENT,
+		EncounterType.CHALLENGE,
+		EncounterType.RISK_CHEST,
+	]
+	var selected: Array[int] = [required_new_types[clampi(chapter_index - 1, 0, 2)]]
+	if selected[0] != EncounterType.EVENT:
+		selected.append(_weighted_encounter_pick(
+			[EncounterType.TREASURE, EncounterType.SHOP, EncounterType.EVENT],
+			selected,
+			chapter_index
+		))
+	while selected.size() < 3:
+		selected.append(_weighted_encounter_pick(
+			[
+				EncounterType.TREASURE,
+				EncounterType.ELITE,
+				EncounterType.SHOP,
+				EncounterType.EVENT,
+				EncounterType.CHALLENGE,
+				EncounterType.RISK_CHEST,
+			],
+			selected,
+			chapter_index
+		))
+	_shuffle_encounters(selected)
+	return selected
+
+
+func _weighted_encounter_pick(
+	candidates: Array[int],
+	excluded: Array[int],
+	chapter_index: int
+) -> int:
+	var available: Array[int] = []
+	var total_weight: float = 0.0
+	for encounter: int in candidates:
+		if encounter in excluded:
+			continue
+		available.append(encounter)
+		total_weight += _get_encounter_weight(encounter, chapter_index)
+	if available.is_empty():
+		return EncounterType.NORMAL
+	var roll: float = _rng.randf_range(0.0, total_weight)
+	for encounter: int in available:
+		roll -= _get_encounter_weight(encounter, chapter_index)
+		if roll <= 0.0:
+			return encounter
+	return available.back()
+
+
+func _get_encounter_weight(encounter: int, chapter_index: int) -> float:
+	match encounter:
+		EncounterType.TREASURE:
+			return 1.65
+		EncounterType.ELITE:
+			return 1.10 + float(chapter_index) * 0.16
+		EncounterType.SHOP:
+			return 1.30
+		EncounterType.EVENT:
+			return 1.35
+		EncounterType.CHALLENGE:
+			return 0.72 + float(chapter_index) * 0.22
+		EncounterType.RISK_CHEST:
+			return 0.80 + float(chapter_index) * 0.18
+		_:
+			return 1.0
 
 
 func _shuffle_encounters(encounters: Array[int]) -> void:
@@ -1242,6 +1328,8 @@ func _shuffle_encounters(encounters: Array[int]) -> void:
 
 
 func _advance_to_next_room() -> void:
+	if _telemetry != null:
+		_telemetry.complete_room(&"advanced")
 	_current_room_index += 1
 	if _current_room_index >= _room_sequence.size():
 		_complete_run()
@@ -1258,6 +1346,11 @@ func _load_room(pool_index: int) -> void:
 	_choosing_upgrade = false
 	_awaiting_chest = false
 	_shopping = false
+	_event_active = false
+	_risk_ambush_active = false
+	_pending_risk_gold = 0
+	_pending_risk_heal = 0
+	_challenge_reward_granted = false
 	_clear_chest()
 	_clear_projectiles()
 	_clear_enemies()
@@ -1268,6 +1361,14 @@ func _load_room(pool_index: int) -> void:
 		_current_room_index + 1
 	)
 	_current_encounter = _get_encounter_for_room(_current_room_index)
+	_current_combat_profile = _get_combat_profile()
+	if _telemetry != null:
+		_telemetry.begin_room(
+			_current_room_index + 1,
+			StringName(String(_current_room_data.get("id", "unknown_room"))),
+			String(_current_room_data.get("title", "未知房间")),
+			_get_encounter_name(_current_encounter)
+		)
 	platform_rects.clear()
 	var room_platforms: Array = _current_room_data.get("platforms", []) as Array
 	for platform_value in room_platforms:
@@ -1285,10 +1386,18 @@ func _load_room(pool_index: int) -> void:
 		player.set_input_enabled(false)
 		_run_active = false
 		_show_shop()
+	elif _current_encounter == EncounterType.EVENT:
+		player.set_input_enabled(false)
+		_run_active = false
+		_show_event_choice()
 	else:
 		player.set_input_enabled(true)
 		_run_active = true
-		if _last_upgrade_name.is_empty():
+		if _current_encounter == EncounterType.RISK_CHEST:
+			_status_label.text = "风险宝箱已出现——开启后击败伏兵才能领取奖励"
+		elif _current_encounter == EncounterType.CHALLENGE:
+			_status_label.text = "进入 %s·挑战房——高压敌群，胜利获得额外金币与星屑" % room_title
+		elif _last_upgrade_name.is_empty():
 			_status_label.text = "进入 %s·%s——清除全部敌人" % [
 				room_title,
 				_get_encounter_name(_current_encounter),
@@ -1341,21 +1450,24 @@ func _clear_platform_colliders() -> void:
 
 
 func _spawn_room_enemies() -> void:
-	if _current_encounter == EncounterType.SHOP:
+	if _current_encounter == EncounterType.SHOP or _current_encounter == EncounterType.EVENT:
+		return
+	if _current_encounter == EncounterType.RISK_CHEST:
+		_spawn_risk_chest()
 		return
 	if _current_encounter == EncounterType.BOSS:
 		_spawn_boss()
 		return
 	var base_spawn_values: Array = _current_room_data.get("enemies", []) as Array
-	var spawn_values: Array[Dictionary] = []
+	var spawn_candidates: Array[Dictionary] = []
 	for spawn_value: Variant in base_spawn_values:
-		spawn_values.append((spawn_value as Dictionary).duplicate(true))
+		spawn_candidates.append((spawn_value as Dictionary).duplicate(true))
 	var reinforcement_count: int = _get_room_reinforcement_count(_current_room_index)
 	for reinforcement_index in range(reinforcement_count):
 		if platform_rects.is_empty():
 			break
 		var random_surface: int = _rng.randi_range(0, platform_rects.size() - 1)
-		spawn_values.append({
+		spawn_candidates.append({
 			"surface": random_surface,
 			"ratio": _rng.randf_range(0.22, 0.78),
 			"role": (
@@ -1364,9 +1476,11 @@ func _spawn_room_enemies() -> void:
 				else ENEMY_ROLE_MELEE
 			),
 		})
-	var elite_count: int = 0
-	if _current_encounter == EncounterType.ELITE:
-		elite_count = 3 if _current_room_index >= FINAL_CHAPTER_START else 2
+	var spawn_values: Array[Dictionary] = COMBAT_BUDGET_SCRIPT.build_spawn_plan(
+		spawn_candidates,
+		_current_combat_profile,
+		_rng
+	)
 	for spawn_index in range(spawn_values.size()):
 		var descriptor: Dictionary = spawn_values[spawn_index]
 		var surface_index: int = int(descriptor.get("surface", 0))
@@ -1379,9 +1493,7 @@ func _spawn_room_enemies() -> void:
 			continue
 		var horizontal_ratio: float = float(descriptor.get("ratio", 0.5))
 		var role: int = int(descriptor.get("role", ENEMY_ROLE_MELEE))
-		var rank: int = ENEMY_RANK_NORMAL
-		if spawn_index < elite_count:
-			rank = ENEMY_RANK_ELITE
+		var rank: int = int(descriptor.get("rank", ENEMY_RANK_NORMAL))
 		var family: int = _get_enemy_family_for_spawn(_current_room_index, spawn_index)
 		var vertical_offset: float = 28.0 if rank == ENEMY_RANK_ELITE else 22.0
 		_spawn_enemy(
@@ -1390,7 +1502,8 @@ func _spawn_room_enemies() -> void:
 			maximum_x,
 			role,
 			rank,
-			family
+			family,
+			spawn_index
 		)
 
 
@@ -1400,7 +1513,8 @@ func _spawn_enemy(
 	patrol_right: float,
 	role: int,
 	rank: int = ENEMY_RANK_NORMAL,
-	family: int = ENEMY_FAMILY_SLIME
+	family: int = ENEMY_FAMILY_SLIME,
+	spawn_order: int = -1
 ) -> void:
 	var enemy: RogueEnemy = ENEMY_SCRIPT.new() as RogueEnemy
 	var variant: int = 1
@@ -1428,6 +1542,15 @@ func _spawn_enemy(
 			else "MeleeRedCrystalSlime_%02d"
 		) % (_enemies.size() + 1)
 	enemy.position = spawn_position
+	var combat_profile: Dictionary = _get_combat_profile()
+	var behavior_profile: Dictionary = (
+		combat_profile.get("behavior", {}) as Dictionary
+	).duplicate(true)
+	var resolved_spawn_order: int = _enemies.size() if spawn_order < 0 else spawn_order
+	behavior_profile["engagement_delay"] = (
+		float(behavior_profile.get("engagement_stagger", 0.0))
+		* float(resolved_spawn_order)
+	)
 	enemy.setup(
 		variant,
 		_rng.randf_range(0.0, TAU),
@@ -1439,14 +1562,16 @@ func _spawn_enemy(
 		_get_difficulty_damage_multiplier(),
 		family,
 		_get_difficulty_speed_multiplier(),
-		_get_difficulty_aggression_multiplier()
+		_get_difficulty_aggression_multiplier(),
+		behavior_profile
 	)
 	enemy.set_target(player)
 	enemy.defeated.connect(_on_enemy_defeated.bind(enemy))
-	enemy.projectile_requested.connect(_on_enemy_projectile_requested)
+	enemy.projectile_requested.connect(_on_enemy_projectile_requested.bind(enemy))
 	enemy.sound_requested.connect(_on_enemy_sound_requested)
 	if rank == ENEMY_RANK_BOSS:
 		enemy.health_changed.connect(_on_boss_health_changed)
+		enemy.boss_phase_changed.connect(_on_boss_phase_changed)
 		_boss_enemy = enemy
 	add_child(enemy)
 	_enemies.append(enemy)
@@ -1474,14 +1599,19 @@ func _spawn_boss() -> void:
 		ENEMY_RANK_BOSS,
 		family
 	)
-	if _current_room_index < MIXED_CHAPTER_START:
+	var escort_count: int = int(_current_combat_profile.get("boss_escort_count", 0))
+	if escort_count <= 0:
 		return
 	var escort_family: int = (
 		ENEMY_FAMILY_GOBLIN if family == ENEMY_FAMILY_SLIME else ENEMY_FAMILY_SLIME
 	)
-	var escort_roles: Array[int] = [ENEMY_ROLE_MELEE, ENEMY_ROLE_RANGED]
-	var escort_ratios: Array[float] = [0.28, 0.86]
-	for escort_index in range(escort_roles.size()):
+	var escort_roles: Array[int] = [
+		ENEMY_ROLE_MELEE,
+		ENEMY_ROLE_RANGED,
+		ENEMY_ROLE_MELEE,
+	]
+	var escort_ratios: Array[float] = [0.24, 0.86, 0.46]
+	for escort_index in range(mini(escort_count, escort_roles.size())):
 		var escort_rank: int = (
 			ENEMY_RANK_ELITE
 			if _current_room_index >= FINAL_CHAPTER_START or escort_index == 0
@@ -1498,7 +1628,8 @@ func _spawn_boss() -> void:
 			maximum_x,
 			escort_roles[escort_index],
 			escort_rank,
-			escort_family
+			escort_family,
+			escort_index + 1
 		)
 
 
@@ -1573,6 +1704,8 @@ func _on_enemy_defeated(enemy: RogueEnemy) -> void:
 	_gold += enemy.get_gold_reward()
 	_run_shards += enemy.get_essence_reward()
 	if enemy.is_boss():
+		if _telemetry != null:
+			_telemetry.record_boss_defeat()
 		_boss_health_background.visible = false
 		_boss_enemy = null
 	_enemies.erase(enemy)
@@ -1647,6 +1780,24 @@ func _on_room_cleared() -> void:
 	if _current_encounter == EncounterType.TREASURE and not _awaiting_chest:
 		_spawn_reward_chest()
 		return
+	if _current_encounter == EncounterType.RISK_CHEST and _risk_ambush_active:
+		_risk_ambush_active = false
+		_gold += _pending_risk_gold
+		var restored_health: int = player.heal(_pending_risk_heal)
+		_status_label.text = "风险挑战完成：金币 +%d，生命恢复 %d" % [
+			_pending_risk_gold,
+			restored_health,
+		]
+		_pending_risk_gold = 0
+		_pending_risk_heal = 0
+		_update_economy_hud()
+	if _current_encounter == EncounterType.CHALLENGE and not _challenge_reward_granted:
+		_challenge_reward_granted = true
+		var challenge_gold: int = 18 + _current_room_index
+		_gold += challenge_gold
+		_run_shards += 2
+		_status_label.text = "挑战完成：额外金币 +%d，星屑 +2" % challenge_gold
+		_update_economy_hud()
 	player.set_input_enabled(false)
 	if _current_room_index >= _room_sequence.size() - 1:
 		_complete_run()
@@ -1656,10 +1807,13 @@ func _on_room_cleared() -> void:
 
 func _show_upgrade_choice() -> void:
 	_shopping = false
+	_event_active = false
 	_upgrade_choices = _pick_upgrade_choices()
 	if _upgrade_choices.size() < 3:
 		push_error("Upgrade pool did not provide three choices")
 		return
+	if _telemetry != null:
+		_telemetry.record_upgrade_offers(_upgrade_choices, player.get_weapon_id())
 	_choosing_upgrade = true
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "房间已清理——选择一项强化"
@@ -1680,6 +1834,7 @@ func _show_upgrade_choice() -> void:
 
 func _show_shop() -> void:
 	_shopping = true
+	_event_active = false
 	_choosing_upgrade = true
 	_upgrade_choices.clear()
 	var base_choices: Array[Dictionary] = _pick_upgrade_choices()
@@ -1687,6 +1842,8 @@ func _show_shop() -> void:
 		var shop_offer: Dictionary = base_choices[choice_index].duplicate(true)
 		shop_offer["cost"] = 16 + choice_index * 4
 		_upgrade_choices.append(shop_offer)
+	if _telemetry != null:
+		_telemetry.record_upgrade_offers(_upgrade_choices, player.get_weapon_id())
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "星尘旅商——购买一项强化"
 	_upgrade_hint.text = "金币不足时按 E 离开；数字键 1 / 2 / 3 购买"
@@ -1704,6 +1861,50 @@ func _show_shop() -> void:
 			cost,
 		]
 	_status_label.text = "旅商已抵达——当前拥有 %d 金币" % _gold
+	_update_controls()
+
+
+func _show_event_choice() -> void:
+	_shopping = false
+	_event_active = true
+	_choosing_upgrade = true
+	_upgrade_choices = [
+		{
+			"id": &"event_rest",
+			"name": "月泉休整",
+			"description": "恢复 40 点生命",
+			"effect": &"heal",
+			"amount": 40,
+		},
+		{
+			"id": &"event_gold",
+			"name": "搜寻遗物",
+			"description": "获得 28 金币",
+			"effect": &"gold",
+			"amount": 28,
+		},
+		{
+			"id": &"event_shards",
+			"name": "聆听星语",
+			"description": "获得 3 星屑并恢复 12 点生命",
+			"effect": &"shards",
+			"amount": 3,
+		},
+	]
+	_upgrade_overlay.visible = true
+	_upgrade_title.text = "月蚀奇遇——选择回应"
+	_upgrade_hint.text = "事件不会触发战斗；点击卡片，或按数字键 1 / 2 / 3"
+	for choice_index in range(_upgrade_buttons.size()):
+		var button: Button = _upgrade_buttons[choice_index]
+		var choice: Dictionary = _upgrade_choices[choice_index]
+		button.visible = true
+		button.disabled = false
+		button.text = "[%d]  [事件] %s\n\n%s" % [
+			choice_index + 1,
+			String(choice.get("name", "事件")),
+			String(choice.get("description", "")),
+		]
+	_status_label.text = "发现月蚀遗迹——选择一种回应"
 	_update_controls()
 
 
@@ -1738,6 +1939,8 @@ func _on_upgrade_button_pressed(choice_index: int) -> void:
 func choose_upgrade(choice_index: int) -> bool:
 	if not _choosing_upgrade or choice_index < 0 or choice_index >= _upgrade_choices.size():
 		return false
+	if _event_active:
+		return _resolve_event_choice(choice_index)
 	var choice: Dictionary = _upgrade_choices[choice_index]
 	if _shopping:
 		var cost: int = int(choice.get("cost", 0))
@@ -1748,9 +1951,37 @@ func choose_upgrade(choice_index: int) -> bool:
 	var upgrade_id: StringName = choice.get("id", &"")
 	if not player.apply_run_upgrade(upgrade_id):
 		return false
+	if _telemetry != null:
+		_telemetry.record_upgrade_choice(upgrade_id, player.get_weapon_id())
 	_last_upgrade_name = String(choice.get("name", "强化"))
 	_choosing_upgrade = false
 	_shopping = false
+	_upgrade_choices.clear()
+	_hide_upgrade_overlay()
+	_update_economy_hud()
+	_advance_to_next_room()
+	return true
+
+
+func _resolve_event_choice(choice_index: int) -> bool:
+	if not _event_active or choice_index < 0 or choice_index >= _upgrade_choices.size():
+		return false
+	var choice: Dictionary = _upgrade_choices[choice_index]
+	var amount: int = int(choice.get("amount", 0))
+	var effect: StringName = choice.get("effect", &"")
+	match effect:
+		&"heal":
+			player.heal(amount)
+		&"gold":
+			_gold += amount
+		&"shards":
+			_run_shards += amount
+			player.heal(12)
+		_:
+			return false
+	_last_upgrade_name = String(choice.get("name", "奇遇"))
+	_event_active = false
+	_choosing_upgrade = false
 	_upgrade_choices.clear()
 	_hide_upgrade_overlay()
 	_update_economy_hud()
@@ -1775,6 +2006,8 @@ func _complete_run() -> void:
 	_run_active = false
 	_choosing_upgrade = false
 	_run_complete = true
+	if _telemetry != null:
+		_telemetry.finish_run(true, player.get_weapon_id(), &"victory")
 	_clear_projectiles()
 	player.set_input_enabled(false)
 	_upgrade_overlay.visible = true
@@ -1823,6 +2056,33 @@ func _spawn_reward_chest() -> void:
 	_update_controls()
 
 
+func _spawn_risk_chest() -> void:
+	_clear_chest()
+	if platform_rects.is_empty():
+		_show_upgrade_choice()
+		return
+	var chest_surface: Rect2 = platform_rects[0]
+	for surface in platform_rects:
+		if surface.position.x <= 640.0 and surface.end.x >= 640.0:
+			chest_surface = surface
+			break
+	var chest_x: float = clampf(640.0, chest_surface.position.x + 42.0, chest_surface.end.x - 42.0)
+	_chest = CHEST_SCRIPT.new() as RewardChest
+	_chest.name = "RiskChest"
+	_chest.position = Vector2(chest_x, chest_surface.position.y - 27.0)
+	_chest.setup(
+		42,
+		28,
+		String(_settings.call(&"get_binding_name", &"interact")),
+		true
+	)
+	_chest.opened.connect(_on_chest_opened)
+	add_child(_chest)
+	_awaiting_chest = true
+	player.set_input_enabled(true)
+	_update_controls()
+
+
 func _open_current_chest() -> bool:
 	if not _awaiting_chest or not is_instance_valid(_chest):
 		return false
@@ -1839,12 +2099,55 @@ func _on_chest_opened(gold_reward: int, heal_reward: int) -> void:
 	if not _awaiting_chest:
 		return
 	_awaiting_chest = false
+	if _current_encounter == EncounterType.RISK_CHEST:
+		_pending_risk_gold = gold_reward
+		_pending_risk_heal = heal_reward
+		_risk_ambush_active = true
+		_run_active = true
+		player.set_input_enabled(true)
+		_spawn_risk_ambush()
+		_status_label.text = "风险宝箱触发伏兵——清除全部敌人领取奖励"
+		_update_controls()
+		return
 	_gold += gold_reward
 	var restored_health: int = player.heal(heal_reward)
 	player.set_input_enabled(false)
 	_status_label.text = "宝箱：金币 +%d，生命恢复 %d" % [gold_reward, restored_health]
 	_update_economy_hud()
 	call_deferred(&"_show_upgrade_choice")
+
+
+func _spawn_risk_ambush() -> void:
+	if platform_rects.is_empty():
+		_risk_ambush_active = false
+		call_deferred(&"_on_room_cleared")
+		return
+	var ambush_count: int = int(_current_combat_profile.get("risk_ambush_count", 4))
+	var elite_slots: int = int(_current_combat_profile.get("elite_slots", 1))
+	for ambush_index in range(ambush_count):
+		var surface_index: int = posmod(ambush_index * 2 + _current_room_index, platform_rects.size())
+		var surface: Rect2 = platform_rects[surface_index]
+		var minimum_x: float = surface.position.x + 42.0
+		var maximum_x: float = surface.end.x - 42.0
+		if maximum_x <= minimum_x:
+			continue
+		var role: int = ENEMY_ROLE_RANGED if ambush_index % 3 == 2 else ENEMY_ROLE_MELEE
+		var rank: int = ENEMY_RANK_ELITE if ambush_index < elite_slots else ENEMY_RANK_NORMAL
+		var family: int = _get_enemy_family_for_spawn(_current_room_index, ambush_index)
+		var ratio: float = 0.22 + float(posmod(ambush_index * 37, 57)) / 100.0
+		var vertical_offset: float = 28.0 if rank == ENEMY_RANK_ELITE else 22.0
+		_spawn_enemy(
+			Vector2(lerpf(minimum_x, maximum_x, ratio), surface.position.y - vertical_offset),
+			minimum_x,
+			maximum_x,
+			role,
+			rank,
+			family,
+			ambush_index
+		)
+	if _enemies.is_empty():
+		_risk_ambush_active = false
+		call_deferred(&"_on_room_cleared")
 
 
 func _clear_chest() -> void:
@@ -1858,14 +2161,30 @@ func _on_enemy_projectile_requested(
 	origin: Vector2,
 	projectile_velocity: Vector2,
 	damage: int,
-	projectile_style: int
+	projectile_style: int,
+	source_enemy: RogueEnemy = null
 ) -> void:
 	if not _run_active:
 		return
 	var projectile: Area2D = ENEMY_PROJECTILE_SCRIPT.new() as Area2D
 	add_child(projectile)
 	projectile.global_position = origin
-	projectile.call(&"setup", projectile_velocity, damage, player, projectile_style)
+	var damage_cause: StringName = &"enemy_projectile"
+	if is_instance_valid(source_enemy):
+		if source_enemy.is_boss():
+			damage_cause = &"boss_volley"
+		elif source_enemy.get_enemy_family() == RogueEnemy.EnemyFamily.GOBLIN:
+			damage_cause = &"goblin_arrow"
+		else:
+			damage_cause = &"slime_projectile"
+	projectile.call(
+		&"setup",
+		projectile_velocity,
+		damage,
+		player,
+		projectile_style,
+		damage_cause
+	)
 	projectile.connect(&"removed", _on_projectile_removed)
 	_projectiles.append(projectile)
 
@@ -1898,6 +2217,11 @@ func _on_player_health_changed(current_health: int, maximum_health: int) -> void
 	_health_label.text = "生命  %d / %d" % [current_health, maximum_health]
 
 
+func _on_player_damage_received(amount: int, cause: StringName) -> void:
+	if _telemetry != null:
+		_telemetry.record_damage(amount, cause)
+
+
 func _update_lives_hud() -> void:
 	if not is_instance_valid(_lives_label):
 		return
@@ -1919,12 +2243,28 @@ func _on_boss_health_changed(current_health: int, maximum_health: int) -> void:
 	var boss_name: String = "赤晶史莱姆王"
 	if is_instance_valid(_boss_enemy) and _boss_enemy.get_enemy_family() == ENEMY_FAMILY_GOBLIN:
 		boss_name = "赤牙战争酋长"
-	_boss_health_label.text = "%s  %d / %d" % [boss_name, current_health, maximum_health]
+	var boss_phase: int = _boss_enemy.get_boss_phase() if is_instance_valid(_boss_enemy) else 1
+	_boss_health_label.text = "%s  阶段 %d  ·  %d / %d" % [
+		boss_name,
+		boss_phase,
+		current_health,
+		maximum_health,
+	]
+
+
+func _on_boss_phase_changed(phase: int) -> void:
+	var phase_name: String = "狂暴阶段" if phase >= 3 else "强化阶段"
+	_status_label.text = "首领进入%s——观察地面与瞄准预警" % phase_name
+	_trigger_camera_shake(13.0 if phase >= 3 else 9.0, 0.18)
 
 
 func _on_player_died() -> void:
 	if _death_restart_pending:
 		return
+	if _telemetry != null:
+		var death_reason: StringName = player.get_last_death_reason()
+		_telemetry.record_death(death_reason)
+		_telemetry.finish_run(false, player.get_weapon_id(), death_reason)
 	_run_active = false
 	_choosing_upgrade = false
 	_shopping = false
@@ -2201,11 +2541,12 @@ func _get_enemy_family_for_spawn(room_index: int, spawn_index: int) -> int:
 
 
 func _get_room_reinforcement_count(room_index: int) -> int:
-	if room_index >= FINAL_CHAPTER_START:
-		return 2
-	if room_index >= MIXED_CHAPTER_START:
-		return 1
-	return 0
+	var profile: Dictionary = COMBAT_BUDGET_SCRIPT.create_profile(
+		_selected_difficulty,
+		room_index,
+		_current_encounter
+	)
+	return int(profile.get("candidate_reinforcements", 0))
 
 
 func _get_chapter_name(room_index: int) -> String:
@@ -2228,6 +2569,12 @@ func _get_encounter_name(encounter: int) -> String:
 			return "商店"
 		EncounterType.BOSS:
 			return "首领房"
+		EncounterType.EVENT:
+			return "事件房"
+		EncounterType.CHALLENGE:
+			return "挑战房"
+		EncounterType.RISK_CHEST:
+			return "风险宝箱"
 		_:
 			return "战斗房"
 
@@ -2277,6 +2624,14 @@ func is_shopping() -> bool:
 	return _shopping
 
 
+func is_event_active() -> bool:
+	return _event_active
+
+
+func is_risk_ambush_active() -> bool:
+	return _risk_ambush_active
+
+
 func get_gold() -> int:
 	return _gold
 
@@ -2285,8 +2640,20 @@ func get_current_encounter_name() -> String:
 	return _get_encounter_name(_current_encounter)
 
 
+func get_current_combat_profile() -> Dictionary:
+	return _get_combat_profile().duplicate(true)
+
+
 func get_progression_snapshot() -> Dictionary:
 	return _progression.get_snapshot() if _progression != null else {}
+
+
+func get_run_telemetry_snapshot() -> Dictionary:
+	return _telemetry.get_current_run_snapshot() if _telemetry != null else {}
+
+
+func get_run_telemetry_summary() -> Dictionary:
+	return _telemetry.get_summary() if _telemetry != null else {}
 
 
 func _draw_gothic_platform(rect: Rect2, room_accent: Color) -> void:

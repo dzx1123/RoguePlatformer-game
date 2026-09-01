@@ -33,6 +33,7 @@ func _run_test() -> void:
 	if encounters.size() != 20:
 		_fail("Seeded run did not create twenty encounters")
 		return
+	var new_encounters_seen := {5: false, 6: false, 7: false}
 	for chapter_index in range(4):
 		var chapter_start: int = chapter_index * 5
 		if int(encounters[chapter_start]) != 0:
@@ -41,17 +42,37 @@ func _run_test() -> void:
 		if int(encounters[chapter_start + 4]) != 4:
 			_fail("Chapter %d did not end with a boss room" % (chapter_index + 1))
 			return
-		var special_counts := {1: 0, 2: 0, 3: 0}
+		var middle_encounters: Array[int] = []
 		for room_offset in range(1, 4):
 			var encounter: int = int(encounters[chapter_start + room_offset])
-			if not special_counts.has(encounter):
+			if encounter not in [1, 2, 3, 5, 6, 7]:
 				_fail("Chapter contained an invalid constrained encounter")
 				return
-			special_counts[encounter] = int(special_counts[encounter]) + 1
-		for count_value: Variant in special_counts.values():
-			if int(count_value) != 1:
-				_fail("Chapter did not contain one treasure, elite and shop room")
+			if encounter in middle_encounters:
+				_fail("Chapter repeated the same special encounter")
 				return
+			middle_encounters.append(encounter)
+			if new_encounters_seen.has(encounter):
+				new_encounters_seen[encounter] = true
+		if chapter_index == 0 and middle_encounters != [1, 2, 3]:
+			_fail("Onboarding chapter no longer preserves treasure, elite and shop order")
+			return
+		if chapter_index > 0:
+			var required_new_encounter: int = [5, 6, 7][chapter_index - 1]
+			if required_new_encounter not in middle_encounters:
+				_fail("Chapter did not contain its guaranteed new encounter archetype")
+				return
+			var has_recovery_room: bool = false
+			for encounter: int in middle_encounters:
+				if encounter in [1, 3, 5]:
+					has_recovery_room = true
+			if not has_recovery_room:
+				_fail("Weighted chapter omitted every recovery/economy room")
+				return
+	for was_seen: Variant in new_encounters_seen.values():
+		if not bool(was_seen):
+			_fail("One of event, challenge, or risk-chest rooms never appeared")
+			return
 
 	print("encounter_seed_smoke: PASS")
 	quit(0)

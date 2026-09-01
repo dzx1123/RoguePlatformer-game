@@ -12,6 +12,7 @@ signal projectile_requested(
 	projectile_style: int
 )
 signal sound_requested(cue: StringName, is_boss: bool)
+signal boss_phase_changed(phase: int)
 
 const MELEE_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_melee_sheet.png")
 const RANGED_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_ranged_sheet.png")
@@ -44,6 +45,12 @@ enum EnemyFamily {
 enum ProjectileStyle {
 	CRYSTAL_ORB,
 	ARROW,
+}
+
+enum BossAttackPattern {
+	LUNGE,
+	VOLLEY,
+	SLAM,
 }
 
 const GRAVITY := 1800.0
@@ -100,6 +107,10 @@ const GOBLIN_ELITE_RUN_BOTTOM := [398.0, 397.0, 398.0, 362.0, 367.0, 361.0, 364.
 const PURSUIT_JUMP_SPEED := 690.0
 const PURSUIT_JUMP_MIN_HEIGHT := 36.0
 const PURSUIT_JUMP_MAX_HEIGHT := 420.0
+const BOSS_LUNGE_SPEED := 560.0
+const BOSS_LUNGE_REACH_X := 225.0
+const BOSS_SLAM_REACH_X := 255.0
+const BOSS_SLAM_REACH_Y := 135.0
 
 var _variant: int = 0
 var _role: int = EnemyRole.MELEE
@@ -116,6 +127,9 @@ var _attack_remaining: float = 0.0
 var _attack_cooldown_remaining: float = 0.0
 var _attack_action_performed: bool = false
 var _boss_attack_uses_projectile: bool = false
+var _boss_attack_pattern: int = BossAttackPattern.LUNGE
+var _boss_attack_counter: int = 0
+var _boss_phase: int = 1
 var _hurt_remaining: float = 0.0
 var _hurt_invulnerability_remaining: float = 0.0
 var _max_health: int = MELEE_MAX_HEALTH
@@ -125,6 +139,19 @@ var _difficulty_health_multiplier: float = 1.0
 var _difficulty_damage_multiplier: float = 1.0
 var _difficulty_speed_multiplier: float = 1.0
 var _difficulty_aggression_multiplier: float = 1.0
+var _behavior_tier: int = 2
+var _attack_cooldown_scale: float = 1.0
+var _reaction_delay: float = 0.65
+var _telegraph_scale: float = 1.0
+var _engagement_delay: float = 0.0
+var _pursuit_level: int = 1
+var _ranged_volley_count: int = 1
+var _ranged_spread: float = 0.0
+var _melee_combo_chance: float = 0.0
+var _melee_combo_limit: int = 0
+var _melee_combo_chain: int = 0
+var _attack_sequence_count: int = 0
+var _combo_followup_pending: bool = false
 var _pursuit_jump_cooldown_remaining: float = 0.0
 var _death_remaining: float = 0.0
 var _locomotion_cycle: float = 0.0
@@ -188,7 +215,8 @@ func setup(
 	difficulty_damage_multiplier: float = 1.0,
 	family: int = EnemyFamily.SLIME,
 	difficulty_speed_multiplier: float = 1.0,
-	difficulty_aggression_multiplier: float = 1.0
+	difficulty_aggression_multiplier: float = 1.0,
+	behavior_profile: Dictionary = {}
 ) -> void:
 	_role = clampi(role, EnemyRole.MELEE, EnemyRole.RANGED)
 	_rank = clampi(rank, EnemyRank.NORMAL, EnemyRank.BOSS)
@@ -197,6 +225,7 @@ func setup(
 	_difficulty_damage_multiplier = maxf(0.1, difficulty_damage_multiplier)
 	_difficulty_speed_multiplier = clampf(difficulty_speed_multiplier, 0.55, 2.20)
 	_difficulty_aggression_multiplier = clampf(difficulty_aggression_multiplier, 0.55, 2.40)
+	_configure_behavior(behavior_profile)
 	_variant = variant % 3
 	if _role == EnemyRole.RANGED:
 		_variant = 1
@@ -212,17 +241,17 @@ func setup(
 	_patrol_right = patrol_right
 	_patrol_direction = -1.0 if sin(phase) < 0.0 else 1.0
 	_facing = _patrol_direction
-	# Low aggression now includes a readable reaction pause instead of attacking on
-	# the very first physics frame. Later rooms naturally shorten this delay.
-	var aggression_progress: float = inverse_lerp(
-		0.55,
-		2.20,
-		clampf(_difficulty_aggression_multiplier, 0.55, 2.20)
-	)
+	_boss_phase = 1
+	_boss_attack_counter = 0
+	_boss_attack_pattern = BossAttackPattern.LUNGE
 	_attack_cooldown_remaining = (
-		lerpf(1.25, 0.10, aggression_progress)
+		_reaction_delay
+		+ _engagement_delay
 		+ fposmod(absf(_phase), 0.28)
 	)
+	_melee_combo_chain = 0
+	_attack_sequence_count = 0
+	_combo_followup_pending = false
 	var base_health: int = RANGED_MAX_HEALTH if is_ranged_enemy() else MELEE_MAX_HEALTH
 	if is_boss():
 		_max_health = BOSS_MAX_HEALTH
@@ -235,6 +264,40 @@ func setup(
 	if is_instance_valid(_enemy_sprite):
 		_update_sprite_animation()
 	queue_redraw()
+
+
+func _configure_behavior(profile: Dictionary) -> void:
+	if profile.is_empty():
+		var aggression_progress: float = inverse_lerp(
+			0.55,
+			2.20,
+			clampf(_difficulty_aggression_multiplier, 0.55, 2.20)
+		)
+		_behavior_tier = clampi(roundi(aggression_progress * 5.0), 0, 5)
+		_attack_cooldown_scale = clampf(
+			1.0 / pow(maxf(_difficulty_aggression_multiplier, 0.10), 1.35),
+			0.62,
+			2.20
+		)
+		_reaction_delay = lerpf(1.25, 0.12, aggression_progress)
+		_telegraph_scale = lerpf(1.15, 0.90, aggression_progress)
+		_engagement_delay = 0.0
+		_pursuit_level = 0 if _behavior_tier <= 1 else (1 if _behavior_tier <= 3 else 2)
+		_ranged_volley_count = 1 if _behavior_tier <= 2 else (2 if _behavior_tier <= 4 else 3)
+		_ranged_spread = 0.0 if _ranged_volley_count <= 1 else 0.08
+		_melee_combo_chance = 0.0 if _behavior_tier <= 2 else lerpf(0.18, 0.45, inverse_lerp(3.0, 5.0, float(_behavior_tier)))
+		_melee_combo_limit = 0 if _behavior_tier <= 2 else (1 if _behavior_tier <= 4 else 2)
+		return
+	_behavior_tier = clampi(int(profile.get("tier", 2)), 0, 5)
+	_attack_cooldown_scale = clampf(float(profile.get("attack_cooldown_scale", 1.0)), 0.60, 2.40)
+	_reaction_delay = clampf(float(profile.get("reaction_delay", 0.65)), 0.05, 2.0)
+	_telegraph_scale = clampf(float(profile.get("telegraph_scale", 1.0)), 0.82, 1.30)
+	_engagement_delay = clampf(float(profile.get("engagement_delay", 0.0)), 0.0, 2.5)
+	_pursuit_level = clampi(int(profile.get("pursuit_level", 1)), 0, 2)
+	_ranged_volley_count = clampi(int(profile.get("ranged_volley_count", 1)), 1, 3)
+	_ranged_spread = clampf(float(profile.get("ranged_spread", 0.0)), 0.0, 0.18)
+	_melee_combo_chance = clampf(float(profile.get("melee_combo_chance", 0.0)), 0.0, 0.65)
+	_melee_combo_limit = clampi(int(profile.get("melee_combo_limit", 0)), 0, 2)
 
 
 func set_target(target: Node2D) -> void:
@@ -287,6 +350,21 @@ func get_speed_multiplier() -> float:
 
 func get_aggression_multiplier() -> float:
 	return _difficulty_aggression_multiplier
+
+
+func get_behavior_profile() -> Dictionary:
+	return {
+		"tier": _behavior_tier,
+		"attack_cooldown_scale": _attack_cooldown_scale,
+		"reaction_delay": _reaction_delay,
+		"telegraph_scale": _telegraph_scale,
+		"engagement_delay": _engagement_delay,
+		"pursuit_level": _pursuit_level,
+		"ranged_volley_count": _ranged_volley_count,
+		"ranged_spread": _ranged_spread,
+		"melee_combo_chance": _melee_combo_chance,
+		"melee_combo_limit": _melee_combo_limit,
+	}
 
 
 func get_hurtbox_rect() -> Rect2:
@@ -444,8 +522,9 @@ func _apply_player_hit(
 	_current_health = maxi(0, _current_health - maxi(1, damage))
 	_hurt_remaining = 0.18
 	_hurt_invulnerability_remaining = maxf(0.0, hurt_invulnerability)
-	_attack_remaining = 0.0
-	_attack_action_performed = false
+	if not is_boss():
+		_attack_remaining = 0.0
+		_attack_action_performed = false
 	var knockback_direction: float = signf(global_position.x - attack_origin.x)
 	if is_zero_approx(knockback_direction):
 		knockback_direction = facing
@@ -454,6 +533,7 @@ func _apply_player_hit(
 		knockback_direction * 330.0 * knockback_scale * knockback_multiplier,
 		-180.0 * knockback_scale * knockback_multiplier
 	)
+	_update_boss_phase()
 	health_changed.emit(_current_health, _max_health)
 	queue_redraw()
 	if _current_health <= 0:
@@ -500,15 +580,32 @@ func _physics_process(delta: float) -> void:
 		desired_speed = 0.0
 	elif _attack_remaining > 0.0:
 		_attack_remaining = maxf(0.0, _attack_remaining - delta)
+		var attack_progress: float = clampf(
+			1.0 - _attack_remaining / maxf(_get_attack_duration(), 0.001),
+			0.0,
+			1.0
+		)
+		if (
+			is_boss()
+			and _boss_attack_pattern == BossAttackPattern.LUNGE
+			and attack_progress >= 0.30
+			and attack_progress <= 0.74
+		):
+			desired_speed = _facing * BOSS_LUNGE_SPEED * _get_boss_phase_speed_scale()
 		var action_time: float = _get_attack_duration() - _get_attack_action_delay()
 		if not _attack_action_performed and _attack_remaining <= action_time:
 			_attack_action_performed = true
-			if is_ranged_enemy() or (is_boss() and _boss_attack_uses_projectile):
+			if is_boss() and _boss_attack_pattern == BossAttackPattern.SLAM:
+				_perform_boss_slam()
+				sound_requested.emit(&"bite", true)
+			elif is_ranged_enemy() or (is_boss() and _boss_attack_uses_projectile):
 				_fire_projectile()
 				sound_requested.emit(&"spit", is_boss())
 			else:
 				_hit_target_if_still_close()
 				sound_requested.emit(&"bite", is_boss())
+		if _attack_remaining <= 0.0:
+			_try_schedule_melee_combo()
 	else:
 		if _target_in_attack_range() and _attack_cooldown_remaining <= 0.0:
 			_start_attack()
@@ -516,6 +613,13 @@ func _physics_process(delta: float) -> void:
 			desired_speed = _get_desired_speed()
 
 	var acceleration_scale: float = 0.38 if _hurt_remaining > 0.0 else 1.0
+	if (
+		is_boss()
+		and _attack_remaining > 0.0
+		and _boss_attack_pattern == BossAttackPattern.LUNGE
+		and not is_zero_approx(desired_speed)
+	):
+		acceleration_scale = 4.2
 	velocity.x = move_toward(
 		velocity.x,
 		desired_speed,
@@ -602,7 +706,7 @@ func _get_detection_range_y() -> float:
 
 
 func _try_pursuit_jump() -> void:
-	if not is_boss() and _difficulty_aggression_multiplier < 0.68:
+	if not is_boss() and _pursuit_level <= 0:
 		return
 	if (
 		_pursuit_jump_cooldown_remaining > 0.0
@@ -615,12 +719,8 @@ func _try_pursuit_jump() -> void:
 	var height_to_target: float = -target_offset.y
 	if height_to_target < PURSUIT_JUMP_MIN_HEIGHT or height_to_target > PURSUIT_JUMP_MAX_HEIGHT:
 		return
-	var aggression_progress: float = clampf(
-		(_difficulty_aggression_multiplier - 0.8) / 1.4,
-		0.0,
-		1.0
-	)
-	var horizontal_reach: float = lerpf(260.0, 560.0, aggression_progress)
+	var pursuit_progress: float = 1.0 if is_boss() else float(_pursuit_level) / 2.0
+	var horizontal_reach: float = lerpf(290.0, 560.0, pursuit_progress)
 	if absf(target_offset.x) > horizontal_reach:
 		return
 	var jump_speed_scale: float = clampf(sqrt(_difficulty_speed_multiplier), 0.90, 1.16)
@@ -630,9 +730,9 @@ func _try_pursuit_jump() -> void:
 		jump_speed_scale *= 1.08
 	velocity.y = -PURSUIT_JUMP_SPEED * jump_speed_scale
 	_pursuit_jump_cooldown_remaining = clampf(
-		1.25 / _difficulty_aggression_multiplier,
+		lerpf(1.35, 0.72, pursuit_progress) / _difficulty_aggression_multiplier,
 		0.48,
-		1.30
+		1.55
 	)
 
 
@@ -644,9 +744,13 @@ func _target_in_attack_range() -> bool:
 	if absf(offset.x) > 6.0:
 		_facing = signf(offset.x)
 	if is_boss():
-		if _family == EnemyFamily.GOBLIN:
-			return absf(offset.x) <= 168.0 and absf(offset.y) <= 96.0
-		return absf(offset.x) <= 250.0 and absf(offset.y) <= 96.0
+		match _peek_next_boss_attack_pattern():
+			BossAttackPattern.VOLLEY:
+				return absf(offset.x) <= 540.0 and absf(offset.y) <= 180.0
+			BossAttackPattern.SLAM:
+				return absf(offset.x) <= BOSS_SLAM_REACH_X and absf(offset.y) <= BOSS_SLAM_REACH_Y
+			_:
+				return absf(offset.x) <= BOSS_LUNGE_REACH_X and absf(offset.y) <= 115.0
 	if is_ranged_enemy():
 		return (
 			absf(offset.x) <= RANGED_ATTACK_RANGE_X
@@ -664,47 +768,95 @@ func _start_attack() -> void:
 		if absf(target_delta_x) > 6.0:
 			_facing = signf(target_delta_x)
 	if is_boss() and is_instance_valid(_target):
-		_boss_attack_uses_projectile = (
-			_family == EnemyFamily.SLIME
-			and absf(_target.global_position.x - global_position.x) > 125.0
-		)
+		_boss_attack_pattern = _peek_next_boss_attack_pattern()
+		_boss_attack_counter += 1
+		_boss_attack_uses_projectile = _boss_attack_pattern == BossAttackPattern.VOLLEY
+	if _combo_followup_pending:
+		_combo_followup_pending = false
+		_melee_combo_chain += 1
+	else:
+		_melee_combo_chain = 0
+	_attack_sequence_count += 1
 	_attack_remaining = _get_attack_duration()
 	_attack_cooldown_remaining = _get_attack_cooldown()
 	_attack_action_performed = false
 
 
 func _get_attack_duration() -> float:
+	var base_duration: float
 	if is_boss():
-		return 0.54
-	return RANGED_ATTACK_DURATION if is_ranged_enemy() else MELEE_ATTACK_DURATION
+		match _boss_attack_pattern:
+			BossAttackPattern.VOLLEY:
+				base_duration = 0.92
+			BossAttackPattern.SLAM:
+				base_duration = 1.08
+			_:
+				base_duration = 0.76
+	else:
+		base_duration = RANGED_ATTACK_DURATION if is_ranged_enemy() else MELEE_ATTACK_DURATION
+	return base_duration * _telegraph_scale
 
 
 func _get_attack_action_delay() -> float:
+	var base_delay: float
 	if is_boss():
-		return 0.25
-	return RANGED_ATTACK_FIRE_DELAY if is_ranged_enemy() else MELEE_ATTACK_HIT_DELAY
+		match _boss_attack_pattern:
+			BossAttackPattern.VOLLEY:
+				base_delay = 0.58
+			BossAttackPattern.SLAM:
+				base_delay = 0.72
+			_:
+				base_delay = 0.46
+	else:
+		base_delay = RANGED_ATTACK_FIRE_DELAY if is_ranged_enemy() else MELEE_ATTACK_HIT_DELAY
+	return base_delay * _telegraph_scale
 
 
 func _get_attack_cooldown() -> float:
 	var base_cooldown: float
 	if is_boss():
-		base_cooldown = 0.82
+		base_cooldown = 1.08 / _get_boss_phase_speed_scale()
 	elif is_elite():
 		base_cooldown = (
 			(RANGED_ATTACK_COOLDOWN if is_ranged_enemy() else MELEE_ATTACK_COOLDOWN) * 0.78
 		)
 	else:
 		base_cooldown = RANGED_ATTACK_COOLDOWN if is_ranged_enemy() else MELEE_ATTACK_COOLDOWN
-	var aggression_scale: float = clampf(_difficulty_aggression_multiplier, 0.55, 2.20)
 	return maxf(
 		0.40 if is_boss() else 0.46,
-		base_cooldown / pow(aggression_scale, 1.35)
+		base_cooldown * _attack_cooldown_scale
 	)
+
+
+func _try_schedule_melee_combo() -> void:
+	if (
+		is_boss()
+		or is_ranged_enemy()
+		or _melee_combo_limit <= 0
+		or _melee_combo_chain >= _melee_combo_limit
+		or not _target_in_attack_range()
+	):
+		_combo_followup_pending = false
+		return
+	var combo_roll: float = fposmod(
+		absf(sin(_phase * 1.37 + float(_attack_sequence_count) * 2.11)) * 1.618,
+		1.0
+	)
+	if combo_roll > _melee_combo_chance:
+		_combo_followup_pending = false
+		return
+	_combo_followup_pending = true
+	_attack_cooldown_remaining = minf(_attack_cooldown_remaining, 0.16)
 
 
 func _get_melee_chase_speed() -> float:
 	if is_boss():
-		return MELEE_CHASE_SPEED * 1.18 * _difficulty_speed_multiplier
+		return (
+			MELEE_CHASE_SPEED
+			* 1.18
+			* _difficulty_speed_multiplier
+			* _get_boss_phase_speed_scale()
+		)
 	return MELEE_CHASE_SPEED * (1.16 if is_elite() else 1.0) * _difficulty_speed_multiplier
 
 
@@ -717,7 +869,10 @@ func _hit_target_if_still_close() -> void:
 		return
 	if is_boss():
 		var boss_melee_offset: Vector2 = _target.global_position - global_position
-		if absf(boss_melee_offset.x) > 166.0 or absf(boss_melee_offset.y) > 100.0:
+		if (
+			absf(boss_melee_offset.x) > BOSS_LUNGE_REACH_X
+			or absf(boss_melee_offset.y) > 115.0
+		):
 			return
 	elif not _target_in_attack_range():
 		return
@@ -725,7 +880,22 @@ func _hit_target_if_still_close() -> void:
 		var damage: int = _get_scaled_damage(
 			32 if is_boss() else (28 if is_elite() else MELEE_DAMAGE)
 		)
-		_target.call(&"receive_enemy_attack", global_position, damage)
+		var damage_cause: StringName = &"boss_lunge" if is_boss() else &"enemy_melee"
+		_target.call(&"receive_enemy_attack", global_position, damage, damage_cause)
+
+
+func _perform_boss_slam() -> void:
+	if not is_instance_valid(_target):
+		return
+	var target_offset: Vector2 = _target.global_position - global_position
+	if (
+		absf(target_offset.x) > BOSS_SLAM_REACH_X
+		or absf(target_offset.y) > BOSS_SLAM_REACH_Y
+	):
+		return
+	if _target.has_method(&"receive_enemy_attack"):
+		var slam_damage: int = _get_scaled_damage(38 + (_boss_phase - 1) * 3)
+		_target.call(&"receive_enemy_attack", global_position, slam_damage, &"boss_slam")
 
 
 func _fire_projectile() -> void:
@@ -746,11 +916,16 @@ func _fire_projectile() -> void:
 	)
 	var projectile_style := (
 		ProjectileStyle.ARROW
-		if _family == EnemyFamily.GOBLIN and is_ranged_enemy()
+		if _family == EnemyFamily.GOBLIN
 		else ProjectileStyle.CRYSTAL_ORB
 	)
 	if is_boss():
-		for spread_angle in [-0.16, 0.0, 0.16]:
+		var spread_angles: Array[float] = []
+		if _boss_phase >= 3:
+			spread_angles.assign([-0.24, -0.12, 0.0, 0.12, 0.24])
+		else:
+			spread_angles.assign([-0.16, 0.0, 0.16])
+		for spread_angle: float in spread_angles:
 			projectile_requested.emit(
 				global_position + Vector2(_facing * 28.0, -12.0),
 				projectile_direction.rotated(float(spread_angle)) * projectile_speed,
@@ -758,12 +933,77 @@ func _fire_projectile() -> void:
 				projectile_style
 			)
 	else:
-		projectile_requested.emit(
-			global_position + Vector2(_facing * 18.0, -8.0),
-			projectile_direction * projectile_speed,
-			projectile_damage,
-			projectile_style
-		)
+		var volley_center: float = float(_ranged_volley_count - 1) * 0.5
+		for projectile_index in range(_ranged_volley_count):
+			var spread_angle: float = (float(projectile_index) - volley_center) * _ranged_spread
+			projectile_requested.emit(
+				global_position + Vector2(_facing * 18.0, -8.0),
+				projectile_direction.rotated(spread_angle) * projectile_speed,
+				projectile_damage,
+				projectile_style
+			)
+
+
+func _update_boss_phase() -> void:
+	if not is_boss() or _max_health <= 0:
+		return
+	var health_ratio: float = float(_current_health) / float(_max_health)
+	var next_phase: int = 3 if health_ratio <= 0.35 else (2 if health_ratio <= 0.70 else 1)
+	if next_phase == _boss_phase:
+		return
+	_boss_phase = next_phase
+	_boss_attack_counter = 0
+	_attack_cooldown_remaining = maxf(_attack_cooldown_remaining, 0.62)
+	boss_phase_changed.emit(_boss_phase)
+	queue_redraw()
+
+
+func _peek_next_boss_attack_pattern() -> int:
+	var sequence: Array[int]
+	match _boss_phase:
+		2:
+			sequence = [
+				BossAttackPattern.SLAM,
+				BossAttackPattern.LUNGE,
+				BossAttackPattern.VOLLEY,
+			]
+		3:
+			sequence = [
+				BossAttackPattern.VOLLEY,
+				BossAttackPattern.SLAM,
+				BossAttackPattern.LUNGE,
+			]
+		_:
+			sequence = [BossAttackPattern.LUNGE, BossAttackPattern.VOLLEY]
+	return sequence[posmod(_boss_attack_counter, sequence.size())]
+
+
+func _get_boss_phase_speed_scale() -> float:
+	match _boss_phase:
+		2:
+			return 1.10
+		3:
+			return 1.24
+		_:
+			return 1.0
+
+
+func get_boss_phase() -> int:
+	return _boss_phase
+
+
+func get_boss_attack_pattern() -> int:
+	return _boss_attack_pattern
+
+
+func get_boss_attack_name() -> String:
+	match _boss_attack_pattern:
+		BossAttackPattern.VOLLEY:
+			return "扇形弹幕"
+		BossAttackPattern.SLAM:
+			return "震地重击"
+		_:
+			return "突进猛袭"
 
 
 func _get_scaled_damage(base_damage: int) -> int:
@@ -1294,15 +1534,34 @@ func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 
 func _draw() -> void:
 	if is_boss():
-		draw_circle(Vector2(0.0, -22.0), 76.0 + sin(_elapsed * 3.0) * 2.5, Color(0.98, 0.12, 0.20, 0.10))
-		draw_arc(Vector2(0.0, -22.0), 73.0, 0.0, TAU, 38, Color(0.98, 0.28, 0.22, 0.44), 2.4)
+		var phase_color := (
+			Color("#ffcf55")
+			if _boss_phase >= 3
+			else (Color("#ff6b5f") if _boss_phase == 2 else Color("#fa3347"))
+		)
+		draw_circle(
+			Vector2(0.0, -22.0),
+			76.0 + sin(_elapsed * (3.0 + float(_boss_phase) * 0.45)) * 2.5,
+			Color(phase_color, 0.10 + float(_boss_phase - 1) * 0.035)
+		)
+		draw_arc(
+			Vector2(0.0, -22.0),
+			73.0,
+			0.0,
+			TAU,
+			38,
+			Color(phase_color, 0.44 + float(_boss_phase - 1) * 0.08),
+			2.4 + float(_boss_phase - 1) * 0.55
+		)
 	elif is_elite():
 		draw_circle(Vector2(0.0, -7.0), 37.0 + sin(_elapsed * 4.0), Color(0.68, 0.30, 1.0, 0.10))
 		draw_arc(Vector2(0.0, -7.0), 36.0, 0.0, TAU, 26, Color(0.76, 0.44, 1.0, 0.46), 2.0)
 
 	if _attack_remaining > 0.0:
 		var attack_progress: float = 1.0 - _attack_remaining / _get_attack_duration()
-		if is_ranged_enemy() or (is_boss() and _boss_attack_uses_projectile):
+		if is_boss():
+			_draw_boss_attack_telegraph(attack_progress)
+		elif is_ranged_enemy():
 			var charge_radius: float = lerpf(3.0, 9.0, sin(attack_progress * PI))
 			draw_circle(
 				Vector2(_facing * (42.0 if is_boss() else 25.0), -10.0),
@@ -1319,3 +1578,83 @@ func _draw() -> void:
 			Rect2(-bar_width * 0.5 + 2.0, bar_y + 2.0, (bar_width - 4.0) * health_ratio, 2.0),
 			Color(0.96, 0.20, 0.22, 0.96)
 		)
+
+
+func _draw_boss_attack_telegraph(attack_progress: float) -> void:
+	var duration: float = maxf(_get_attack_duration(), 0.001)
+	var impact_progress: float = _get_attack_action_delay() / duration
+	var warning_progress: float = clampf(attack_progress / maxf(impact_progress, 0.001), 0.0, 1.0)
+	var post_impact_fade: float = 1.0 - smoothstep(
+		impact_progress,
+		minf(1.0, impact_progress + 0.20),
+		attack_progress
+	)
+	var pulse: float = 0.58 + 0.42 * sin(warning_progress * PI * 7.0)
+	var warning_alpha: float = (0.24 + warning_progress * 0.54) * pulse * post_impact_fade
+	match _boss_attack_pattern:
+		BossAttackPattern.VOLLEY:
+			var charge_center := Vector2(_facing * 42.0, -15.0)
+			var volley_color := Color(0.30, 0.90, 1.0, warning_alpha)
+			for ring_index in range(3):
+				draw_arc(
+					charge_center,
+					14.0 + float(ring_index) * 10.0 + warning_progress * 5.0,
+					0.0,
+					TAU,
+					24,
+					Color(volley_color, warning_alpha * (1.0 - float(ring_index) * 0.22)),
+					2.2
+				)
+			if is_instance_valid(_target):
+				var target_local: Vector2 = to_local(_target.global_position)
+				var aim_end: Vector2 = charge_center.lerp(target_local, 0.86)
+				draw_dashed_line(
+					charge_center,
+					aim_end,
+					Color(0.55, 0.95, 1.0, warning_alpha * 0.78),
+					2.0,
+					8.0
+				)
+		BossAttackPattern.SLAM:
+			var slam_color := Color(1.0, 0.48, 0.16, warning_alpha)
+			draw_set_transform(Vector2(0.0, 26.0), 0.0, Vector2(1.0, 0.24))
+			draw_circle(
+				Vector2.ZERO,
+				BOSS_SLAM_REACH_X * (0.82 + warning_progress * 0.18),
+				Color(slam_color, warning_alpha * 0.16)
+			)
+			draw_arc(
+				Vector2.ZERO,
+				BOSS_SLAM_REACH_X * (0.82 + warning_progress * 0.18),
+				0.0,
+				TAU,
+				64,
+				slam_color,
+				8.0
+			)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			for marker_side in [-1.0, 1.0]:
+				var marker_x: float = marker_side * BOSS_SLAM_REACH_X
+				draw_line(
+					Vector2(marker_x, 15.0),
+					Vector2(marker_x, 35.0),
+					Color(1.0, 0.72, 0.30, warning_alpha),
+					4.0
+				)
+		_:
+			var lunge_color := Color(1.0, 0.22, 0.28, warning_alpha)
+			var lane_start := Vector2(_facing * 42.0, 20.0)
+			var lane_end := Vector2(
+				_facing * BOSS_LUNGE_REACH_X * (0.72 + warning_progress * 0.28),
+				20.0
+			)
+			draw_line(lane_start, lane_end, Color(lunge_color, warning_alpha * 0.30), 18.0)
+			draw_line(lane_start, lane_end, lunge_color, 3.0)
+			draw_colored_polygon(
+				PackedVector2Array([
+					lane_end + Vector2(_facing * 18.0, 0.0),
+					lane_end + Vector2(-_facing * 9.0, -12.0),
+					lane_end + Vector2(-_facing * 9.0, 12.0),
+				]),
+				Color(1.0, 0.30, 0.34, warning_alpha)
+			)

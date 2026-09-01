@@ -42,10 +42,12 @@ func _run_test() -> void:
 
 	main.set("_selected_difficulty", 0)
 	main.set("_current_room_index", 0)
+	main.set("_current_encounter", 0)
 	var easy_first_health: float = float(main.call(&"_get_difficulty_health_multiplier"))
 	var easy_first_damage: float = float(main.call(&"_get_difficulty_damage_multiplier"))
 	var easy_first_speed: float = float(main.call(&"_get_difficulty_speed_multiplier"))
 	var easy_first_aggression: float = float(main.call(&"_get_difficulty_aggression_multiplier"))
+	var easy_first_profile: Dictionary = main.call(&"get_current_combat_profile") as Dictionary
 	main.set("_current_room_index", 19)
 	var easy_final_health: float = float(main.call(&"_get_difficulty_health_multiplier"))
 	var easy_final_damage: float = float(main.call(&"_get_difficulty_damage_multiplier"))
@@ -56,11 +58,12 @@ func _run_test() -> void:
 	var hard_final_damage: float = float(main.call(&"_get_difficulty_damage_multiplier"))
 	var hard_final_speed: float = float(main.call(&"_get_difficulty_speed_multiplier"))
 	var hard_final_aggression: float = float(main.call(&"_get_difficulty_aggression_multiplier"))
+	var hard_final_profile: Dictionary = main.call(&"get_current_combat_profile") as Dictionary
 	if (
 		easy_first_health >= 1.0
-		or easy_first_damage > 0.60
-		or easy_first_speed > 0.82
-		or easy_first_aggression > 0.60
+		or easy_first_damage > 0.70
+		or easy_first_speed > 0.90
+		or easy_first_aggression > 0.65
 		or easy_final_health <= easy_first_health
 		or easy_final_damage <= easy_first_damage
 		or easy_final_speed <= easy_first_speed
@@ -69,8 +72,25 @@ func _run_test() -> void:
 		or hard_final_damage <= easy_final_damage
 		or hard_final_speed <= easy_final_speed
 		or hard_final_aggression <= easy_final_aggression
+		or hard_final_health > 1.45
+		or hard_final_damage > 1.35
+		or hard_final_speed > 1.15
 	):
-		_fail("Health, damage, speed, or aggression did not accumulate across twenty rooms")
+		_fail("Bounded difficulty scaling did not progress across twenty rooms")
+		return
+	var easy_behavior: Dictionary = easy_first_profile.get("behavior", {}) as Dictionary
+	var hard_behavior: Dictionary = hard_final_profile.get("behavior", {}) as Dictionary
+	if (
+		int(easy_behavior.get("tier", -1)) != 0
+		or int(easy_behavior.get("pursuit_level", -1)) != 0
+		or int(easy_behavior.get("ranged_volley_count", 0)) != 1
+		or float(easy_behavior.get("melee_combo_chance", 1.0)) > 0.0
+		or int(hard_behavior.get("tier", -1)) != 5
+		or int(hard_behavior.get("pursuit_level", 0)) != 2
+		or int(hard_behavior.get("ranged_volley_count", 0)) != 3
+		or float(hard_behavior.get("melee_combo_chance", 0.0)) <= 0.0
+	):
+		_fail("Difficulty did not unlock behavior tiers instead of relying on raw stats")
 		return
 
 	var easy_enemy := RogueEnemy.new()
@@ -85,13 +105,14 @@ func _run_test() -> void:
 		easy_first_damage,
 		RogueEnemy.EnemyFamily.GOBLIN,
 		easy_first_speed,
-		easy_first_aggression
+		easy_first_aggression,
+		easy_behavior
 	)
 	if (
 		float(easy_enemy.call(&"_get_attack_cooldown")) < 2.0
 		or float(easy_enemy.get("_attack_cooldown_remaining")) < 1.20
 	):
-		_fail("Easy mode enemies still attack immediately or too frequently")
+		_fail("Easy mode behavior profile still attacks immediately or too frequently")
 		return
 	easy_enemy.queue_free()
 
@@ -110,14 +131,17 @@ func _run_test() -> void:
 		_fail("Late-room enemy could not be spawned for scaling verification")
 		return
 	var scaled_enemy: RogueEnemy = scaled_enemies.back() as RogueEnemy
+	var scaled_behavior: Dictionary = scaled_enemy.get_behavior_profile()
 	if (
 		scaled_enemy.get_max_health() <= 72
 		or scaled_enemy.get_speed_multiplier() < hard_final_speed - 0.001
 		or scaled_enemy.get_aggression_multiplier() < hard_final_aggression - 0.001
 		or float(scaled_enemy.call(&"_get_attack_cooldown")) >= 0.95
 		or int(scaled_enemy.call(&"_get_scaled_damage", 22)) <= 22
+		or int(scaled_behavior.get("tier", -1)) != 5
+		or int(scaled_behavior.get("pursuit_level", 0)) != 2
 	):
-		_fail("Main did not pass cumulative scaling into enemy movement and combat AI")
+		_fail("Main did not pass the bounded stats and late behavior tier into enemy AI")
 		return
 
 	main.set("_current_room_index", 0)

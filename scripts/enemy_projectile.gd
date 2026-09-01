@@ -10,6 +10,7 @@ var _target: Node2D
 var _remaining_lifetime: float = LIFETIME
 var _is_removing: bool = false
 var _style: int = RogueEnemy.ProjectileStyle.CRYSTAL_ORB
+var _damage_cause: StringName = &"enemy_projectile"
 
 
 func _ready() -> void:
@@ -31,7 +32,8 @@ func setup(
 	projectile_velocity: Vector2,
 	damage: int,
 	target: Node2D,
-	projectile_style: int = RogueEnemy.ProjectileStyle.CRYSTAL_ORB
+	projectile_style: int = RogueEnemy.ProjectileStyle.CRYSTAL_ORB,
+	damage_cause: StringName = &"enemy_projectile"
 ) -> void:
 	_velocity = projectile_velocity
 	_damage = maxi(1, damage)
@@ -41,6 +43,7 @@ func setup(
 		RogueEnemy.ProjectileStyle.CRYSTAL_ORB,
 		RogueEnemy.ProjectileStyle.ARROW
 	)
+	_damage_cause = damage_cause if not damage_cause.is_empty() else &"enemy_projectile"
 	queue_redraw()
 
 
@@ -57,7 +60,7 @@ func _on_body_entered(body: Node2D) -> void:
 	if _is_removing:
 		return
 	if body == _target and body.has_method(&"receive_enemy_attack"):
-		body.call(&"receive_enemy_attack", global_position, _damage)
+		body.call(&"receive_enemy_attack", global_position, _damage, _damage_cause)
 		_remove_projectile()
 		return
 	if body.collision_layer & 1 != 0:

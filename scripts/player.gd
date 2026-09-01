@@ -5,6 +5,7 @@ class_name RoguePlayer
 signal attack_hit(origin: Vector2, facing: float)
 signal skill_hit(origin: Vector2, facing: float, damage: int, reach_scale: float)
 signal health_changed(current_health: int, maximum_health: int)
+signal damage_received(amount: int, cause: StringName)
 signal weapon_changed(weapon_id: StringName, weapon_name: String, skill_name: String)
 signal died
 signal action_started(action: StringName)
@@ -137,6 +138,7 @@ var _drop_through_remaining: float = 0.0
 var _base_ground_surface_y: float = INF
 var _current_health: int = 100
 var _is_dead: bool = false
+var _last_death_reason: StringName = &"unknown"
 var _death_remaining: float = 0.0
 var _input_enabled: bool = true
 var _base_max_health: int = 100
@@ -290,9 +292,12 @@ func _physics_process(delta: float) -> void:
 		_airborne_time += delta
 
 	if global_position.y > 820.0:
+		var fall_damage: int = _current_health
 		_current_health = 0
 		health_changed.emit(_current_health, maxi(1, max_health))
-		_die(global_position + Vector2(0.0, -20.0))
+		if fall_damage > 0:
+			damage_received.emit(fall_damage, &"fall")
+		_die(global_position + Vector2(0.0, -20.0), &"fall")
 		return
 
 	var speed_ratio: float = clampf(absf(velocity.x) / maxf(run_speed, 1.0), 0.0, 1.0)
@@ -330,6 +335,7 @@ func respawn() -> void:
 	global_position = _spawn_point
 	velocity = Vector2.ZERO
 	_is_dead = false
+	_last_death_reason = &"unknown"
 	_death_remaining = 0.0
 	_current_health = maxi(1, max_health)
 	_dash_remaining = 0.0
@@ -775,7 +781,11 @@ func _finish_attack() -> void:
 	_downslash_bounce_applied = false
 
 
-func receive_enemy_attack(attacker_position: Vector2, damage: int = 20) -> bool:
+func receive_enemy_attack(
+	attacker_position: Vector2,
+	damage: int = 20,
+	cause: StringName = &"enemy_attack"
+) -> bool:
 	# The dash is an intentional i-frame window: enemy contact and projectiles do no damage.
 	if _is_dead or _dash_remaining > 0.0 or _hurt_invulnerability_remaining > 0.0:
 		return false
@@ -805,10 +815,14 @@ func receive_enemy_attack(attacker_position: Vector2, damage: int = 20) -> bool:
 		0,
 		int(round(float(maxi(0, damage)) * damage_multiplier))
 	)
+	var health_before: int = _current_health
 	_current_health = maxi(0, _current_health - resolved_damage)
+	var damage_taken: int = health_before - _current_health
 	health_changed.emit(_current_health, maxi(1, max_health))
+	if damage_taken > 0:
+		damage_received.emit(damage_taken, cause)
 	if _current_health <= 0:
-		_die(attacker_position)
+		_die(attacker_position, cause)
 		return true
 
 	vocal_requested.emit(&"hurt")
@@ -932,10 +946,15 @@ func is_dead() -> bool:
 	return _is_dead
 
 
-func _die(attacker_position: Vector2) -> void:
+func get_last_death_reason() -> StringName:
+	return _last_death_reason
+
+
+func _die(attacker_position: Vector2, reason: StringName = &"unknown") -> void:
 	if _is_dead:
 		return
 	_is_dead = true
+	_last_death_reason = reason if not reason.is_empty() else &"unknown"
 	_death_remaining = DEATH_DURATION
 	_dash_remaining = 0.0
 	_finish_attack()

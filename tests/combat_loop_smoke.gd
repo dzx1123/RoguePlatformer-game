@@ -9,6 +9,7 @@ func _run_test() -> void:
 	var main_scene: PackedScene = load("res://scenes/Main.tscn")
 	var main: Node2D = main_scene.instantiate() as Node2D
 	main.set("save_enabled", false)
+	main.call(&"set_next_run_seed", 424242)
 	root.add_child(main)
 	var player: RoguePlayer = main.get_node("Player") as RoguePlayer
 	for _settle_frame in range(24):

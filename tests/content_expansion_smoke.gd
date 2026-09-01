@@ -169,6 +169,19 @@ func _run_test() -> void:
 			return
 
 	for room_number in range(6, 21):
+		if bool(main.call(&"is_event_active")):
+			if not bool(main.call(&"choose_upgrade", 0)):
+				_fail("Event room %d could not resolve its choice" % room_number)
+				return
+			await _wait_physics_frames(5)
+			continue
+		if bool(main.call(&"is_awaiting_chest")):
+			var entry_chest: RewardChest = main.get("_chest") as RewardChest
+			if entry_chest != null and entry_chest.is_risk_chest():
+				if not bool(main.call(&"open_current_chest_for_test")):
+					_fail("Risk chest in room %d could not be opened" % room_number)
+					return
+				await _wait_physics_frames(3)
 		if room_number == 10:
 			var chapter_boss_enemies: Array = main.get("_enemies") as Array
 			if chapter_boss_enemies.size() != 1:
@@ -191,6 +204,7 @@ func _run_test() -> void:
 			room_number >= 11
 			and room_number not in [15, 20]
 			and not bool(main.call(&"is_shopping"))
+			and not (main.get("_enemies") as Array).is_empty()
 		):
 			if not _verify_mixed_enemy_room(main, room_number):
 				return
