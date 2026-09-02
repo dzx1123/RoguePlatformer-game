@@ -3,7 +3,15 @@ extends RefCounted
 ## Persistent player-facing settings: master volume and rebindable keyboard actions.
 class_name RogueSettingsStore
 
+const SAFE_JSON_STORE_SCRIPT := preload("res://scripts/safe_json_store.gd")
 const SAVE_PATH := "user://rogue_settings.json"
+const SAVE_VERSION := 4
+const RESOLUTION_OPTIONS: Array[Vector2i] = [
+	Vector2i(1280, 840),
+	Vector2i(1600, 900),
+	Vector2i(1920, 1080),
+	Vector2i(2560, 1440),
+]
 const DEFAULT_BINDINGS := {
 	"move_left": [KEY_A, KEY_LEFT],
 	"move_right": [KEY_D, KEY_RIGHT],
@@ -20,31 +28,43 @@ const DEFAULT_BINDINGS := {
 }
 
 var _bindings: Dictionary = {}
+var _save_path: String = SAVE_PATH
 var _master_volume: float = 0.80
+var _music_volume: float = 0.80
+var _effects_volume: float = 0.85
+var _voice_volume: float = 0.90
 var _damage_numbers_enabled: bool = true
+var _resolution_index: int = 0
+var _fullscreen_enabled: bool = false
+var _vsync_enabled: bool = true
+var _reduced_effects_enabled: bool = false
 
 
-func _init() -> void:
+func _init(save_path: String = SAVE_PATH) -> void:
+	_save_path = save_path
 	_reset_defaults()
 
 
 func load_settings() -> bool:
 	_reset_defaults()
-	if not FileAccess.file_exists(SAVE_PATH):
+	var load_result: Dictionary = SAFE_JSON_STORE_SCRIPT.load_dictionary(
+		_save_path,
+		Callable(self, "_is_valid_settings_data")
+	)
+	if not bool(load_result.get("ok", false)):
 		apply()
 		return false
-	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
-	if file == null:
-		apply()
-		return false
-	var parsed: Variant = JSON.parse_string(file.get_as_text())
-	if not parsed is Dictionary:
-		apply()
-		return false
-	var data: Dictionary = parsed as Dictionary
+	var data: Dictionary = load_result.get("data", {}) as Dictionary
 	var saved_version: int = int(data.get("version", 1))
 	_master_volume = clampf(float(data.get("master_volume", _master_volume)), 0.0, 1.0)
+	_music_volume = clampf(float(data.get("music_volume", _music_volume)), 0.0, 1.0)
+	_effects_volume = clampf(float(data.get("effects_volume", _effects_volume)), 0.0, 1.0)
+	_voice_volume = clampf(float(data.get("voice_volume", _voice_volume)), 0.0, 1.0)
 	_damage_numbers_enabled = bool(data.get("damage_numbers_enabled", true))
+	_resolution_index = clampi(int(data.get("resolution_index", 0)), 0, RESOLUTION_OPTIONS.size() - 1)
+	_fullscreen_enabled = bool(data.get("fullscreen_enabled", false))
+	_vsync_enabled = bool(data.get("vsync_enabled", true))
+	_reduced_effects_enabled = bool(data.get("reduced_effects_enabled", false))
 	var loaded_bindings: Dictionary = data.get("bindings", {}) as Dictionary
 	for action_value in DEFAULT_BINDINGS:
 		var action_name: String = String(action_value)
@@ -68,16 +88,19 @@ func save_settings() -> Error:
 	for action_value in DEFAULT_BINDINGS:
 		var action_name: String = String(action_value)
 		binding_data[action_name] = get_binding_codes(action_name)
-	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-	if file == null:
-		return FileAccess.get_open_error()
-	file.store_string(JSON.stringify({
-		"version": 3,
+	return SAFE_JSON_STORE_SCRIPT.save_dictionary(_save_path, {
+		"version": SAVE_VERSION,
 		"master_volume": _master_volume,
+		"music_volume": _music_volume,
+		"effects_volume": _effects_volume,
+		"voice_volume": _voice_volume,
 		"damage_numbers_enabled": _damage_numbers_enabled,
+		"resolution_index": _resolution_index,
+		"fullscreen_enabled": _fullscreen_enabled,
+		"vsync_enabled": _vsync_enabled,
+		"reduced_effects_enabled": _reduced_effects_enabled,
 		"bindings": binding_data,
-	}, "\t"))
-	return OK
+	})
 
 
 func apply() -> void:
@@ -90,7 +113,39 @@ func apply() -> void:
 			var event := InputEventKey.new()
 			event.keycode = key_code
 			InputMap.action_add_event(action_name, event)
-	_apply_master_volume()
+	_apply_controller_defaults()
+	_apply_audio()
+	_apply_display()
+
+
+func _apply_controller_defaults() -> void:
+	_add_joy_axis(&"move_left", JOY_AXIS_LEFT_X, -1.0)
+	_add_joy_axis(&"move_right", JOY_AXIS_LEFT_X, 1.0)
+	_add_joy_button(&"move_left", JOY_BUTTON_DPAD_LEFT)
+	_add_joy_button(&"move_right", JOY_BUTTON_DPAD_RIGHT)
+	_add_joy_button(&"aim_up", JOY_BUTTON_DPAD_UP)
+	_add_joy_button(&"aim_down", JOY_BUTTON_DPAD_DOWN)
+	_add_joy_button(&"jump", JOY_BUTTON_A)
+	_add_joy_button(&"attack", JOY_BUTTON_X)
+	_add_joy_button(&"dash", JOY_BUTTON_B)
+	_add_joy_button(&"skill", JOY_BUTTON_Y)
+	_add_joy_button(&"interact", JOY_BUTTON_RIGHT_SHOULDER)
+	_add_joy_button(&"cycle_weapon", JOY_BUTTON_LEFT_SHOULDER)
+	_add_joy_button(&"restart", JOY_BUTTON_BACK)
+	_add_joy_button(&"pause", JOY_BUTTON_START)
+
+
+func _add_joy_button(action_name: StringName, button_index: int) -> void:
+	var event := InputEventJoypadButton.new()
+	event.button_index = button_index
+	InputMap.action_add_event(action_name, event)
+
+
+func _add_joy_axis(action_name: StringName, axis: int, axis_value: float) -> void:
+	var event := InputEventJoypadMotion.new()
+	event.axis = axis
+	event.axis_value = axis_value
+	InputMap.action_add_event(action_name, event)
 
 
 func rebind(action_name: StringName, key_code: int) -> bool:
@@ -134,12 +189,42 @@ func get_binding_codes(action_name: String) -> Array[int]:
 
 func set_master_volume(value: float) -> void:
 	_master_volume = clampf(value, 0.0, 1.0)
-	_apply_master_volume()
+	_apply_audio()
 	save_settings()
 
 
 func get_master_volume() -> float:
 	return _master_volume
+
+
+func set_music_volume(value: float) -> void:
+	_music_volume = clampf(value, 0.0, 1.0)
+	_apply_audio()
+	save_settings()
+
+
+func get_music_volume() -> float:
+	return _music_volume
+
+
+func set_effects_volume(value: float) -> void:
+	_effects_volume = clampf(value, 0.0, 1.0)
+	_apply_audio()
+	save_settings()
+
+
+func get_effects_volume() -> float:
+	return _effects_volume
+
+
+func set_voice_volume(value: float) -> void:
+	_voice_volume = clampf(value, 0.0, 1.0)
+	_apply_audio()
+	save_settings()
+
+
+func get_voice_volume() -> float:
+	return _voice_volume
 
 
 func set_damage_numbers_enabled(enabled: bool) -> void:
@@ -151,13 +236,67 @@ func get_damage_numbers_enabled() -> bool:
 	return _damage_numbers_enabled
 
 
+func get_resolution_options() -> Array[Vector2i]:
+	return RESOLUTION_OPTIONS.duplicate()
+
+
+func set_resolution_index(value: int) -> void:
+	_resolution_index = clampi(value, 0, RESOLUTION_OPTIONS.size() - 1)
+	_apply_display()
+	save_settings()
+
+
+func get_resolution_index() -> int:
+	return _resolution_index
+
+
+func set_fullscreen_enabled(enabled: bool) -> void:
+	_fullscreen_enabled = enabled
+	_apply_display()
+	save_settings()
+
+
+func get_fullscreen_enabled() -> bool:
+	return _fullscreen_enabled
+
+
+func set_vsync_enabled(enabled: bool) -> void:
+	_vsync_enabled = enabled
+	_apply_display()
+	save_settings()
+
+
+func get_vsync_enabled() -> bool:
+	return _vsync_enabled
+
+
+func set_reduced_effects_enabled(enabled: bool) -> void:
+	_reduced_effects_enabled = enabled
+	save_settings()
+
+
+func get_reduced_effects_enabled() -> bool:
+	return _reduced_effects_enabled
+
+
+func get_save_path() -> String:
+	return _save_path
+
+
 func _reset_defaults() -> void:
 	_bindings.clear()
 	for action_value in DEFAULT_BINDINGS:
 		var action_name: String = String(action_value)
 		_bindings[action_name] = _copy_default_codes(action_name)
 	_master_volume = 0.80
+	_music_volume = 0.80
+	_effects_volume = 0.85
+	_voice_volume = 0.90
 	_damage_numbers_enabled = true
+	_resolution_index = 0
+	_fullscreen_enabled = false
+	_vsync_enabled = true
+	_reduced_effects_enabled = false
 
 
 func _copy_default_codes(action_name: String) -> Array[int]:
@@ -167,7 +306,37 @@ func _copy_default_codes(action_name: String) -> Array[int]:
 	return result
 
 
-func _apply_master_volume() -> void:
-	var master_bus: int = AudioServer.get_bus_index(&"Master")
-	if master_bus >= 0:
-		AudioServer.set_bus_volume_db(master_bus, linear_to_db(maxf(_master_volume, 0.001)))
+func _apply_audio() -> void:
+	_apply_bus_volume(&"Master", _master_volume)
+	_apply_bus_volume(&"Music", _music_volume)
+	_apply_bus_volume(&"SFX", _effects_volume)
+	_apply_bus_volume(&"Voice", _voice_volume)
+
+
+func _apply_bus_volume(bus_name: StringName, linear_volume: float) -> void:
+	var bus_index: int = AudioServer.get_bus_index(bus_name)
+	if bus_index < 0:
+		AudioServer.add_bus()
+		bus_index = AudioServer.bus_count - 1
+		AudioServer.set_bus_name(bus_index, bus_name)
+	AudioServer.set_bus_volume_db(bus_index, linear_to_db(maxf(linear_volume, 0.001)))
+
+
+func _apply_display() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	DisplayServer.window_set_vsync_mode(
+		DisplayServer.VSYNC_ENABLED if _vsync_enabled else DisplayServer.VSYNC_DISABLED
+	)
+	if _fullscreen_enabled:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		DisplayServer.window_set_size(RESOLUTION_OPTIONS[_resolution_index])
+
+
+func _is_valid_settings_data(data: Dictionary) -> bool:
+	return (
+		int(data.get("version", 0)) >= 1
+		and data.get("bindings", null) is Dictionary
+	)

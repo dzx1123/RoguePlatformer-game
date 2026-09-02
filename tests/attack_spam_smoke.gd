@@ -18,6 +18,19 @@ func _run_test() -> void:
 		await physics_frame
 
 	var initial_enemies: Array = main.get("_enemies") as Array
+	if initial_enemies.size() < 2:
+		main.call(
+			&"_spawn_enemy",
+			Vector2(1180.0, 590.0),
+			1120.0,
+			1220.0,
+			0,
+			0,
+			0,
+			99
+		)
+		await physics_frame
+		initial_enemies = main.get("_enemies") as Array
 	var initial_enemy_count: int = initial_enemies.size()
 	if initial_enemy_count <= 0:
 		_fail("Main scene did not create an enemy for the hit test")

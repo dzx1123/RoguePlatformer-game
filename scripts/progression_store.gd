@@ -3,6 +3,7 @@ extends RefCounted
 ## Persistent meta progression. The default save lives in Godot's user data folder.
 class_name ProgressionStore
 
+const SAFE_JSON_STORE_SCRIPT := preload("res://scripts/safe_json_store.gd")
 const SAVE_VERSION := 1
 const DEFAULT_SAVE_PATH := "user://rogue_progress.json"
 const TWIN_BLADES_UNLOCK_SHARDS := 6
@@ -30,15 +31,13 @@ func reset_to_defaults() -> void:
 
 func load_progress() -> bool:
 	reset_to_defaults()
-	if not FileAccess.file_exists(_save_path):
+	var load_result: Dictionary = SAFE_JSON_STORE_SCRIPT.load_dictionary(
+		_save_path,
+		Callable(self, "_is_valid_save_data")
+	)
+	if not bool(load_result.get("ok", false)):
 		return false
-	var file := FileAccess.open(_save_path, FileAccess.READ)
-	if file == null:
-		return false
-	var parsed_value: Variant = JSON.parse_string(file.get_as_text())
-	if not parsed_value is Dictionary:
-		return false
-	var data: Dictionary = parsed_value as Dictionary
+	var data: Dictionary = load_result.get("data", {}) as Dictionary
 	_meta_shards = maxi(0, int(data.get("meta_shards", 0)))
 	_runs_completed = maxi(0, int(data.get("runs_completed", 0)))
 	_bosses_defeated = maxi(0, int(data.get("bosses_defeated", 0)))
@@ -57,9 +56,6 @@ func load_progress() -> bool:
 
 
 func save_progress() -> Error:
-	var file := FileAccess.open(_save_path, FileAccess.WRITE)
-	if file == null:
-		return FileAccess.get_open_error()
 	var unlocked_strings: Array[String] = []
 	for weapon_id in _unlocked_weapons:
 		unlocked_strings.append(String(weapon_id))
@@ -71,8 +67,7 @@ func save_progress() -> Error:
 		"unlocked_weapons": unlocked_strings,
 		"selected_weapon": String(_selected_weapon),
 	}
-	file.store_string(JSON.stringify(data, "\t"))
-	return OK
+	return SAFE_JSON_STORE_SCRIPT.save_dictionary(_save_path, data)
 
 
 func bank_run(earned_shards: int, victory: bool) -> Array[StringName]:
@@ -134,3 +129,12 @@ func _unlock_weapon(weapon_id: StringName, newly_unlocked: Array[StringName]) ->
 		return
 	_unlocked_weapons.append(weapon_id)
 	newly_unlocked.append(weapon_id)
+
+
+func _is_valid_save_data(data: Dictionary) -> bool:
+	return (
+		int(data.get("version", 0)) >= 1
+		and data.has("meta_shards")
+		and data.has("runs_completed")
+		and data.get("unlocked_weapons", null) is Array
+	)

@@ -16,7 +16,10 @@ const SETTINGS_STORE_SCRIPT := preload("res://scripts/settings_store.gd")
 const RUN_TELEMETRY_SCRIPT := preload("res://scripts/run_telemetry.gd")
 const COMBAT_BUDGET_SCRIPT := preload("res://scripts/combat_budget.gd")
 const PAUSE_INPUT_HANDLER_SCRIPT := preload("res://scripts/pause_input_handler.gd")
-const UPGRADE_CATALOG_SCRIPT := preload("res://scripts/upgrade_catalog.gd")
+const ENCOUNTER_DIRECTOR_SCRIPT := preload("res://scripts/run_encounter_director.gd")
+const UPGRADE_SERVICE_SCRIPT := preload("res://scripts/run_upgrade_service.gd")
+const RUN_FLOW_STATE_SCRIPT := preload("res://scripts/run_flow_state.gd")
+const RUN_HUD_PRESENTER_SCRIPT := preload("res://scripts/run_hud_presenter.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
 const BUILD_LABEL := "月蚀混战扩展版 2026.08.31C"
 const ROOMS_PER_RUN := 20
@@ -75,6 +78,8 @@ var _current_room_index: int = -1
 var _current_room_data: Dictionary = {}
 var _run_generation: int = 0
 var _run_number: int = 0
+var _flow_state: RunFlowState = RUN_FLOW_STATE_SCRIPT.new() as RunFlowState
+var _hud_presenter: RunHUDPresenter
 var _run_active: bool = false
 var _choosing_upgrade: bool = false
 var _run_complete: bool = false
@@ -127,13 +132,19 @@ var _dash_slot: Control
 var _skill_slot: Control
 var _weapon_slot_panels: Array[Panel] = []
 var _weapon_slot_labels: Array[Label] = []
-var _weapon_hud_state_key: String = ""
 var _lives_remaining: int = MAX_RUN_LIVES
 var _settings: RefCounted
 var _pause_overlay: Control
 var _settings_overlay: Control
 var _settings_key_buttons: Dictionary = {}
 var _settings_volume_slider: HSlider
+var _settings_music_slider: HSlider
+var _settings_effects_slider: HSlider
+var _settings_voice_slider: HSlider
+var _settings_resolution_selector: OptionButton
+var _settings_fullscreen_toggle: CheckButton
+var _settings_vsync_toggle: CheckButton
+var _settings_reduced_effects_toggle: CheckButton
 var _settings_damage_numbers_toggle: CheckButton
 var _settings_guide_label: RichTextLabel
 var _settings_from_pause: bool = false
@@ -141,6 +152,18 @@ var _awaiting_rebind_action: StringName = &""
 var _is_game_paused: bool = false
 var _pause_input_handler: Node
 var _soundscape: RogueSoundscape
+
+
+func _set_run_phase(next_phase: int) -> void:
+	_flow_state.transition_to(next_phase)
+	_run_active = _flow_state.run_active
+	_choosing_upgrade = _flow_state.choosing_upgrade
+	_run_complete = _flow_state.run_complete
+	_death_restart_pending = _flow_state.death_restart_pending
+	_awaiting_chest = _flow_state.awaiting_chest
+	_shopping = _flow_state.shopping
+	_event_active = _flow_state.event_active
+	_risk_ambush_active = _flow_state.risk_ambush_active
 
 
 func _ready() -> void:
@@ -152,6 +175,9 @@ func _ready() -> void:
 	_seed_rng.randomize()
 	_settings = SETTINGS_STORE_SCRIPT.new() as RefCounted
 	_settings.call(&"load_settings")
+	player.set_reduced_effects_enabled(
+		bool(_settings.call(&"get_reduced_effects_enabled"))
+	)
 	_soundscape = SOUNDSCAPE_SCRIPT.new() as RogueSoundscape
 	add_child(_soundscape)
 	_configure_inputs()
@@ -160,6 +186,10 @@ func _ready() -> void:
 	_pause_input_handler.key_pressed.connect(_on_always_key_pressed)
 	_configure_camera()
 	_create_combat_hud()
+	_hud_presenter = RUN_HUD_PRESENTER_SCRIPT.new() as RunHUDPresenter
+	if not _hud_presenter.bind(hud):
+		push_error("Combat HUD presenter could not bind the expected node contract")
+	_update_ability_hud()
 	_create_upgrade_ui()
 	_create_entry_ui()
 	_create_pause_ui()
@@ -352,6 +382,9 @@ func _update_camera_shake(delta: float) -> void:
 
 
 func _trigger_camera_shake(strength: float, duration: float = 0.09) -> void:
+	if _settings != null and bool(_settings.call(&"get_reduced_effects_enabled")):
+		strength *= 0.25
+		duration *= 0.70
 	_camera_shake_strength = maxf(_camera_shake_strength, strength)
 	_camera_shake_duration = maxf(_camera_shake_duration, duration)
 	_camera_shake_remaining = maxf(_camera_shake_remaining, duration)
@@ -660,7 +693,6 @@ func _create_ability_hud() -> void:
 	_skill_slot.position = Vector2(196.0, 0.0)
 	_skill_slot.size = Vector2(78.0, 76.0)
 	ability_bar.add_child(_skill_slot)
-	_update_ability_hud()
 
 
 func _create_upgrade_ui() -> void:
@@ -890,33 +922,72 @@ func _create_settings_ui() -> void:
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_settings_overlay.add_child(title)
 
-	var volume_label := Label.new()
-	volume_label.position = Vector2(125.0, 123.0)
-	volume_label.size = Vector2(180.0, 30.0)
-	volume_label.text = "主音量"
-	volume_label.add_theme_font_size_override("font_size", 18)
-	volume_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_settings_overlay.add_child(volume_label)
-	_settings_volume_slider = HSlider.new()
-	_settings_volume_slider.name = "MasterVolume"
-	_settings_volume_slider.position = Vector2(245.0, 127.0)
-	_settings_volume_slider.size = Vector2(390.0, 24.0)
-	_settings_volume_slider.min_value = 0.0
-	_settings_volume_slider.max_value = 1.0
-	_settings_volume_slider.step = 0.05
-	_settings_volume_slider.value_changed.connect(_on_master_volume_changed)
-	_settings_overlay.add_child(_settings_volume_slider)
+	_settings_volume_slider = _create_settings_audio_slider(
+		"MasterVolume", "主音量", Vector2(100.0, 118.0), 150.0,
+		_on_master_volume_changed
+	)
+	_settings_music_slider = _create_settings_audio_slider(
+		"MusicVolume", "音乐", Vector2(330.0, 118.0), 150.0,
+		_on_music_volume_changed
+	)
+	_settings_effects_slider = _create_settings_audio_slider(
+		"EffectsVolume", "音效", Vector2(560.0, 118.0), 150.0,
+		_on_effects_volume_changed
+	)
+	_settings_voice_slider = _create_settings_audio_slider(
+		"VoiceVolume", "语音", Vector2(790.0, 118.0), 150.0,
+		_on_voice_volume_changed
+	)
 	_settings_damage_numbers_toggle = CheckButton.new()
 	_settings_damage_numbers_toggle.name = "DamageNumbersToggle"
-	_settings_damage_numbers_toggle.position = Vector2(680.0, 118.0)
-	_settings_damage_numbers_toggle.size = Vector2(210.0, 34.0)
+	_settings_damage_numbers_toggle.position = Vector2(1010.0, 118.0)
+	_settings_damage_numbers_toggle.size = Vector2(175.0, 34.0)
 	_settings_damage_numbers_toggle.text = "显示伤害数字"
 	_settings_damage_numbers_toggle.add_theme_font_size_override("font_size", 17)
 	_settings_damage_numbers_toggle.toggled.connect(_on_damage_numbers_toggled)
 	_settings_overlay.add_child(_settings_damage_numbers_toggle)
 
+	var resolution_label := Label.new()
+	resolution_label.position = Vector2(125.0, 160.0)
+	resolution_label.size = Vector2(74.0, 34.0)
+	resolution_label.text = "分辨率"
+	resolution_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	resolution_label.add_theme_font_size_override("font_size", 16)
+	_settings_overlay.add_child(resolution_label)
+	_settings_resolution_selector = OptionButton.new()
+	_settings_resolution_selector.name = "ResolutionSelector"
+	_settings_resolution_selector.position = Vector2(200.0, 160.0)
+	_settings_resolution_selector.size = Vector2(174.0, 34.0)
+	var resolution_options: Array = _settings.call(&"get_resolution_options") as Array
+	for resolution_value: Variant in resolution_options:
+		var resolution: Vector2i = resolution_value
+		_settings_resolution_selector.add_item("%d × %d" % [resolution.x, resolution.y])
+	_settings_resolution_selector.item_selected.connect(_on_resolution_selected)
+	_settings_overlay.add_child(_settings_resolution_selector)
+	_settings_fullscreen_toggle = _create_settings_toggle(
+		"FullscreenToggle", "全屏", Vector2(392.0, 158.0),
+		_on_fullscreen_toggled
+	)
+	_settings_vsync_toggle = _create_settings_toggle(
+		"VsyncToggle", "垂直同步", Vector2(535.0, 158.0),
+		_on_vsync_toggled
+	)
+	_settings_reduced_effects_toggle = _create_settings_toggle(
+		"ReducedEffectsToggle", "减弱闪光/震动", Vector2(680.0, 158.0),
+		_on_reduced_effects_toggled
+	)
+	var controller_status := Label.new()
+	controller_status.name = "ControllerStatus"
+	controller_status.position = Vector2(870.0, 160.0)
+	controller_status.size = Vector2(325.0, 34.0)
+	controller_status.text = "手柄：Xbox 布局已启用"
+	controller_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	controller_status.add_theme_font_size_override("font_size", 15)
+	controller_status.add_theme_color_override("font_color", Color(0.56, 0.82, 0.88, 1.0))
+	_settings_overlay.add_child(controller_status)
+
 	var hint := Label.new()
-	hint.position = Vector2(125.0, 180.0)
+	hint.position = Vector2(125.0, 192.0)
 	hint.size = Vector2(590.0, 32.0)
 	hint.text = "点击键位按钮后按下新的按键；同一个键不会同时分配给多个动作。"
 	hint.add_theme_font_size_override("font_size", 15)
@@ -926,8 +997,8 @@ func _create_settings_ui() -> void:
 
 	var guide_panel := Panel.new()
 	guide_panel.name = "OperationGuidePanel"
-	guide_panel.position = Vector2(755.0, 174.0)
-	guide_panel.size = Vector2(405.0, 376.0)
+	guide_panel.position = Vector2(755.0, 210.0)
+	guide_panel.size = Vector2(405.0, 380.0)
 	guide_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var guide_style := StyleBoxFlat.new()
 	guide_style.bg_color = Color(0.016, 0.038, 0.060, 0.94)
@@ -941,8 +1012,8 @@ func _create_settings_ui() -> void:
 	_settings_overlay.add_child(guide_panel)
 	_settings_guide_label = RichTextLabel.new()
 	_settings_guide_label.name = "OperationGuide"
-	_settings_guide_label.position = Vector2(782.0, 196.0)
-	_settings_guide_label.size = Vector2(351.0, 334.0)
+	_settings_guide_label.position = Vector2(782.0, 232.0)
+	_settings_guide_label.size = Vector2(351.0, 336.0)
 	_settings_guide_label.bbcode_enabled = true
 	_settings_guide_label.fit_content = false
 	_settings_guide_label.scroll_active = false
@@ -987,6 +1058,50 @@ func _create_settings_ui() -> void:
 	_settings_overlay.visible = false
 
 
+func _create_settings_audio_slider(
+	node_name: String,
+	label_text: String,
+	group_position: Vector2,
+	slider_width: float,
+	changed_callback: Callable
+) -> HSlider:
+	var label := Label.new()
+	label.position = group_position
+	label.size = Vector2(62.0, 32.0)
+	label.text = label_text
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 16)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_settings_overlay.add_child(label)
+	var slider := HSlider.new()
+	slider.name = node_name
+	slider.position = group_position + Vector2(62.0, 5.0)
+	slider.size = Vector2(slider_width, 24.0)
+	slider.min_value = 0.0
+	slider.max_value = 1.0
+	slider.step = 0.05
+	slider.value_changed.connect(changed_callback)
+	_settings_overlay.add_child(slider)
+	return slider
+
+
+func _create_settings_toggle(
+	node_name: String,
+	button_text: String,
+	button_position: Vector2,
+	toggled_callback: Callable
+) -> CheckButton:
+	var toggle := CheckButton.new()
+	toggle.name = node_name
+	toggle.position = button_position
+	toggle.size = Vector2(180.0 if button_text.length() > 4 else 130.0, 36.0)
+	toggle.text = button_text
+	toggle.add_theme_font_size_override("font_size", 16)
+	toggle.toggled.connect(toggled_callback)
+	_settings_overlay.add_child(toggle)
+	return toggle
+
+
 func _create_menu_button(node_name: String, button_text: String, button_position: Vector2, button_size: Vector2) -> Button:
 	var button := Button.new()
 	button.name = node_name
@@ -1015,6 +1130,7 @@ func _resume_game() -> void:
 
 func _return_to_main_menu() -> void:
 	_resume_game()
+	_set_run_phase(RunFlowState.Phase.IDLE)
 	_clear_chest()
 	_clear_projectiles()
 	_clear_enemies()
@@ -1028,7 +1144,16 @@ func _open_settings(from_pause: bool) -> void:
 	_settings_from_pause = from_pause
 	_awaiting_rebind_action = &""
 	_settings_volume_slider.value = float(_settings.call(&"get_master_volume"))
+	_settings_music_slider.value = float(_settings.call(&"get_music_volume"))
+	_settings_effects_slider.value = float(_settings.call(&"get_effects_volume"))
+	_settings_voice_slider.value = float(_settings.call(&"get_voice_volume"))
 	_settings_damage_numbers_toggle.button_pressed = bool(_settings.call(&"get_damage_numbers_enabled"))
+	_settings_resolution_selector.select(int(_settings.call(&"get_resolution_index")))
+	_settings_fullscreen_toggle.button_pressed = bool(_settings.call(&"get_fullscreen_enabled"))
+	_settings_vsync_toggle.button_pressed = bool(_settings.call(&"get_vsync_enabled"))
+	_settings_reduced_effects_toggle.button_pressed = bool(
+		_settings.call(&"get_reduced_effects_enabled")
+	)
 	_refresh_settings_key_buttons()
 	_settings_overlay.visible = true
 
@@ -1095,8 +1220,42 @@ func _on_master_volume_changed(value: float) -> void:
 	_settings.call(&"set_master_volume", value)
 
 
+func _on_music_volume_changed(value: float) -> void:
+	_settings.call(&"set_music_volume", value)
+
+
+func _on_effects_volume_changed(value: float) -> void:
+	_settings.call(&"set_effects_volume", value)
+
+
+func _on_voice_volume_changed(value: float) -> void:
+	_settings.call(&"set_voice_volume", value)
+
+
 func _on_damage_numbers_toggled(enabled: bool) -> void:
 	_settings.call(&"set_damage_numbers_enabled", enabled)
+
+
+func _on_resolution_selected(option_index: int) -> void:
+	_settings.call(&"set_resolution_index", option_index)
+
+
+func _on_fullscreen_toggled(enabled: bool) -> void:
+	_settings.call(&"set_fullscreen_enabled", enabled)
+
+
+func _on_vsync_toggled(enabled: bool) -> void:
+	_settings.call(&"set_vsync_enabled", enabled)
+
+
+func _on_reduced_effects_toggled(enabled: bool) -> void:
+	_settings.call(&"set_reduced_effects_enabled", enabled)
+	player.set_reduced_effects_enabled(enabled)
+	if enabled:
+		_camera_shake_remaining = 0.0
+		var camera: Camera2D = player.get_node_or_null("Camera2D") as Camera2D
+		if camera != null:
+			camera.position = _camera_base_position
 
 
 func _reset_bindings() -> void:
@@ -1188,15 +1347,10 @@ func _start_new_run() -> void:
 	else:
 		_run_seed = _seed_rng.randi_range(1, 999999)
 	_rng.seed = _run_seed
-	_run_active = false
-	_choosing_upgrade = false
-	_run_complete = false
-	_death_restart_pending = false
+	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_last_upgrade_name = ""
 	_current_encounter = EncounterType.NORMAL
 	_current_combat_profile.clear()
-	_awaiting_chest = false
-	_shopping = false
 	_gold = 10
 	_run_shards = 0
 	_hide_upgrade_overlay()
@@ -1208,7 +1362,7 @@ func _start_new_run() -> void:
 	player.configure_weapon(_progression.get_selected_weapon())
 	player.reset_run_progression()
 	_boss_health_background.visible = false
-	_encounter_sequence = _build_encounter_sequence()
+	_encounter_sequence = ENCOUNTER_DIRECTOR_SCRIPT.build_sequence(ROOMS_PER_RUN, _rng)
 	_room_sequence = ROOM_CATALOG_SCRIPT.build_room_sequence(
 		_room_pool.size(),
 		ROOMS_PER_RUN,
@@ -1226,107 +1380,6 @@ func _start_new_run() -> void:
 	_advance_to_next_room()
 
 
-func _build_encounter_sequence() -> Array[int]:
-	var sequence: Array[int] = []
-	var chapter_count: int = ceili(float(ROOMS_PER_RUN) / 5.0)
-	for chapter_index in range(chapter_count):
-		sequence.append(EncounterType.NORMAL)
-		var chapter_specials: Array[int]
-		if chapter_index == 0:
-			chapter_specials = [
-				EncounterType.TREASURE,
-				EncounterType.ELITE,
-				EncounterType.SHOP,
-			]
-		else:
-			chapter_specials = _build_weighted_chapter_specials(chapter_index)
-		for encounter: int in chapter_specials:
-			sequence.append(encounter)
-		sequence.append(EncounterType.BOSS)
-	sequence.resize(ROOMS_PER_RUN)
-	return sequence
-
-
-func _build_weighted_chapter_specials(chapter_index: int) -> Array[int]:
-	# Each later chapter guarantees one new room archetype. The other two slots are
-	# weighted without replacement, with at least one recovery/economy room.
-	var required_new_types: Array[int] = [
-		EncounterType.EVENT,
-		EncounterType.CHALLENGE,
-		EncounterType.RISK_CHEST,
-	]
-	var selected: Array[int] = [required_new_types[clampi(chapter_index - 1, 0, 2)]]
-	if selected[0] != EncounterType.EVENT:
-		selected.append(_weighted_encounter_pick(
-			[EncounterType.TREASURE, EncounterType.SHOP, EncounterType.EVENT],
-			selected,
-			chapter_index
-		))
-	while selected.size() < 3:
-		selected.append(_weighted_encounter_pick(
-			[
-				EncounterType.TREASURE,
-				EncounterType.ELITE,
-				EncounterType.SHOP,
-				EncounterType.EVENT,
-				EncounterType.CHALLENGE,
-				EncounterType.RISK_CHEST,
-			],
-			selected,
-			chapter_index
-		))
-	_shuffle_encounters(selected)
-	return selected
-
-
-func _weighted_encounter_pick(
-	candidates: Array[int],
-	excluded: Array[int],
-	chapter_index: int
-) -> int:
-	var available: Array[int] = []
-	var total_weight: float = 0.0
-	for encounter: int in candidates:
-		if encounter in excluded:
-			continue
-		available.append(encounter)
-		total_weight += _get_encounter_weight(encounter, chapter_index)
-	if available.is_empty():
-		return EncounterType.NORMAL
-	var roll: float = _rng.randf_range(0.0, total_weight)
-	for encounter: int in available:
-		roll -= _get_encounter_weight(encounter, chapter_index)
-		if roll <= 0.0:
-			return encounter
-	return available.back()
-
-
-func _get_encounter_weight(encounter: int, chapter_index: int) -> float:
-	match encounter:
-		EncounterType.TREASURE:
-			return 1.65
-		EncounterType.ELITE:
-			return 1.10 + float(chapter_index) * 0.16
-		EncounterType.SHOP:
-			return 1.30
-		EncounterType.EVENT:
-			return 1.35
-		EncounterType.CHALLENGE:
-			return 0.72 + float(chapter_index) * 0.22
-		EncounterType.RISK_CHEST:
-			return 0.80 + float(chapter_index) * 0.18
-		_:
-			return 1.0
-
-
-func _shuffle_encounters(encounters: Array[int]) -> void:
-	for encounter_index in range(encounters.size() - 1, 0, -1):
-		var swap_index: int = _rng.randi_range(0, encounter_index)
-		var held_encounter: int = encounters[encounter_index]
-		encounters[encounter_index] = encounters[swap_index]
-		encounters[swap_index] = held_encounter
-
-
 func _advance_to_next_room() -> void:
 	if _telemetry != null:
 		_telemetry.complete_room(&"advanced")
@@ -1342,12 +1395,7 @@ func _load_room(pool_index: int) -> void:
 		push_error("Invalid room pool index: %d" % pool_index)
 		return
 
-	_run_active = false
-	_choosing_upgrade = false
-	_awaiting_chest = false
-	_shopping = false
-	_event_active = false
-	_risk_ambush_active = false
+	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_pending_risk_gold = 0
 	_pending_risk_heal = 0
 	_challenge_reward_granted = false
@@ -1384,27 +1432,27 @@ func _load_room(pool_index: int) -> void:
 	var room_title: String = _current_room_data.get("title", "未知房间")
 	if _current_encounter == EncounterType.SHOP:
 		player.set_input_enabled(false)
-		_run_active = false
 		_show_shop()
 	elif _current_encounter == EncounterType.EVENT:
 		player.set_input_enabled(false)
-		_run_active = false
 		_show_event_choice()
 	else:
 		player.set_input_enabled(true)
-		_run_active = true
 		if _current_encounter == EncounterType.RISK_CHEST:
+			_set_run_phase(RunFlowState.Phase.CHEST)
 			_status_label.text = "风险宝箱已出现——开启后击败伏兵才能领取奖励"
-		elif _current_encounter == EncounterType.CHALLENGE:
-			_status_label.text = "进入 %s·挑战房——高压敌群，胜利获得额外金币与星屑" % room_title
-		elif _last_upgrade_name.is_empty():
-			_status_label.text = "进入 %s·%s——清除全部敌人" % [
-				room_title,
-				_get_encounter_name(_current_encounter),
-			]
 		else:
-			_status_label.text = "已获得「%s」；进入 %s" % [_last_upgrade_name, room_title]
-			_last_upgrade_name = ""
+			_set_run_phase(RunFlowState.Phase.COMBAT)
+			if _current_encounter == EncounterType.CHALLENGE:
+				_status_label.text = "进入 %s·挑战房——高压敌群，胜利获得额外金币与星屑" % room_title
+			elif _last_upgrade_name.is_empty():
+				_status_label.text = "进入 %s·%s——清除全部敌人" % [
+					room_title,
+					_get_encounter_name(_current_encounter),
+				]
+			else:
+				_status_label.text = "已获得「%s」；进入 %s" % [_last_upgrade_name, room_title]
+				_last_upgrade_name = ""
 	_update_controls()
 	_update_room_label()
 	queue_redraw()
@@ -1775,13 +1823,13 @@ func _spawn_defeat_vfx(defeat_position: Vector2, enemy: RogueEnemy) -> void:
 func _on_room_cleared() -> void:
 	if not _run_active or _choosing_upgrade or _run_complete or not _enemies.is_empty():
 		return
-	_run_active = false
+	var resolved_risk_ambush: bool = _risk_ambush_active
+	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_clear_projectiles()
 	if _current_encounter == EncounterType.TREASURE and not _awaiting_chest:
 		_spawn_reward_chest()
 		return
-	if _current_encounter == EncounterType.RISK_CHEST and _risk_ambush_active:
-		_risk_ambush_active = false
+	if _current_encounter == EncounterType.RISK_CHEST and resolved_risk_ambush:
 		_gold += _pending_risk_gold
 		var restored_health: int = player.heal(_pending_risk_heal)
 		_status_label.text = "风险挑战完成：金币 +%d，生命恢复 %d" % [
@@ -1806,15 +1854,13 @@ func _on_room_cleared() -> void:
 
 
 func _show_upgrade_choice() -> void:
-	_shopping = false
-	_event_active = false
 	_upgrade_choices = _pick_upgrade_choices()
 	if _upgrade_choices.size() < 3:
 		push_error("Upgrade pool did not provide three choices")
 		return
 	if _telemetry != null:
 		_telemetry.record_upgrade_offers(_upgrade_choices, player.get_weapon_id())
-	_choosing_upgrade = true
+	_set_run_phase(RunFlowState.Phase.UPGRADE)
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "房间已清理——选择一项强化"
 	_upgrade_hint.text = "点击卡片，或按数字键 1 / 2 / 3"
@@ -1833,15 +1879,12 @@ func _show_upgrade_choice() -> void:
 
 
 func _show_shop() -> void:
-	_shopping = true
-	_event_active = false
-	_choosing_upgrade = true
-	_upgrade_choices.clear()
-	var base_choices: Array[Dictionary] = _pick_upgrade_choices()
-	for choice_index in range(base_choices.size()):
-		var shop_offer: Dictionary = base_choices[choice_index].duplicate(true)
-		shop_offer["cost"] = 16 + choice_index * 4
-		_upgrade_choices.append(shop_offer)
+	_set_run_phase(RunFlowState.Phase.SHOP)
+	_upgrade_choices = UPGRADE_SERVICE_SCRIPT.create_shop_offers(
+		player.get_weapon_id(),
+		player.get_run_upgrade_counts(),
+		_rng
+	)
 	if _telemetry != null:
 		_telemetry.record_upgrade_offers(_upgrade_choices, player.get_weapon_id())
 	_upgrade_overlay.visible = true
@@ -1865,9 +1908,7 @@ func _show_shop() -> void:
 
 
 func _show_event_choice() -> void:
-	_shopping = false
-	_event_active = true
-	_choosing_upgrade = true
+	_set_run_phase(RunFlowState.Phase.EVENT)
 	_upgrade_choices = [
 		{
 			"id": &"event_rest",
@@ -1909,26 +1950,10 @@ func _show_event_choice() -> void:
 
 
 func _pick_upgrade_choices() -> Array[Dictionary]:
-	var upgrade_pool: Array[Dictionary] = _create_upgrade_pool()
-	var available_indices: Array[int] = []
-	for upgrade_index in range(upgrade_pool.size()):
-		available_indices.append(upgrade_index)
-	for index in range(available_indices.size() - 1, 0, -1):
-		var swap_index: int = _rng.randi_range(0, index)
-		var held_index: int = available_indices[index]
-		available_indices[index] = available_indices[swap_index]
-		available_indices[swap_index] = held_index
-
-	var choices: Array[Dictionary] = []
-	for choice_index in range(mini(3, available_indices.size())):
-		choices.append(upgrade_pool[available_indices[choice_index]])
-	return choices
-
-
-func _create_upgrade_pool() -> Array[Dictionary]:
-	return UPGRADE_CATALOG_SCRIPT.create_available_pool(
+	return UPGRADE_SERVICE_SCRIPT.pick_choices(
 		player.get_weapon_id(),
-		player.get_run_upgrade_counts()
+		player.get_run_upgrade_counts(),
+		_rng
 	)
 
 
@@ -1954,8 +1979,7 @@ func choose_upgrade(choice_index: int) -> bool:
 	if _telemetry != null:
 		_telemetry.record_upgrade_choice(upgrade_id, player.get_weapon_id())
 	_last_upgrade_name = String(choice.get("name", "强化"))
-	_choosing_upgrade = false
-	_shopping = false
+	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_upgrade_choices.clear()
 	_hide_upgrade_overlay()
 	_update_economy_hud()
@@ -1980,8 +2004,7 @@ func _resolve_event_choice(choice_index: int) -> bool:
 		_:
 			return false
 	_last_upgrade_name = String(choice.get("name", "奇遇"))
-	_event_active = false
-	_choosing_upgrade = false
+	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_upgrade_choices.clear()
 	_hide_upgrade_overlay()
 	_update_economy_hud()
@@ -1993,8 +2016,7 @@ func _leave_shop() -> void:
 	if not _shopping:
 		return
 	_last_upgrade_name = "未购物"
-	_shopping = false
-	_choosing_upgrade = false
+	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_upgrade_choices.clear()
 	_hide_upgrade_overlay()
 	_advance_to_next_room()
@@ -2003,9 +2025,7 @@ func _leave_shop() -> void:
 func _complete_run() -> void:
 	if _run_complete:
 		return
-	_run_active = false
-	_choosing_upgrade = false
-	_run_complete = true
+	_set_run_phase(RunFlowState.Phase.COMPLETE)
 	if _telemetry != null:
 		_telemetry.finish_run(true, player.get_weapon_id(), &"victory")
 	_clear_projectiles()
@@ -2050,7 +2070,7 @@ func _spawn_reward_chest() -> void:
 	)
 	_chest.opened.connect(_on_chest_opened)
 	add_child(_chest)
-	_awaiting_chest = true
+	_set_run_phase(RunFlowState.Phase.CHEST)
 	player.set_input_enabled(true)
 	_status_label.text = "宝藏已出现——跟随宝箱上方提示"
 	_update_controls()
@@ -2078,7 +2098,7 @@ func _spawn_risk_chest() -> void:
 	)
 	_chest.opened.connect(_on_chest_opened)
 	add_child(_chest)
-	_awaiting_chest = true
+	_set_run_phase(RunFlowState.Phase.CHEST)
 	player.set_input_enabled(true)
 	_update_controls()
 
@@ -2098,18 +2118,17 @@ func open_current_chest_for_test() -> bool:
 func _on_chest_opened(gold_reward: int, heal_reward: int) -> void:
 	if not _awaiting_chest:
 		return
-	_awaiting_chest = false
 	if _current_encounter == EncounterType.RISK_CHEST:
 		_pending_risk_gold = gold_reward
 		_pending_risk_heal = heal_reward
-		_risk_ambush_active = true
-		_run_active = true
+		_set_run_phase(RunFlowState.Phase.RISK_AMBUSH)
 		player.set_input_enabled(true)
 		_spawn_risk_ambush()
 		_status_label.text = "风险宝箱触发伏兵——清除全部敌人领取奖励"
 		_update_controls()
 		return
 	_gold += gold_reward
+	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	var restored_health: int = player.heal(heal_reward)
 	player.set_input_enabled(false)
 	_status_label.text = "宝箱：金币 +%d，生命恢复 %d" % [gold_reward, restored_health]
@@ -2119,7 +2138,6 @@ func _on_chest_opened(gold_reward: int, heal_reward: int) -> void:
 
 func _spawn_risk_ambush() -> void:
 	if platform_rects.is_empty():
-		_risk_ambush_active = false
 		call_deferred(&"_on_room_cleared")
 		return
 	var ambush_count: int = int(_current_combat_profile.get("risk_ambush_count", 4))
@@ -2146,7 +2164,6 @@ func _spawn_risk_ambush() -> void:
 			ambush_index
 		)
 	if _enemies.is_empty():
-		_risk_ambush_active = false
 		call_deferred(&"_on_room_cleared")
 
 
@@ -2154,7 +2171,6 @@ func _clear_chest() -> void:
 	if is_instance_valid(_chest):
 		_chest.queue_free()
 	_chest = null
-	_awaiting_chest = false
 
 
 func _on_enemy_projectile_requested(
@@ -2201,20 +2217,8 @@ func _clear_projectiles() -> void:
 
 
 func _on_player_health_changed(current_health: int, maximum_health: int) -> void:
-	if not is_instance_valid(_health_label) or not is_instance_valid(_health_fill):
-		return
-	var health_ratio: float = clampf(
-		float(current_health) / float(maxi(maximum_health, 1)),
-		0.0,
-		1.0
-	)
-	_health_fill.size.x = HEALTH_FILL_WIDTH * health_ratio
-	_health_fill.color = (
-		Color(0.90, 0.24, 0.22, 0.96)
-		if health_ratio <= 0.30
-		else Color(0.18, 0.82, 0.50, 0.96)
-	)
-	_health_label.text = "生命  %d / %d" % [current_health, maximum_health]
+	if _hud_presenter != null:
+		_hud_presenter.update_health(current_health, maximum_health)
 
 
 func _on_player_damage_received(amount: int, cause: StringName) -> void:
@@ -2223,33 +2227,21 @@ func _on_player_damage_received(amount: int, cause: StringName) -> void:
 
 
 func _update_lives_hud() -> void:
-	if not is_instance_valid(_lives_label):
-		return
-	var marks := ""
-	for life_index in range(MAX_RUN_LIVES):
-		marks += "●" if life_index < _lives_remaining else "○"
-	_lives_label.text = "命数  %s   难度：%s" % [marks, get_selected_difficulty_name()]
+	if _hud_presenter != null:
+		_hud_presenter.update_lives(
+			_lives_remaining,
+			MAX_RUN_LIVES,
+			get_selected_difficulty_name()
+		)
 
 
 func _on_boss_health_changed(current_health: int, maximum_health: int) -> void:
-	if not is_instance_valid(_boss_health_background):
-		return
-	var health_ratio: float = clampf(
-		float(current_health) / float(maxi(1, maximum_health)),
-		0.0,
-		1.0
-	)
-	_boss_health_fill.size.x = 492.0 * health_ratio
 	var boss_name: String = "赤晶史莱姆王"
 	if is_instance_valid(_boss_enemy) and _boss_enemy.get_enemy_family() == ENEMY_FAMILY_GOBLIN:
 		boss_name = "赤牙战争酋长"
 	var boss_phase: int = _boss_enemy.get_boss_phase() if is_instance_valid(_boss_enemy) else 1
-	_boss_health_label.text = "%s  阶段 %d  ·  %d / %d" % [
-		boss_name,
-		boss_phase,
-		current_health,
-		maximum_health,
-	]
+	if _hud_presenter != null:
+		_hud_presenter.update_boss(current_health, maximum_health, boss_name, boss_phase)
 
 
 func _on_boss_phase_changed(phase: int) -> void:
@@ -2265,10 +2257,7 @@ func _on_player_died() -> void:
 		var death_reason: StringName = player.get_last_death_reason()
 		_telemetry.record_death(death_reason)
 		_telemetry.finish_run(false, player.get_weapon_id(), death_reason)
-	_run_active = false
-	_choosing_upgrade = false
-	_shopping = false
-	_death_restart_pending = true
+	_set_run_phase(RunFlowState.Phase.DEATH_RESTART)
 	_lives_remaining = maxi(0, _lives_remaining - 1)
 	player.set_input_enabled(false)
 	_clear_chest()
@@ -2298,7 +2287,7 @@ func _finish_death_sequence(expected_generation: int) -> void:
 	if _lives_remaining > 0:
 		_start_new_run()
 		return
-	_death_restart_pending = false
+	_set_run_phase(RunFlowState.Phase.IDLE)
 	_clear_chest()
 	_clear_projectiles()
 	_clear_enemies()
@@ -2319,149 +2308,42 @@ func _update_controls() -> void:
 
 
 func _update_room_label() -> void:
-	if _current_room_data.is_empty():
-		_room_label.text = ""
+	if _hud_presenter == null:
 		return
 	var room_title: String = _current_room_data.get("title", "未知房间")
 	var chapter_name: String = _get_chapter_name(_current_room_index)
-	if _run_complete:
-		_room_label.text = "轮次完成 · RUN %02d · S%06d\n月蚀回廊已净化" % [
-			_run_number,
-			_run_seed,
-		]
-	else:
-		_room_label.text = "房间 %02d/%02d · %s · S%06d\n%s · %s" % [
-			_current_room_index + 1,
-			ROOMS_PER_RUN,
-			_get_encounter_name(_current_encounter),
-			_run_seed,
-			chapter_name,
-			room_title,
-		]
+	_hud_presenter.update_room(
+		not _current_room_data.is_empty(),
+		_run_complete,
+		_run_number,
+		_run_seed,
+		_current_room_index + 1,
+		ROOMS_PER_RUN,
+		_get_encounter_name(_current_encounter),
+		chapter_name,
+		room_title
+	)
 
 
 func _update_economy_hud() -> void:
-	if not is_instance_valid(_currency_label) or _progression == null:
+	if _hud_presenter == null or _progression == null:
 		return
-	_currency_label.text = "金币 %d    局外星屑 %d（本局待结算 %d）" % [
+	_hud_presenter.update_economy(
 		_gold,
 		_progression.get_meta_shards(),
-		_run_shards,
-	]
+		_run_shards
+	)
 
 
 func _update_equipment_hud() -> void:
-	if not is_instance_valid(_equipment_label) or _progression == null:
+	if _hud_presenter == null or _progression == null:
 		return
-	_equipment_label.text = "武器库  ·  当前：%s" % player.get_weapon_name()
-	_update_weapon_slots()
-
-
-func _update_weapon_slots() -> void:
-	if _progression == null:
-		return
-	var weapon_ids: Array[StringName] = WeaponCatalog.all_weapon_ids()
-	if _weapon_slot_panels.size() != weapon_ids.size() or _weapon_slot_labels.size() != weapon_ids.size():
-		return
-	var unlocked: Array[StringName] = _progression.get_unlocked_weapons()
-	var active_weapon: StringName = player.get_weapon_id()
-	var state_parts: Array[String] = [String(active_weapon)]
-	for weapon_id in weapon_ids:
-		state_parts.append("1" if unlocked.has(weapon_id) else "0")
-	var state_key: String = "|".join(state_parts)
-	if state_key == _weapon_hud_state_key:
-		return
-	_weapon_hud_state_key = state_key
-
-	for weapon_index in range(weapon_ids.size()):
-		var weapon_id: StringName = weapon_ids[weapon_index]
-		var weapon_data: Dictionary = WeaponCatalog.get_weapon(weapon_id)
-		var accent: Color = weapon_data.get("accent", Color("#78d9ef"))
-		var is_unlocked: bool = unlocked.has(weapon_id)
-		var is_active: bool = weapon_id == active_weapon
-		var slot: Panel = _weapon_slot_panels[weapon_index]
-		var slot_label: Label = _weapon_slot_labels[weapon_index]
-		var slot_style := StyleBoxFlat.new()
-		slot_style.bg_color = (
-			Color(accent, 0.20)
-			if is_active
-			else Color(0.026, 0.054, 0.070, 0.98) if is_unlocked
-			else Color(0.018, 0.027, 0.036, 0.96)
-		)
-		slot_style.border_color = (
-			Color(accent, 0.96)
-			if is_active
-			else Color(0.37, 0.55, 0.62, 0.58) if is_unlocked
-			else Color(0.22, 0.27, 0.31, 0.60)
-		)
-		slot_style.set_border_width_all(2 if is_active else 1)
-		slot_style.corner_radius_top_left = 6
-		slot_style.corner_radius_top_right = 6
-		slot_style.corner_radius_bottom_left = 6
-		slot_style.corner_radius_bottom_right = 6
-		if is_active:
-			slot_style.shadow_color = Color(accent, 0.35)
-			slot_style.shadow_size = 5
-		slot.add_theme_stylebox_override("panel", slot_style)
-
-		var slot_state := "未解锁"
-		if is_active:
-			slot_state = "装备中"
-		elif is_unlocked:
-			slot_state = "可切换"
-		var weapon_name: String = WeaponCatalog.get_weapon_name(weapon_id)
-		slot_label.text = "%s\n%s" % [weapon_name, slot_state]
-		slot_label.add_theme_color_override(
-			"font_color",
-			accent.lightened(0.18) if is_active else Color(0.67, 0.76, 0.79, 1.0) if is_unlocked else Color(0.34, 0.39, 0.42, 1.0)
-		)
-		slot.tooltip_text = "%s · %s" % [weapon_name, slot_state]
+	_hud_presenter.update_equipment(player, _progression)
 
 
 func _update_ability_hud() -> void:
-	if not is_instance_valid(_attack_slot) or not is_instance_valid(_dash_slot) or not is_instance_valid(_skill_slot):
-		return
-	var weapon_data: Dictionary = WeaponCatalog.get_weapon(player.get_weapon_id())
-	var weapon_accent: Color = weapon_data.get("accent", Color("#78d9ef"))
-	_attack_slot.call(
-		&"configure",
-		0,
-		"普通攻击",
-		"J",
-		"使用%s发动普通攻击，可配合 W / S 改变挥砍方向。" % player.get_weapon_name(),
-		weapon_accent
-	)
-	_attack_slot.call(
-		&"set_cooldown",
-		player.get_attack_cooldown_remaining(),
-		player.get_attack_cooldown_duration()
-	)
-	_dash_slot.call(
-		&"configure",
-		1,
-		"闪避冲刺",
-		"K",
-		"向当前朝向高速闪避。冷却：2.0 秒。",
-		Color("#65dcff")
-	)
-	_dash_slot.call(
-		&"set_cooldown",
-		player.get_dash_cooldown_remaining(),
-		player.get_dash_cooldown_duration()
-	)
-	_skill_slot.call(
-		&"configure",
-		2,
-		player.get_skill_name(),
-		"L",
-		"向前突进并释放多重月弧，造成高额范围伤害。",
-		weapon_accent.lightened(0.12)
-	)
-	_skill_slot.call(
-		&"set_cooldown",
-		player.get_skill_cooldown_remaining(),
-		player.get_skill_cooldown_duration()
-	)
+	if _hud_presenter != null:
+		_hud_presenter.update_abilities(player)
 
 
 func _cycle_weapon() -> void:
@@ -2605,11 +2487,11 @@ func get_current_room_number() -> int:
 
 
 func is_choosing_upgrade() -> bool:
-	return _choosing_upgrade
+	return _flow_state.choosing_upgrade
 
 
 func is_run_complete() -> bool:
-	return _run_complete
+	return _flow_state.run_complete
 
 
 func get_upgrade_choices() -> Array[Dictionary]:
@@ -2617,19 +2499,23 @@ func get_upgrade_choices() -> Array[Dictionary]:
 
 
 func is_awaiting_chest() -> bool:
-	return _awaiting_chest
+	return _flow_state.awaiting_chest
 
 
 func is_shopping() -> bool:
-	return _shopping
+	return _flow_state.shopping
 
 
 func is_event_active() -> bool:
-	return _event_active
+	return _flow_state.event_active
 
 
 func is_risk_ambush_active() -> bool:
-	return _risk_ambush_active
+	return _flow_state.risk_ambush_active
+
+
+func get_run_flow_snapshot() -> Dictionary:
+	return _flow_state.snapshot()
 
 
 func get_gold() -> int:

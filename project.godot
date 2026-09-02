@@ -17,12 +17,14 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 config/name="月蚀回廊"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://assets/ui/moon_eclipse_icon.svg"
 
 [display]
 
 window/size/viewport_width=1280
 window/size/viewport_height=840
 window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
 
 [rendering]
 

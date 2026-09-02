@@ -22,6 +22,14 @@ func _run_test() -> void:
 		not settings_menu.visible
 		or (settings_menu.get_node("Bind_dash") as Button) == null
 		or (settings_menu.get_node("DamageNumbersToggle") as CheckButton) == null
+		or (settings_menu.get_node("ResolutionSelector") as OptionButton) == null
+		or (settings_menu.get_node("FullscreenToggle") as CheckButton) == null
+		or (settings_menu.get_node("VsyncToggle") as CheckButton) == null
+		or (settings_menu.get_node("ReducedEffectsToggle") as CheckButton) == null
+		or (settings_menu.get_node("MusicVolume") as HSlider) == null
+		or (settings_menu.get_node("EffectsVolume") as HSlider) == null
+		or (settings_menu.get_node("VoiceVolume") as HSlider) == null
+		or settings_menu.get_node_or_null("ControllerStatus") == null
 		or operation_guide == null
 	):
 		_fail("Settings menu did not expose bindings, options, and the operation guide")
@@ -29,6 +37,13 @@ func _run_test() -> void:
 	var guide_text: String = operation_guide.get_parsed_text()
 	if not guide_text.contains("操作说明") or not guide_text.contains("开宝箱") or not guide_text.contains("空中可再次跳跃"):
 		_fail("Settings operation guide did not contain the moved gameplay instructions")
+		return
+	var has_controller_jump := false
+	for input_event: InputEvent in InputMap.action_get_events(&"jump"):
+		if input_event is InputEventJoypadButton:
+			has_controller_jump = true
+	if not has_controller_jump:
+		_fail("Settings did not install the default controller map")
 		return
 	(settings_menu.get_node("CloseSettings") as Button).emit_signal("pressed")
 	menu_main.queue_free()

@@ -38,6 +38,14 @@
 1. 使用 Godot 4.7.2 或兼容的 Godot 4 稳定版导入 `project.godot`。
 2. 在编辑器中按 `F6` 或 `F5` 运行。
 
+## 导出 Windows 测试包
+
+1. 安装与 Godot 4.7.2 匹配的 Windows x86_64 发布模板。
+2. 在项目根目录运行 `powershell -ExecutionPolicy Bypass -File .\tools\verify_windows_build.ps1`。
+3. 验证通过的 EXE 与 PCK 位于 `build/windows-verify/`；脚本会自动隐藏启动 EXE，并检查运行日志。
+
+完整人工验收项目见 `docs/WINDOWS_RELEASE_CHECKLIST.md`。
+
 ## 项目结构
 
 - `scenes/`：Godot 场景

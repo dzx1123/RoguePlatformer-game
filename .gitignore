@@ -14,3 +14,6 @@ Desktop.ini
 export/
 exports/
 build/
+
+# Local automated QA captures and soak-test reports
+tests/artifacts/

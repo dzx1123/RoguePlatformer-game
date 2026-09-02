@@ -3,6 +3,7 @@ extends RefCounted
 ## Records balancing data without coupling it to the gameplay scene or HUD.
 class_name RunTelemetry
 
+const SAFE_JSON_STORE_SCRIPT := preload("res://scripts/safe_json_store.gd")
 const SAVE_VERSION := 1
 const DEFAULT_SAVE_PATH := "user://run_telemetry.json"
 const MAX_RUN_HISTORY := 60
@@ -26,15 +27,15 @@ func load_data() -> bool:
 	_history.clear()
 	_current_run.clear()
 	_current_room.clear()
-	if not _persistence_enabled or not FileAccess.file_exists(_save_path):
+	if not _persistence_enabled:
 		return false
-	var file := FileAccess.open(_save_path, FileAccess.READ)
-	if file == null:
+	var load_result: Dictionary = SAFE_JSON_STORE_SCRIPT.load_dictionary(
+		_save_path,
+		Callable(self, "_is_valid_telemetry_data")
+	)
+	if not bool(load_result.get("ok", false)):
 		return false
-	var parsed_value: Variant = JSON.parse_string(file.get_as_text())
-	if not parsed_value is Dictionary:
-		return false
-	var data: Dictionary = parsed_value as Dictionary
+	var data: Dictionary = load_result.get("data", {}) as Dictionary
 	var history_value: Variant = data.get("history", [])
 	if history_value is Array:
 		for run_value: Variant in history_value:
@@ -54,18 +55,14 @@ func load_data() -> bool:
 func save_data() -> Error:
 	if not _persistence_enabled:
 		return OK
-	var file := FileAccess.open(_save_path, FileAccess.WRITE)
-	if file == null:
-		return FileAccess.get_open_error()
 	var saved_current: Dictionary = _current_run.duplicate(true)
 	if not _current_room.is_empty():
 		saved_current["current_room"] = _current_room.duplicate(true)
-	file.store_string(JSON.stringify({
+	return SAFE_JSON_STORE_SCRIPT.save_dictionary(_save_path, {
 		"version": SAVE_VERSION,
 		"history": _history,
 		"current_run": saved_current,
-	}, "\t"))
-	return OK
+	})
 
 
 func begin_run(seed_value: int, difficulty_name: String, weapon_id: StringName) -> void:
@@ -342,6 +339,14 @@ func _save_after_event() -> void:
 	var save_error: Error = save_data()
 	if save_error != OK:
 		push_warning("Could not save optional run telemetry: %s" % error_string(save_error))
+
+
+func _is_valid_telemetry_data(data: Dictionary) -> bool:
+	return (
+		int(data.get("version", 0)) >= 1
+		and data.get("history", null) is Array
+		and data.get("current_run", null) is Dictionary
+	)
 
 
 func _trim_history() -> void:

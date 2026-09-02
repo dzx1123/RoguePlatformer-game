@@ -141,6 +141,7 @@ var _is_dead: bool = false
 var _last_death_reason: StringName = &"unknown"
 var _death_remaining: float = 0.0
 var _input_enabled: bool = true
+var _reduced_effects_enabled: bool = false
 var _base_max_health: int = 100
 var _base_attack_damage: int = 34
 var _base_run_speed: float = 320.0
@@ -625,6 +626,17 @@ func set_input_enabled(enabled: bool) -> void:
 		if not _is_dead:
 			_finish_attack()
 			_finish_skill()
+
+
+func set_reduced_effects_enabled(enabled: bool) -> void:
+	_reduced_effects_enabled = enabled
+	if enabled:
+		_skill_pose_echo_remaining = 0.0
+		skill_pose_echo.visible = false
+
+
+func get_reduced_effects_enabled() -> bool:
+	return _reduced_effects_enabled
 
 
 func get_run_stats() -> Dictionary:
@@ -1187,16 +1199,22 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 	if _is_dead:
 		visual_modulate = Color(0.56, 0.64, 0.72, 0.72)
 	elif _hurt_remaining > 0.0:
-		visual_modulate = Color(1.0, 0.42, 0.42, 1.0)
+		visual_modulate = (
+			Color(1.0, 0.76, 0.76, 1.0)
+			if _reduced_effects_enabled
+			else Color(1.0, 0.42, 0.42, 1.0)
+		)
 	elif _hurt_invulnerability_remaining > 0.0:
 		# A hard on/off blink made otherwise smooth movement read as dropped frames.
 		# Keep the protection readable with a continuous cool pulse instead.
-		var invulnerability_pulse: float = 0.5 + 0.5 * sin(_visual_time * TAU * 4.2)
+		var pulse_speed: float = 2.0 if _reduced_effects_enabled else 4.2
+		var invulnerability_pulse: float = 0.5 + 0.5 * sin(_visual_time * TAU * pulse_speed)
+		var minimum_alpha: float = 0.90 if _reduced_effects_enabled else 0.78
 		visual_modulate = Color(
 			lerpf(0.82, 1.0, invulnerability_pulse),
 			lerpf(0.92, 1.0, invulnerability_pulse),
 			1.0,
-			lerpf(0.78, 0.96, invulnerability_pulse)
+			lerpf(minimum_alpha, 0.96, invulnerability_pulse)
 		)
 	hero_sprite.modulate = visual_modulate
 	_update_skill_effect()
@@ -1805,6 +1823,8 @@ func _start_skill_pose_echo(
 	pose_rotation: float,
 	pose_flip_h: bool
 ) -> void:
+	if _reduced_effects_enabled:
+		return
 	skill_pose_echo.texture = texture
 	skill_pose_echo.region_enabled = false
 	skill_pose_echo.position = pose_position

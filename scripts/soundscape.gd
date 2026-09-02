@@ -80,6 +80,7 @@ var _vocal_duck_remaining: float = 0.0
 func _ready() -> void:
 	_player = AudioStreamPlayer.new()
 	_player.name = "MoonlitSoundscape"
+	_player.bus = &"Music"
 	var stream := AudioStreamGenerator.new()
 	stream.mix_rate = MIX_RATE
 	stream.buffer_length = 0.35
@@ -93,11 +94,13 @@ func _ready() -> void:
 	for vocal_index in range(4):
 		var vocal_player := AudioStreamPlayer.new()
 		vocal_player.name = "YoungAdventurerVoice_%02d" % vocal_index
+		vocal_player.bus = &"Voice"
 		add_child(vocal_player)
 		_vocal_players.append(vocal_player)
 	for player_index in range(8):
 		var sfx_player := AudioStreamPlayer.new()
 		sfx_player.name = "CombatSample_%02d" % player_index
+		sfx_player.bus = &"SFX"
 		add_child(sfx_player)
 		_sfx_players.append(sfx_player)
 

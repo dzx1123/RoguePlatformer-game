@@ -332,9 +332,13 @@ func _wait_physics_frames(frame_count: int) -> void:
 
 
 func _remove_temporary_save() -> void:
-	var absolute_path: String = ProjectSettings.globalize_path(_temporary_save_path)
-	if FileAccess.file_exists(_temporary_save_path):
-		DirAccess.remove_absolute(absolute_path)
+	for path: String in [
+		_temporary_save_path,
+		_temporary_save_path + ".tmp",
+		_temporary_save_path + ".bak",
+	]:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
 func _fail(message: String) -> void:
