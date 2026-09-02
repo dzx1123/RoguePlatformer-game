@@ -43,6 +43,7 @@ func _run_test() -> void:
 		"res://scripts/run_encounter_director.gd",
 		"res://scripts/run_upgrade_service.gd",
 		"res://scripts/run_flow_state.gd",
+		"res://scripts/run_hud_builder.gd",
 		"res://scripts/run_hud_presenter.gd",
 	]:
 		if not ResourceLoader.exists(script_path):

@@ -30,6 +30,7 @@ func _run_test() -> void:
 		or (settings_menu.get_node("EffectsVolume") as HSlider) == null
 		or (settings_menu.get_node("VoiceVolume") as HSlider) == null
 		or settings_menu.get_node_or_null("ControllerStatus") == null
+		or settings_menu.get_node_or_null("DisplayStatus") == null
 		or operation_guide == null
 	):
 		_fail("Settings menu did not expose bindings, options, and the operation guide")
@@ -44,6 +45,10 @@ func _run_test() -> void:
 			has_controller_jump = true
 	if not has_controller_jump:
 		_fail("Settings did not install the default controller map")
+		return
+	var attack_binding: Button = settings_menu.get_node("Bind_attack") as Button
+	if not attack_binding.text.contains("J") or not attack_binding.text.contains("X"):
+		_fail("Settings binding rows do not show keyboard and controller prompts together")
 		return
 	(settings_menu.get_node("CloseSettings") as Button).emit_signal("pressed")
 	menu_main.queue_free()
@@ -64,6 +69,13 @@ func _run_test() -> void:
 		or game_main.get_node_or_null("HUD/WeaponPanel") == null
 	):
 		_fail("Redesigned top cards and dedicated bottom combat dock were not created")
+		return
+	var input_bridge: Node = game_main.get("_pause_input_handler") as Node
+	input_bridge.call(&"set_initial_device", true)
+	await process_frame
+	var attack_slot: Control = game_main.get_node("HUD/AbilityBar/AttackAbility") as Control
+	if not attack_slot.tooltip_text.contains("[X]"):
+		_fail("Combat HUD did not switch to the controller attack prompt")
 		return
 	var escape_event := InputEventKey.new()
 	escape_event.keycode = KEY_ESCAPE

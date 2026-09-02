@@ -1,5 +1,7 @@
 extends SceneTree
 
+const SETTINGS_STORE := preload("res://scripts/settings_store.gd")
+
 
 func _initialize() -> void:
 	call_deferred(&"_run_test")
@@ -12,6 +14,8 @@ func _run_test() -> void:
 	_bind_action_key(&"aim_up", KEY_W)
 	_bind_action_key(&"aim_down", KEY_S)
 	_bind_action_key(&"attack", KEY_J)
+	var settings = SETTINGS_STORE.new("res://tests/vertical_attack_settings_temp.json")
+	settings.apply()
 	for frame_name in [
 		"hero_slash_up_windup.png",
 		"hero_slash_up.png",
@@ -66,6 +70,47 @@ func _run_test() -> void:
 	if player.get_attack_type() != RoguePlayer.AttackType.DOWNWARD:
 		_fail("Down direction plus attack did not produce a down slash")
 		return
+	player.call(&"_finish_attack")
+	player.set("_attack_cooldown_remaining", 0.0)
+	await physics_frame
+	var stick_up := InputEventJoypadMotion.new()
+	stick_up.device = 0
+	stick_up.axis = JOY_AXIS_LEFT_Y
+	stick_up.axis_value = -1.0
+	var controller_attack := InputEventJoypadButton.new()
+	controller_attack.device = 0
+	controller_attack.button_index = JOY_BUTTON_X
+	controller_attack.pressed = true
+	Input.parse_input_event(stick_up)
+	Input.parse_input_event(controller_attack)
+	await physics_frame
+	await physics_frame
+	controller_attack.pressed = false
+	Input.parse_input_event(controller_attack)
+	stick_up.axis_value = 0.0
+	Input.parse_input_event(stick_up)
+	if player.get_attack_type() != RoguePlayer.AttackType.UPWARD:
+		_fail("Left-stick up plus X did not produce an up slash")
+		return
+	player.call(&"_finish_attack")
+	player.set("_attack_cooldown_remaining", 0.0)
+	await physics_frame
+	var stick_down := InputEventJoypadMotion.new()
+	stick_down.device = 0
+	stick_down.axis = JOY_AXIS_LEFT_Y
+	stick_down.axis_value = 1.0
+	controller_attack.pressed = true
+	Input.parse_input_event(stick_down)
+	Input.parse_input_event(controller_attack)
+	await physics_frame
+	await physics_frame
+	controller_attack.pressed = false
+	Input.parse_input_event(controller_attack)
+	stick_down.axis_value = 0.0
+	Input.parse_input_event(stick_down)
+	if player.get_attack_type() != RoguePlayer.AttackType.DOWNWARD:
+		_fail("Left-stick down plus X did not produce a down slash")
+		return
 	enemy.queue_free()
 	player.queue_free()
 	await process_frame
@@ -79,7 +124,9 @@ func _fail(message: String) -> void:
 
 
 func _bind_action_key(action_name: StringName, keycode: Key) -> void:
-	InputMap.action_erase_events(action_name)
+	for input_event: InputEvent in InputMap.action_get_events(action_name):
+		if input_event is InputEventKey:
+			InputMap.action_erase_event(action_name, input_event)
 	var event := InputEventKey.new()
 	event.keycode = keycode
 	InputMap.action_add_event(action_name, event)

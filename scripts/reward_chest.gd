@@ -30,10 +30,13 @@ func setup(
 	_gold_reward = maxi(0, gold_reward)
 	_heal_reward = maxi(0, heal_reward)
 	_is_risk = is_risk
+	set_interaction_prompt(interaction_key)
+
+
+func set_interaction_prompt(interaction_prompt: String) -> void:
+	set_meta(&"interaction_key", interaction_prompt)
 	if is_instance_valid(_prompt_key_label):
-		_prompt_key_label.text = interaction_key
-	else:
-		set_meta(&"interaction_key", interaction_key)
+		_prompt_key_label.text = interaction_prompt
 
 
 func _ready() -> void:

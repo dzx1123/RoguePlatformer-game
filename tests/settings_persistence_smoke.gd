@@ -41,6 +41,8 @@ func _run_test() -> void:
 			return _fail("Audio bus was not created: %s" % bus_name)
 	var controller_actions := {
 		&"move_left": InputEventJoypadMotion,
+		&"aim_up": InputEventJoypadMotion,
+		&"aim_down": InputEventJoypadMotion,
 		&"jump": InputEventJoypadButton,
 		&"attack": InputEventJoypadButton,
 		&"pause": InputEventJoypadButton,
@@ -52,6 +54,29 @@ func _run_test() -> void:
 				found_controller_event = true
 		if not found_controller_event:
 			return _fail("Controller mapping is missing for %s" % action_name)
+	if not _has_left_stick_y_mapping(&"aim_up", -1.0):
+		return _fail("Left-stick up is not mapped to the upward slash direction")
+	if not _has_left_stick_y_mapping(&"aim_down", 1.0):
+		return _fail("Left-stick down is not mapped to the downward slash direction")
+	if (
+		not _has_joy_button(&"choice_1", JOY_BUTTON_X)
+		or not _has_joy_button(&"choice_2", JOY_BUTTON_Y)
+		or not _has_joy_button(&"choice_3", JOY_BUTTON_B)
+	):
+		return _fail("The three card-choice shortcuts are not mapped to X / Y / B")
+	if (
+		not _has_joy_button(&"ui_accept", JOY_BUTTON_A)
+		or not _has_joy_button(&"ui_cancel", JOY_BUTTON_B)
+		or not _has_left_stick_mapping(&"ui_left", JOY_AXIS_LEFT_X, -1.0)
+		or not _has_left_stick_mapping(&"ui_down", JOY_AXIS_LEFT_Y, 1.0)
+	):
+		return _fail("Controller menu navigation/confirm/cancel mappings are incomplete")
+	if (
+		String(loaded.get_controller_binding_name(&"attack")) != "X"
+		or not String(loaded.get_controller_binding_name(&"aim_up")).contains("LS↑")
+		or not String(loaded.get_combined_binding_name(&"dash")).contains("B")
+	):
+		return _fail("Controller binding labels do not match the installed Xbox map")
 	print("settings_persistence_smoke: PASS")
 	_cleanup()
 	quit(0)
@@ -61,6 +86,31 @@ func _cleanup() -> void:
 	for path: String in [SAVE_PATH, SAVE_PATH + ".tmp", SAVE_PATH + ".bak"]:
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+func _has_left_stick_y_mapping(action_name: StringName, direction: float) -> bool:
+	return _has_left_stick_mapping(action_name, JOY_AXIS_LEFT_Y, direction)
+
+
+func _has_left_stick_mapping(action_name: StringName, axis: int, direction: float) -> bool:
+	for input_event: InputEvent in InputMap.action_get_events(action_name):
+		if (
+			input_event is InputEventJoypadMotion
+			and input_event.axis == axis
+			and is_equal_approx(input_event.axis_value, direction)
+		):
+			return true
+	return false
+
+
+func _has_joy_button(action_name: StringName, button_index: int) -> bool:
+	for input_event: InputEvent in InputMap.action_get_events(action_name):
+		if (
+			input_event is InputEventJoypadButton
+			and input_event.button_index == button_index
+		):
+			return true
+	return false
 
 
 func _fail(message: String) -> void:

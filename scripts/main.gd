@@ -2,8 +2,6 @@ extends Node2D
 
 const WORLD_SIZE := Vector2(1280.0, 720.0)
 const DISPLAY_SIZE := Vector2(1280.0, 840.0)
-const HUD_DOCK_TOP := 720.0
-const HEALTH_FILL_WIDTH := 354.0
 const ENEMY_SCRIPT := preload("res://scripts/rogue_enemy.gd")
 const ENEMY_PROJECTILE_SCRIPT := preload("res://scripts/enemy_projectile.gd")
 const ROOM_CATALOG_SCRIPT := preload("res://scripts/run_room_catalog.gd")
@@ -11,7 +9,6 @@ const CHEST_SCRIPT := preload("res://scripts/reward_chest.gd")
 const COMBAT_VFX_SCRIPT := preload("res://scripts/combat_vfx.gd")
 const DAMAGE_NUMBER_SCRIPT := preload("res://scripts/damage_number.gd")
 const SOUNDSCAPE_SCRIPT := preload("res://scripts/soundscape.gd")
-const ABILITY_SLOT_SCRIPT := preload("res://scripts/ability_slot.gd")
 const SETTINGS_STORE_SCRIPT := preload("res://scripts/settings_store.gd")
 const RUN_TELEMETRY_SCRIPT := preload("res://scripts/run_telemetry.gd")
 const COMBAT_BUDGET_SCRIPT := preload("res://scripts/combat_budget.gd")
@@ -19,6 +16,7 @@ const PAUSE_INPUT_HANDLER_SCRIPT := preload("res://scripts/pause_input_handler.g
 const ENCOUNTER_DIRECTOR_SCRIPT := preload("res://scripts/run_encounter_director.gd")
 const UPGRADE_SERVICE_SCRIPT := preload("res://scripts/run_upgrade_service.gd")
 const RUN_FLOW_STATE_SCRIPT := preload("res://scripts/run_flow_state.gd")
+const RUN_HUD_BUILDER_SCRIPT := preload("res://scripts/run_hud_builder.gd")
 const RUN_HUD_PRESENTER_SCRIPT := preload("res://scripts/run_hud_presenter.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
 const BUILD_LABEL := "月蚀混战扩展版 2026.08.31C"
@@ -37,6 +35,8 @@ const ENEMY_RANK_ELITE := 1
 const ENEMY_RANK_BOSS := 2
 const ENEMY_FAMILY_SLIME := 0
 const ENEMY_FAMILY_GOBLIN := 1
+const CHOICE_ACTIONS: Array[StringName] = [&"choice_1", &"choice_2", &"choice_3"]
+const CHOICE_CONTROLLER_LABELS: Array[String] = ["X", "Y", "B"]
 
 enum EncounterType {
 	NORMAL,
@@ -80,18 +80,10 @@ var _run_generation: int = 0
 var _run_number: int = 0
 var _flow_state: RunFlowState = RUN_FLOW_STATE_SCRIPT.new() as RunFlowState
 var _hud_presenter: RunHUDPresenter
-var _run_active: bool = false
-var _choosing_upgrade: bool = false
-var _run_complete: bool = false
-var _death_restart_pending: bool = false
 var _last_upgrade_name: String = ""
 var _current_encounter: int = EncounterType.NORMAL
 var _current_combat_profile: Dictionary = {}
 var _chest: RewardChest
-var _awaiting_chest: bool = false
-var _shopping: bool = false
-var _event_active: bool = false
-var _risk_ambush_active: bool = false
 var _pending_risk_gold: int = 0
 var _pending_risk_heal: int = 0
 var _challenge_reward_granted: bool = false
@@ -101,16 +93,6 @@ var _progression: ProgressionStore
 var _telemetry
 var _boss_enemy: RogueEnemy
 
-var _health_label: Label
-var _health_fill: ColorRect
-var _lives_label: Label
-var _status_label: Label
-var _room_label: Label
-var _currency_label: Label
-var _equipment_label: Label
-var _boss_health_background: ColorRect
-var _boss_health_fill: ColorRect
-var _boss_health_label: Label
 var _upgrade_overlay: Control
 var _upgrade_title: Label
 var _upgrade_hint: Label
@@ -127,11 +109,6 @@ var _camera_base_position := Vector2.ZERO
 var _camera_shake_remaining: float = 0.0
 var _camera_shake_duration: float = 0.0
 var _camera_shake_strength: float = 0.0
-var _attack_slot: Control
-var _dash_slot: Control
-var _skill_slot: Control
-var _weapon_slot_panels: Array[Panel] = []
-var _weapon_slot_labels: Array[Label] = []
 var _lives_remaining: int = MAX_RUN_LIVES
 var _settings: RefCounted
 var _pause_overlay: Control
@@ -147,23 +124,19 @@ var _settings_vsync_toggle: CheckButton
 var _settings_reduced_effects_toggle: CheckButton
 var _settings_damage_numbers_toggle: CheckButton
 var _settings_guide_label: RichTextLabel
+var _settings_controller_status_label: Label
+var _settings_display_status_label: Label
 var _settings_from_pause: bool = false
 var _awaiting_rebind_action: StringName = &""
 var _is_game_paused: bool = false
+var _using_controller_input: bool = false
+var _display_apply_generation: int = 0
 var _pause_input_handler: Node
 var _soundscape: RogueSoundscape
 
 
 func _set_run_phase(next_phase: int) -> void:
 	_flow_state.transition_to(next_phase)
-	_run_active = _flow_state.run_active
-	_choosing_upgrade = _flow_state.choosing_upgrade
-	_run_complete = _flow_state.run_complete
-	_death_restart_pending = _flow_state.death_restart_pending
-	_awaiting_chest = _flow_state.awaiting_chest
-	_shopping = _flow_state.shopping
-	_event_active = _flow_state.event_active
-	_risk_ambush_active = _flow_state.risk_ambush_active
 
 
 func _ready() -> void:
@@ -184,8 +157,13 @@ func _ready() -> void:
 	_pause_input_handler = PAUSE_INPUT_HANDLER_SCRIPT.new() as Node
 	hud.add_child(_pause_input_handler)
 	_pause_input_handler.key_pressed.connect(_on_always_key_pressed)
+	_pause_input_handler.input_device_changed.connect(_on_input_device_changed)
+	_pause_input_handler.controller_pause_pressed.connect(_on_controller_pause_pressed)
+	_pause_input_handler.controller_cancel_pressed.connect(_on_controller_cancel_pressed)
+	if not Input.joy_connection_changed.is_connected(_on_joy_connection_changed):
+		Input.joy_connection_changed.connect(_on_joy_connection_changed)
 	_configure_camera()
-	_create_combat_hud()
+	RUN_HUD_BUILDER_SCRIPT.build(hud, title_label, controls_label)
 	_hud_presenter = RUN_HUD_PRESENTER_SCRIPT.new() as RunHUDPresenter
 	if not _hud_presenter.bind(hud):
 		push_error("Combat HUD presenter could not bind the expected node contract")
@@ -194,6 +172,9 @@ func _ready() -> void:
 	_create_entry_ui()
 	_create_pause_ui()
 	_create_settings_ui()
+	_using_controller_input = not Input.get_connected_joypads().is_empty()
+	_pause_input_handler.call(&"set_initial_device", _using_controller_input)
+	_refresh_input_prompts()
 	player.auto_respawn = false
 	player.attack_hit.connect(_on_player_attack_hit)
 	player.skill_hit.connect(_on_player_skill_hit)
@@ -229,13 +210,15 @@ func _process(_delta: float) -> void:
 		return
 	if _telemetry != null:
 		_telemetry.tick(_delta)
+	if _flow_state.choosing_upgrade and _process_choice_shortcuts():
+		return
 	if not _entry_flow_active and Input.is_action_just_pressed(&"restart"):
 		_start_new_run()
 		return
 	if Input.is_action_just_pressed(&"interact"):
-		if _awaiting_chest:
+		if _flow_state.awaiting_chest:
 			_open_current_chest()
-		elif _shopping:
+		elif _flow_state.shopping:
 			_leave_shop()
 	if Input.is_action_just_pressed(&"cycle_weapon"):
 		_cycle_weapon()
@@ -244,6 +227,14 @@ func _process(_delta: float) -> void:
 	_update_equipment_hud()
 	_update_ability_hud()
 	_update_lives_hud()
+
+
+func _process_choice_shortcuts() -> bool:
+	for choice_index in range(CHOICE_ACTIONS.size()):
+		if Input.is_action_just_pressed(CHOICE_ACTIONS[choice_index]):
+			choose_upgrade(choice_index)
+			return true
+	return false
 
 
 func _on_player_action_started(action: StringName) -> void:
@@ -280,18 +271,6 @@ func _on_enemy_sound_requested(cue: StringName, is_boss: bool) -> void:
 			_soundscape.play_enemy_bite(is_boss)
 		&"spit":
 			_soundscape.play_enemy_spit(is_boss)
-
-
-func _unhandled_key_input(event: InputEvent) -> void:
-	if not _choosing_upgrade or not event.is_pressed() or event.is_echo():
-		return
-	match event.keycode:
-		KEY_1, KEY_KP_1:
-			choose_upgrade(0)
-		KEY_2, KEY_KP_2:
-			choose_upgrade(1)
-		KEY_3, KEY_KP_3:
-			choose_upgrade(2)
 
 
 func _configure_inputs() -> void:
@@ -351,6 +330,91 @@ func _on_always_key_pressed(event: InputEventKey) -> void:
 	get_viewport().set_input_as_handled()
 
 
+func _on_controller_pause_pressed() -> void:
+	if _settings_overlay.visible:
+		_close_settings()
+	elif _entry_flow_active:
+		return
+	elif _is_game_paused:
+		_resume_game()
+	else:
+		_pause_game()
+	get_viewport().set_input_as_handled()
+
+
+func _on_controller_cancel_pressed() -> void:
+	if _settings_overlay.visible:
+		_close_settings()
+	elif _is_game_paused:
+		_resume_game()
+	else:
+		return
+	get_viewport().set_input_as_handled()
+
+
+func _on_input_device_changed(using_controller: bool) -> void:
+	_using_controller_input = using_controller
+	_refresh_input_prompts()
+
+
+func _on_joy_connection_changed(_device: int, connected: bool) -> void:
+	if connected:
+		_using_controller_input = true
+	elif Input.get_connected_joypads().is_empty():
+		_using_controller_input = false
+	_refresh_input_prompts()
+
+
+func _refresh_input_prompts() -> void:
+	_update_ability_hud()
+	_refresh_settings_key_buttons()
+	_refresh_choice_overlay_prompts()
+	if is_instance_valid(_chest):
+		_chest.set_interaction_prompt(_get_action_prompt(&"interact"))
+	if is_instance_valid(_settings_controller_status_label):
+		var connected_count: int = Input.get_connected_joypads().size()
+		if connected_count > 0:
+			_settings_controller_status_label.text = (
+				"手柄：已连接 · 当前显示 Xbox 键位"
+				if _using_controller_input
+				else "手柄：已连接 · 按任意手柄键切换提示"
+			)
+		else:
+			_settings_controller_status_label.text = "手柄：未连接 · Xbox 映射已启用"
+	_ensure_context_focus()
+
+
+func _ensure_context_focus() -> void:
+	if not _using_controller_input:
+		return
+	var focus_owner: Control = get_viewport().gui_get_focus_owner()
+	if is_instance_valid(_settings_overlay) and _settings_overlay.visible:
+		if focus_owner == null or not _settings_overlay.is_ancestor_of(focus_owner):
+			_settings_resolution_selector.grab_focus()
+		return
+	if is_instance_valid(_upgrade_overlay) and _upgrade_overlay.visible:
+		if focus_owner != null and _upgrade_overlay.is_ancestor_of(focus_owner):
+			return
+		for button in _upgrade_buttons:
+			if button.visible and not button.disabled:
+				button.grab_focus()
+				return
+	if is_instance_valid(_pause_overlay) and _pause_overlay.visible:
+		if focus_owner == null or not _pause_overlay.is_ancestor_of(focus_owner):
+			(_pause_overlay.get_node("Resume") as Button).grab_focus()
+		return
+	if is_instance_valid(_entry_overlay) and _entry_overlay.visible:
+		if focus_owner != null and _entry_overlay.is_ancestor_of(focus_owner) and focus_owner.visible:
+			return
+		if _start_button.visible:
+			_start_button.grab_focus()
+		else:
+			for button in _difficulty_buttons:
+				if button.visible:
+					button.grab_focus()
+					return
+
+
 func _configure_camera() -> void:
 	var camera: Camera2D = player.get_node_or_null("Camera2D") as Camera2D
 	if camera == null:
@@ -388,311 +452,6 @@ func _trigger_camera_shake(strength: float, duration: float = 0.09) -> void:
 	_camera_shake_strength = maxf(_camera_shake_strength, strength)
 	_camera_shake_duration = maxf(_camera_shake_duration, duration)
 	_camera_shake_remaining = maxf(_camera_shake_remaining, duration)
-
-
-func _create_hud_panel(
-	panel_name: String,
-	panel_position: Vector2,
-	panel_size: Vector2,
-	border_color: Color,
-	accent_color: Color
-) -> Panel:
-	var panel := Panel.new()
-	panel.name = panel_name
-	panel.position = panel_position
-	panel.size = panel_size
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.018, 0.042, 0.065, 0.90)
-	panel_style.border_color = border_color
-	panel_style.set_border_width_all(1)
-	panel_style.corner_radius_top_left = 9
-	panel_style.corner_radius_top_right = 9
-	panel_style.corner_radius_bottom_left = 9
-	panel_style.corner_radius_bottom_right = 9
-	panel_style.shadow_color = Color(0.0, 0.0, 0.0, 0.36)
-	panel_style.shadow_size = 7
-	panel_style.shadow_offset = Vector2(0.0, 3.0)
-	panel.add_theme_stylebox_override("panel", panel_style)
-	hud.add_child(panel)
-	var accent := ColorRect.new()
-	accent.position = Vector2(0.0, 10.0)
-	accent.size = Vector2(4.0, panel_size.y - 20.0)
-	accent.color = accent_color
-	accent.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(accent)
-	return panel
-
-
-func _create_combat_hud() -> void:
-	# Gameplay stays visually clean; the complete control guide now lives in Settings.
-	title_label.text = ""
-	title_label.visible = false
-	controls_label.text = ""
-	controls_label.visible = false
-
-	# The combat dock occupies its own 120-pixel strip below the 1280x720 room.
-	# It is intentionally opaque so gameplay silhouettes never compete with HUD text.
-	var bottom_hud := Panel.new()
-	bottom_hud.name = "BottomHUD"
-	bottom_hud.position = Vector2(0.0, HUD_DOCK_TOP)
-	bottom_hud.size = Vector2(DISPLAY_SIZE.x, DISPLAY_SIZE.y - HUD_DOCK_TOP)
-	bottom_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var bottom_style := StyleBoxFlat.new()
-	bottom_style.bg_color = Color(0.008, 0.019, 0.032, 1.0)
-	bottom_style.border_color = Color(0.21, 0.58, 0.67, 0.72)
-	bottom_style.border_width_top = 2
-	bottom_style.shadow_color = Color(0.0, 0.0, 0.0, 0.72)
-	bottom_style.shadow_size = 12
-	bottom_style.shadow_offset = Vector2(0.0, -4.0)
-	bottom_hud.add_theme_stylebox_override("panel", bottom_style)
-	hud.add_child(bottom_hud)
-
-	var top_rune := ColorRect.new()
-	top_rune.position = Vector2(28.0, 4.0)
-	top_rune.size = Vector2(1224.0, 2.0)
-	top_rune.color = Color(0.31, 0.82, 0.90, 0.54)
-	top_rune.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bottom_hud.add_child(top_rune)
-
-	_create_hud_panel(
-		"VitalsPanel",
-		Vector2(28.0, 728.0),
-		Vector2(390.0, 104.0),
-		Color(0.23, 0.58, 0.66, 0.60),
-		Color("#46cdd9")
-	)
-	_create_hud_panel(
-		"AbilityPanel",
-		Vector2(432.0, 722.0),
-		Vector2(416.0, 114.0),
-		Color(0.40, 0.55, 0.75, 0.72),
-		Color("#86a8ff")
-	)
-	var weapon_panel: Panel = _create_hud_panel(
-		"WeaponPanel",
-		Vector2(862.0, 728.0),
-		Vector2(390.0, 104.0),
-		Color(0.63, 0.47, 0.24, 0.68),
-		Color("#e8b65c")
-	)
-
-	var health_background := ColorRect.new()
-	health_background.name = "HealthBackground"
-	health_background.position = Vector2(42.0, 755.0)
-	health_background.size = Vector2(362.0, 28.0)
-	health_background.color = Color(0.012, 0.033, 0.047, 0.98)
-	health_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(health_background)
-
-	_health_fill = ColorRect.new()
-	_health_fill.name = "HealthFill"
-	_health_fill.position = Vector2(4.0, 4.0)
-	_health_fill.size = Vector2(HEALTH_FILL_WIDTH, 20.0)
-	_health_fill.color = Color(0.18, 0.82, 0.50, 0.96)
-	_health_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	health_background.add_child(_health_fill)
-
-	_health_label = Label.new()
-	_health_label.name = "HealthLabel"
-	_health_label.position = Vector2(4.0, 0.0)
-	_health_label.size = Vector2(354.0, 28.0)
-	_health_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_health_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_health_label.add_theme_font_size_override("font_size", 15)
-	_health_label.add_theme_color_override("font_color", Color.WHITE)
-	_health_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.84))
-	_health_label.add_theme_constant_override("outline_size", 2)
-	_health_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	health_background.add_child(_health_label)
-
-	_create_hud_panel(
-		"RoomCard",
-		Vector2(1002.0, 16.0),
-		Vector2(246.0, 70.0),
-		Color(0.26, 0.68, 0.78, 0.72),
-		Color("#61d6e8")
-	)
-	_create_hud_panel(
-		"StatusToast",
-		Vector2(42.0, 802.0),
-		Vector2(362.0, 25.0),
-		Color(0.78, 0.57, 0.24, 0.48),
-		Color("#efb85d")
-	)
-
-	_status_label = Label.new()
-	_status_label.name = "CombatStatus"
-	_status_label.position = Vector2(52.0, 804.0)
-	_status_label.size = Vector2(340.0, 21.0)
-	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_status_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	_status_label.clip_text = true
-	_status_label.add_theme_font_size_override("font_size", 12)
-	_status_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.50, 1.0))
-	_status_label.add_theme_color_override("font_outline_color", Color(0.025, 0.045, 0.07, 0.96))
-	_status_label.add_theme_constant_override("outline_size", 1)
-	_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(_status_label)
-
-	_room_label = Label.new()
-	_room_label.name = "RoomProgress"
-	_room_label.position = Vector2(1018.0, 24.0)
-	_room_label.size = Vector2(214.0, 54.0)
-	_room_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_room_label.add_theme_font_size_override("font_size", 14)
-	_room_label.add_theme_color_override("font_color", Color(0.78, 0.90, 0.96, 1.0))
-	_room_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(_room_label)
-
-	_currency_label = Label.new()
-	_currency_label.name = "Currency"
-	_currency_label.position = Vector2(42.0, 785.0)
-	_currency_label.size = Vector2(362.0, 16.0)
-	_currency_label.clip_text = true
-	_currency_label.add_theme_font_size_override("font_size", 13)
-	_currency_label.add_theme_color_override("font_color", Color(1.0, 0.83, 0.43, 1.0))
-	_currency_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(_currency_label)
-
-	_equipment_label = Label.new()
-	_equipment_label.name = "Equipment"
-	_equipment_label.position = Vector2(880.0, 734.0)
-	_equipment_label.size = Vector2(352.0, 20.0)
-	_equipment_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_equipment_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_equipment_label.clip_text = true
-	_equipment_label.add_theme_font_size_override("font_size", 13)
-	_equipment_label.add_theme_color_override("font_color", Color(0.96, 0.82, 0.53, 1.0))
-	_equipment_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(_equipment_label)
-
-	_lives_label = Label.new()
-	_lives_label.name = "Lives"
-	_lives_label.position = Vector2(42.0, 734.0)
-	_lives_label.size = Vector2(362.0, 18.0)
-	_lives_label.add_theme_font_size_override("font_size", 13)
-	_lives_label.clip_text = true
-	_lives_label.add_theme_color_override("font_color", Color(1.0, 0.76, 0.46, 1.0))
-	_lives_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(_lives_label)
-
-	_boss_health_background = ColorRect.new()
-	_boss_health_background.name = "BossHealth"
-	_boss_health_background.position = Vector2(390.0, 22.0)
-	_boss_health_background.size = Vector2(500.0, 28.0)
-	_boss_health_background.color = Color(0.05, 0.02, 0.03, 0.92)
-	_boss_health_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(_boss_health_background)
-
-	_boss_health_fill = ColorRect.new()
-	_boss_health_fill.position = Vector2(4.0, 4.0)
-	_boss_health_fill.size = Vector2(492.0, 20.0)
-	_boss_health_fill.color = Color(0.88, 0.18, 0.22, 0.96)
-	_boss_health_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_boss_health_background.add_child(_boss_health_fill)
-
-	_boss_health_label = Label.new()
-	_boss_health_label.position = Vector2(8.0, 1.0)
-	_boss_health_label.size = Vector2(484.0, 26.0)
-	_boss_health_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_boss_health_label.add_theme_font_size_override("font_size", 15)
-	_boss_health_label.add_theme_color_override("font_color", Color.WHITE)
-	_boss_health_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_boss_health_background.add_child(_boss_health_label)
-	_boss_health_background.visible = false
-
-	var ability_heading := Label.new()
-	ability_heading.position = Vector2(450.0, 726.0)
-	ability_heading.size = Vector2(380.0, 20.0)
-	ability_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ability_heading.text = "战技  ·  COMBAT ARTS"
-	ability_heading.add_theme_font_size_override("font_size", 12)
-	ability_heading.add_theme_color_override("font_color", Color(0.63, 0.78, 0.98, 0.90))
-	ability_heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(ability_heading)
-
-	_create_weapon_hud(weapon_panel)
-	_create_ability_hud()
-
-
-func _create_weapon_hud(weapon_panel: Panel) -> void:
-	_weapon_slot_panels.clear()
-	_weapon_slot_labels.clear()
-	for weapon_index in range(WeaponCatalog.all_weapon_ids().size()):
-		var slot := Panel.new()
-		slot.name = "WeaponSlot_%d" % weapon_index
-		slot.position = Vector2(18.0 + float(weapon_index) * 92.0, 31.0)
-		slot.size = Vector2(84.0, 58.0)
-		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		weapon_panel.add_child(slot)
-		_weapon_slot_panels.append(slot)
-
-		var slot_label := Label.new()
-		slot_label.name = "Label"
-		slot_label.position = Vector2(4.0, 3.0)
-		slot_label.size = Vector2(76.0, 52.0)
-		slot_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		slot_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		slot_label.add_theme_font_size_override("font_size", 11)
-		slot_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		slot.add_child(slot_label)
-		_weapon_slot_labels.append(slot_label)
-
-	var switch_panel := Panel.new()
-	switch_panel.name = "WeaponSwitch"
-	switch_panel.position = Vector2(296.0, 31.0)
-	switch_panel.size = Vector2(72.0, 58.0)
-	switch_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var switch_style := StyleBoxFlat.new()
-	switch_style.bg_color = Color(0.025, 0.075, 0.098, 0.96)
-	switch_style.border_color = Color(0.37, 0.78, 0.85, 0.70)
-	switch_style.set_border_width_all(1)
-	switch_style.corner_radius_top_left = 6
-	switch_style.corner_radius_top_right = 6
-	switch_style.corner_radius_bottom_left = 6
-	switch_style.corner_radius_bottom_right = 6
-	switch_panel.add_theme_stylebox_override("panel", switch_style)
-	weapon_panel.add_child(switch_panel)
-
-	var switch_label := Label.new()
-	switch_label.position = Vector2(3.0, 3.0)
-	switch_label.size = Vector2(66.0, 52.0)
-	switch_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	switch_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	switch_label.text = "Q\n切换"
-	switch_label.add_theme_font_size_override("font_size", 12)
-	switch_label.add_theme_color_override("font_color", Color(0.65, 0.90, 0.95, 1.0))
-	switch_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	switch_panel.add_child(switch_label)
-
-
-func _create_ability_hud() -> void:
-	var ability_bar := Control.new()
-	ability_bar.name = "AbilityBar"
-	ability_bar.position = Vector2(503.0, 752.0)
-	ability_bar.size = Vector2(274.0, 76.0)
-	ability_bar.mouse_filter = Control.MOUSE_FILTER_PASS
-	hud.add_child(ability_bar)
-
-	_attack_slot = ABILITY_SLOT_SCRIPT.new() as Control
-	_attack_slot.name = "AttackAbility"
-	_attack_slot.position = Vector2(0.0, 0.0)
-	_attack_slot.size = Vector2(78.0, 76.0)
-	ability_bar.add_child(_attack_slot)
-
-	_dash_slot = ABILITY_SLOT_SCRIPT.new() as Control
-	_dash_slot.name = "DashAbility"
-	_dash_slot.position = Vector2(98.0, 0.0)
-	_dash_slot.size = Vector2(78.0, 76.0)
-	ability_bar.add_child(_dash_slot)
-
-	_skill_slot = ABILITY_SLOT_SCRIPT.new() as Control
-	_skill_slot.name = "SkillAbility"
-	_skill_slot.position = Vector2(196.0, 0.0)
-	_skill_slot.size = Vector2(78.0, 76.0)
-	ability_bar.add_child(_skill_slot)
 
 
 func _create_upgrade_ui() -> void:
@@ -744,6 +503,7 @@ func _create_upgrade_ui() -> void:
 		button.pressed.connect(_on_upgrade_button_pressed.bind(choice_index))
 		_upgrade_overlay.add_child(button)
 		_upgrade_buttons.append(button)
+	_configure_horizontal_focus(_upgrade_buttons)
 
 	_hide_upgrade_overlay()
 
@@ -833,6 +593,8 @@ func _create_entry_ui() -> void:
 		button.visible = false
 		_entry_overlay.add_child(button)
 		_difficulty_buttons.append(button)
+	_configure_horizontal_focus(_difficulty_buttons)
+	_configure_vertical_focus([_start_button, entry_settings, entry_quit])
 
 	_entry_overlay.visible = false
 
@@ -878,6 +640,7 @@ func _create_pause_ui() -> void:
 	var menu_button := _create_menu_button("ReturnToMenu", "返回主菜单", Vector2(495.0, 413.0), Vector2(290.0, 48.0))
 	menu_button.pressed.connect(_return_to_main_menu)
 	_pause_overlay.add_child(menu_button)
+	_configure_vertical_focus([resume_button, settings_button, menu_button])
 	_pause_overlay.visible = false
 
 
@@ -976,24 +739,27 @@ func _create_settings_ui() -> void:
 		"ReducedEffectsToggle", "减弱闪光/震动", Vector2(680.0, 158.0),
 		_on_reduced_effects_toggled
 	)
-	var controller_status := Label.new()
-	controller_status.name = "ControllerStatus"
-	controller_status.position = Vector2(870.0, 160.0)
-	controller_status.size = Vector2(325.0, 34.0)
-	controller_status.text = "手柄：Xbox 布局已启用"
-	controller_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	controller_status.add_theme_font_size_override("font_size", 15)
-	controller_status.add_theme_color_override("font_color", Color(0.56, 0.82, 0.88, 1.0))
-	_settings_overlay.add_child(controller_status)
+	_settings_controller_status_label = Label.new()
+	_settings_controller_status_label.name = "ControllerStatus"
+	_settings_controller_status_label.position = Vector2(870.0, 160.0)
+	_settings_controller_status_label.size = Vector2(325.0, 34.0)
+	_settings_controller_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_settings_controller_status_label.add_theme_font_size_override("font_size", 14)
+	_settings_controller_status_label.add_theme_color_override(
+		"font_color", Color(0.56, 0.82, 0.88, 1.0)
+	)
+	_settings_overlay.add_child(_settings_controller_status_label)
 
-	var hint := Label.new()
-	hint.position = Vector2(125.0, 192.0)
-	hint.size = Vector2(590.0, 32.0)
-	hint.text = "点击键位按钮后按下新的按键；同一个键不会同时分配给多个动作。"
-	hint.add_theme_font_size_override("font_size", 15)
-	hint.add_theme_color_override("font_color", Color(0.58, 0.74, 0.84, 1.0))
-	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_settings_overlay.add_child(hint)
+	_settings_display_status_label = Label.new()
+	_settings_display_status_label.name = "DisplayStatus"
+	_settings_display_status_label.position = Vector2(125.0, 192.0)
+	_settings_display_status_label.size = Vector2(590.0, 32.0)
+	_settings_display_status_label.add_theme_font_size_override("font_size", 13)
+	_settings_display_status_label.add_theme_color_override(
+		"font_color", Color(0.58, 0.74, 0.84, 1.0)
+	)
+	_settings_display_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_settings_overlay.add_child(_settings_display_status_label)
 
 	var guide_panel := Panel.new()
 	guide_panel.name = "OperationGuidePanel"
@@ -1055,6 +821,7 @@ func _create_settings_ui() -> void:
 	back_button.pressed.connect(_close_settings)
 	_settings_overlay.add_child(back_button)
 	_refresh_settings_operation_guide()
+	_refresh_display_status()
 	_settings_overlay.visible = false
 
 
@@ -1112,12 +879,35 @@ func _create_menu_button(node_name: String, button_text: String, button_position
 	return button
 
 
+func _configure_horizontal_focus(buttons: Array) -> void:
+	if buttons.size() < 2:
+		return
+	for button_index in range(buttons.size()):
+		var button: Control = buttons[button_index] as Control
+		var previous: Control = buttons[posmod(button_index - 1, buttons.size())] as Control
+		var next: Control = buttons[(button_index + 1) % buttons.size()] as Control
+		button.focus_neighbor_left = button.get_path_to(previous)
+		button.focus_neighbor_right = button.get_path_to(next)
+
+
+func _configure_vertical_focus(controls: Array) -> void:
+	if controls.size() < 2:
+		return
+	for control_index in range(controls.size()):
+		var control: Control = controls[control_index] as Control
+		var previous: Control = controls[posmod(control_index - 1, controls.size())] as Control
+		var next: Control = controls[(control_index + 1) % controls.size()] as Control
+		control.focus_neighbor_top = control.get_path_to(previous)
+		control.focus_neighbor_bottom = control.get_path_to(next)
+
+
 func _pause_game() -> void:
-	if _entry_flow_active or _run_complete:
+	if _entry_flow_active or _flow_state.run_complete:
 		return
 	_is_game_paused = true
 	_pause_overlay.visible = true
 	get_tree().paused = true
+	_ensure_context_focus()
 
 
 func _resume_game() -> void:
@@ -1131,6 +921,7 @@ func _resume_game() -> void:
 func _return_to_main_menu() -> void:
 	_resume_game()
 	_set_run_phase(RunFlowState.Phase.IDLE)
+	_hide_upgrade_overlay()
 	_clear_chest()
 	_clear_projectiles()
 	_clear_enemies()
@@ -1154,8 +945,10 @@ func _open_settings(from_pause: bool) -> void:
 	_settings_reduced_effects_toggle.button_pressed = bool(
 		_settings.call(&"get_reduced_effects_enabled")
 	)
-	_refresh_settings_key_buttons()
 	_settings_overlay.visible = true
+	_refresh_input_prompts()
+	_refresh_display_status()
+	_ensure_context_focus()
 
 
 func _close_settings() -> void:
@@ -1163,6 +956,8 @@ func _close_settings() -> void:
 	_settings_overlay.visible = false
 	if not _settings_from_pause:
 		_show_start_screen()
+	else:
+		_ensure_context_focus()
 
 
 func _begin_rebind(action_name: StringName) -> void:
@@ -1177,27 +972,29 @@ func _refresh_settings_key_buttons() -> void:
 		if action_name == _awaiting_rebind_action:
 			button.text = "按下新按键…"
 		else:
-			button.text = String(_settings.call(&"get_binding_name", action_name))
+			button.text = String(_settings.call(&"get_combined_binding_name", action_name))
 	_refresh_settings_operation_guide()
 
 
 func _refresh_settings_operation_guide() -> void:
 	if not is_instance_valid(_settings_guide_label) or _settings == null:
 		return
-	var left_key: String = String(_settings.call(&"get_binding_name", &"move_left"))
-	var right_key: String = String(_settings.call(&"get_binding_name", &"move_right"))
-	var jump_key: String = String(_settings.call(&"get_binding_name", &"jump"))
-	var attack_key: String = String(_settings.call(&"get_binding_name", &"attack"))
-	var up_key: String = String(_settings.call(&"get_binding_name", &"aim_up"))
-	var down_key: String = String(_settings.call(&"get_binding_name", &"aim_down"))
-	var dash_key: String = String(_settings.call(&"get_binding_name", &"dash"))
-	var skill_key: String = String(_settings.call(&"get_binding_name", &"skill"))
-	var interact_key: String = String(_settings.call(&"get_binding_name", &"interact"))
-	var weapon_key: String = String(_settings.call(&"get_binding_name", &"cycle_weapon"))
-	var restart_key: String = String(_settings.call(&"get_binding_name", &"restart"))
-	var pause_key: String = String(_settings.call(&"get_binding_name", &"pause"))
+	var left_key: String = _get_action_prompt(&"move_left")
+	var right_key: String = _get_action_prompt(&"move_right")
+	var jump_key: String = _get_action_prompt(&"jump")
+	var attack_key: String = _get_action_prompt(&"attack")
+	var up_key: String = _get_action_prompt(&"aim_up")
+	var down_key: String = _get_action_prompt(&"aim_down")
+	var dash_key: String = _get_action_prompt(&"dash")
+	var skill_key: String = _get_action_prompt(&"skill")
+	var interact_key: String = _get_action_prompt(&"interact")
+	var weapon_key: String = _get_action_prompt(&"cycle_weapon")
+	var restart_key: String = _get_action_prompt(&"restart")
+	var pause_key: String = _get_action_prompt(&"pause")
+	var scheme_name := "Xbox 手柄" if _using_controller_input else "键盘"
 	_settings_guide_label.text = (
 		"[font_size=22][color=#f2c66d]操作说明[/color][/font_size]\n"
+		+ "[color=#8fb6c9]当前提示：%s[/color]\n" % scheme_name
 		+ "[color=#68d8e8]移动与探索[/color]\n"
 		+ "[color=#ffffff]%s / %s[/color]  左右移动\n" % [left_key, right_key]
 		+ "[color=#ffffff]%s[/color]  跳跃；空中可再次跳跃\n" % jump_key
@@ -1210,9 +1007,59 @@ func _refresh_settings_operation_guide() -> void:
 		+ "[color=#ffffff]%s[/color]  主动技能    [color=#ffffff]%s[/color]  切换武器\n\n"
 		% [skill_key, weapon_key]
 		+ "[color=#68d8e8]系统[/color]\n"
-		+ "[color=#ffffff]1 / 2 / 3[/color]  选择强化或购买商品\n"
+		+ (
+			"[color=#ffffff]X / Y / B[/color]  直接选牌；[color=#ffffff]LS / D-Pad + A[/color]  导航确认\n"
+			if _using_controller_input
+			else "[color=#ffffff]1 / 2 / 3[/color]  选择强化或购买商品\n"
+		)
 		+ "[color=#ffffff]%s[/color]  暂停与设置    [color=#ffffff]%s[/color]  重新开局"
 		% [pause_key, restart_key]
+	)
+
+
+func _get_action_prompt(action_name: StringName) -> String:
+	if _settings == null:
+		return ""
+	return String(_settings.call(
+		&"get_action_prompt", action_name, _using_controller_input
+	))
+
+
+func _queue_display_apply() -> void:
+	_display_apply_generation += 1
+	_apply_display_after_frame(_display_apply_generation)
+
+
+func _apply_display_after_frame(expected_generation: int) -> void:
+	await get_tree().process_frame
+	if expected_generation != _display_apply_generation or _settings == null:
+		return
+	_settings.call(&"apply_display")
+	await get_tree().process_frame
+	if expected_generation == _display_apply_generation:
+		_refresh_display_status()
+
+
+func _refresh_display_status() -> void:
+	if not is_instance_valid(_settings_display_status_label) or _settings == null:
+		return
+	if Engine.is_embedded_in_editor():
+		_settings_display_status_label.text = (
+			"编辑器嵌入运行不支持全屏/窗口尺寸；关闭 Embed Game on Next Play 后即可生效。"
+		)
+		_settings_display_status_label.add_theme_color_override(
+			"font_color", Color(1.0, 0.72, 0.40, 1.0)
+		)
+		return
+	var target: Vector2i = _settings.call(&"get_requested_resolution")
+	var fullscreen_enabled: bool = bool(_settings.call(&"get_fullscreen_enabled"))
+	_settings_display_status_label.text = (
+		"全屏已应用（使用当前显示器尺寸）；%d × %d 将在窗口模式生效。" % [target.x, target.y]
+		if fullscreen_enabled
+		else "窗口分辨率已应用：%d × %d。" % [target.x, target.y]
+	)
+	_settings_display_status_label.add_theme_color_override(
+		"font_color", Color(0.45, 0.88, 0.72, 1.0)
 	)
 
 
@@ -1238,14 +1085,17 @@ func _on_damage_numbers_toggled(enabled: bool) -> void:
 
 func _on_resolution_selected(option_index: int) -> void:
 	_settings.call(&"set_resolution_index", option_index)
+	_queue_display_apply()
 
 
 func _on_fullscreen_toggled(enabled: bool) -> void:
 	_settings.call(&"set_fullscreen_enabled", enabled)
+	_queue_display_apply()
 
 
 func _on_vsync_toggled(enabled: bool) -> void:
 	_settings.call(&"set_vsync_enabled", enabled)
+	_queue_display_apply()
 
 
 func _on_reduced_effects_toggled(enabled: bool) -> void:
@@ -1282,6 +1132,7 @@ func _show_start_screen() -> void:
 	entry_quit.visible = true
 	for button in _difficulty_buttons:
 		button.visible = false
+	_ensure_context_focus()
 
 
 func _show_difficulty_selection() -> void:
@@ -1292,6 +1143,7 @@ func _show_difficulty_selection() -> void:
 	(_entry_overlay.get_node("EntryQuit") as Button).visible = false
 	for button in _difficulty_buttons:
 		button.visible = true
+	_ensure_context_focus()
 
 
 func _start_game_with_difficulty(difficulty: int) -> void:
@@ -1361,7 +1213,7 @@ func _start_new_run() -> void:
 	player.set_input_enabled(false)
 	player.configure_weapon(_progression.get_selected_weapon())
 	player.reset_run_progression()
-	_boss_health_background.visible = false
+	_hud_presenter.set_boss_visible(false)
 	_encounter_sequence = ENCOUNTER_DIRECTOR_SCRIPT.build_sequence(ROOMS_PER_RUN, _rng)
 	_room_sequence = ROOM_CATALOG_SCRIPT.build_room_sequence(
 		_room_pool.size(),
@@ -1440,18 +1292,18 @@ func _load_room(pool_index: int) -> void:
 		player.set_input_enabled(true)
 		if _current_encounter == EncounterType.RISK_CHEST:
 			_set_run_phase(RunFlowState.Phase.CHEST)
-			_status_label.text = "风险宝箱已出现——开启后击败伏兵才能领取奖励"
+			_set_status("风险宝箱已出现——开启后击败伏兵才能领取奖励")
 		else:
 			_set_run_phase(RunFlowState.Phase.COMBAT)
 			if _current_encounter == EncounterType.CHALLENGE:
-				_status_label.text = "进入 %s·挑战房——高压敌群，胜利获得额外金币与星屑" % room_title
+				_set_status("进入 %s·挑战房——高压敌群，胜利获得额外金币与星屑" % room_title)
 			elif _last_upgrade_name.is_empty():
-				_status_label.text = "进入 %s·%s——清除全部敌人" % [
+				_set_status("进入 %s·%s——清除全部敌人" % [
 					room_title,
 					_get_encounter_name(_current_encounter),
-				]
+				])
 			else:
-				_status_label.text = "已获得「%s」；进入 %s" % [_last_upgrade_name, room_title]
+				_set_status("已获得「%s」；进入 %s" % [_last_upgrade_name, room_title])
 				_last_upgrade_name = ""
 	_update_controls()
 	_update_room_label()
@@ -1624,7 +1476,7 @@ func _spawn_enemy(
 	add_child(enemy)
 	_enemies.append(enemy)
 	if rank == ENEMY_RANK_BOSS:
-		_boss_health_background.visible = true
+		_hud_presenter.set_boss_visible(true)
 		_on_boss_health_changed(enemy.get_current_health(), enemy.get_max_health())
 
 
@@ -1687,12 +1539,12 @@ func _clear_enemies() -> void:
 			enemy.queue_free()
 	_enemies.clear()
 	_boss_enemy = null
-	if is_instance_valid(_boss_health_background):
-		_boss_health_background.visible = false
+	if _hud_presenter != null:
+		_hud_presenter.set_boss_visible(false)
 
 
 func _on_player_attack_hit(origin: Vector2, facing: float) -> void:
-	if not _run_active:
+	if not _flow_state.run_active:
 		return
 	var damage_amount: int = player.get_attack_damage()
 	for enemy: RogueEnemy in _enemies.duplicate():
@@ -1716,7 +1568,7 @@ func _on_player_skill_hit(
 	damage: int,
 	reach_scale: float
 ) -> void:
-	if not _run_active:
+	if not _flow_state.run_active:
 		return
 	for enemy: RogueEnemy in _enemies.duplicate():
 		if not is_instance_valid(enemy):
@@ -1754,7 +1606,7 @@ func _on_enemy_defeated(enemy: RogueEnemy) -> void:
 	if enemy.is_boss():
 		if _telemetry != null:
 			_telemetry.record_boss_defeat()
-		_boss_health_background.visible = false
+		_hud_presenter.set_boss_visible(false)
 		_boss_enemy = null
 	_enemies.erase(enemy)
 	_update_economy_hud()
@@ -1821,21 +1673,26 @@ func _spawn_defeat_vfx(defeat_position: Vector2, enemy: RogueEnemy) -> void:
 
 
 func _on_room_cleared() -> void:
-	if not _run_active or _choosing_upgrade or _run_complete or not _enemies.is_empty():
+	if (
+		not _flow_state.run_active
+		or _flow_state.choosing_upgrade
+		or _flow_state.run_complete
+		or not _enemies.is_empty()
+	):
 		return
-	var resolved_risk_ambush: bool = _risk_ambush_active
+	var resolved_risk_ambush: bool = _flow_state.risk_ambush_active
 	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_clear_projectiles()
-	if _current_encounter == EncounterType.TREASURE and not _awaiting_chest:
+	if _current_encounter == EncounterType.TREASURE and not _flow_state.awaiting_chest:
 		_spawn_reward_chest()
 		return
 	if _current_encounter == EncounterType.RISK_CHEST and resolved_risk_ambush:
 		_gold += _pending_risk_gold
 		var restored_health: int = player.heal(_pending_risk_heal)
-		_status_label.text = "风险挑战完成：金币 +%d，生命恢复 %d" % [
+		_set_status("风险挑战完成：金币 +%d，生命恢复 %d" % [
 			_pending_risk_gold,
 			restored_health,
-		]
+		])
 		_pending_risk_gold = 0
 		_pending_risk_heal = 0
 		_update_economy_hud()
@@ -1844,7 +1701,7 @@ func _on_room_cleared() -> void:
 		var challenge_gold: int = 18 + _current_room_index
 		_gold += challenge_gold
 		_run_shards += 2
-		_status_label.text = "挑战完成：额外金币 +%d，星屑 +2" % challenge_gold
+		_set_status("挑战完成：额外金币 +%d，星屑 +2" % challenge_gold)
 		_update_economy_hud()
 	player.set_input_enabled(false)
 	if _current_room_index >= _room_sequence.size() - 1:
@@ -1863,18 +1720,8 @@ func _show_upgrade_choice() -> void:
 	_set_run_phase(RunFlowState.Phase.UPGRADE)
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "房间已清理——选择一项强化"
-	_upgrade_hint.text = "点击卡片，或按数字键 1 / 2 / 3"
-	for choice_index in range(_upgrade_buttons.size()):
-		var button: Button = _upgrade_buttons[choice_index]
-		var choice: Dictionary = _upgrade_choices[choice_index]
-		button.visible = true
-		button.disabled = false
-		button.text = "[%d]  [%s] %s\n\n%s" % [
-			choice_index + 1,
-			String(choice.get("rarity_name", "普通")),
-			String(choice.get("name", "强化")),
-			String(choice.get("description", "")),
-		]
+	_refresh_choice_overlay_prompts()
+	_ensure_context_focus()
 	_update_controls()
 
 
@@ -1889,21 +1736,9 @@ func _show_shop() -> void:
 		_telemetry.record_upgrade_offers(_upgrade_choices, player.get_weapon_id())
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "星尘旅商——购买一项强化"
-	_upgrade_hint.text = "金币不足时按 E 离开；数字键 1 / 2 / 3 购买"
-	for choice_index in range(_upgrade_buttons.size()):
-		var button: Button = _upgrade_buttons[choice_index]
-		var choice: Dictionary = _upgrade_choices[choice_index]
-		var cost: int = int(choice.get("cost", 0))
-		button.visible = true
-		button.disabled = _gold < cost
-		button.text = "[%d]  [%s] %s\n\n%s\n\n%d 金币" % [
-			choice_index + 1,
-			String(choice.get("rarity_name", "普通")),
-			String(choice.get("name", "商品")),
-			String(choice.get("description", "")),
-			cost,
-		]
-	_status_label.text = "旅商已抵达——当前拥有 %d 金币" % _gold
+	_refresh_choice_overlay_prompts()
+	_ensure_context_focus()
+	_set_status("旅商已抵达——当前拥有 %d 金币" % _gold)
 	_update_controls()
 
 
@@ -1934,19 +1769,79 @@ func _show_event_choice() -> void:
 	]
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "月蚀奇遇——选择回应"
-	_upgrade_hint.text = "事件不会触发战斗；点击卡片，或按数字键 1 / 2 / 3"
+	_refresh_choice_overlay_prompts()
+	_ensure_context_focus()
+	_set_status("发现月蚀遗迹——选择一种回应")
+	_update_controls()
+
+
+func _refresh_choice_overlay_prompts() -> void:
+	if (
+		not is_instance_valid(_upgrade_overlay)
+		or not _upgrade_overlay.visible
+		or not is_instance_valid(_upgrade_hint)
+	):
+		return
+	if _flow_state.run_complete:
+		_upgrade_hint.text = "已通过 %d 个房间。按 %s 开启随机新一局" % [
+			ROOMS_PER_RUN,
+			_get_action_prompt(&"restart"),
+		]
+		return
+	if not _flow_state.choosing_upgrade or _upgrade_choices.size() < _upgrade_buttons.size():
+		return
+
+	var shortcut_labels: Array[String] = []
+	for choice_index in range(_upgrade_buttons.size()):
+		shortcut_labels.append(
+			CHOICE_CONTROLLER_LABELS[choice_index]
+			if _using_controller_input
+			else str(choice_index + 1)
+		)
+	if _using_controller_input:
+		_upgrade_hint.text = (
+			"X / Y / B 直接购买 · 左摇杆或十字键切换 · A 确认 · %s 离开"
+			% _get_action_prompt(&"interact")
+			if _flow_state.shopping
+			else "X / Y / B 直接选牌 · 左摇杆或十字键切换 · A 确认"
+		)
+	elif _flow_state.shopping:
+		_upgrade_hint.text = "金币不足时按 %s 离开；数字键 1 / 2 / 3 购买" % _get_action_prompt(&"interact")
+	elif _flow_state.event_active:
+		_upgrade_hint.text = "事件不会触发战斗；点击卡片，或按数字键 1 / 2 / 3"
+	else:
+		_upgrade_hint.text = "点击卡片，或按数字键 1 / 2 / 3"
+
 	for choice_index in range(_upgrade_buttons.size()):
 		var button: Button = _upgrade_buttons[choice_index]
 		var choice: Dictionary = _upgrade_choices[choice_index]
+		var shortcut: String = shortcut_labels[choice_index]
 		button.visible = true
-		button.disabled = false
-		button.text = "[%d]  [事件] %s\n\n%s" % [
-			choice_index + 1,
-			String(choice.get("name", "事件")),
-			String(choice.get("description", "")),
-		]
-	_status_label.text = "发现月蚀遗迹——选择一种回应"
-	_update_controls()
+		if _flow_state.shopping:
+			var cost: int = int(choice.get("cost", 0))
+			button.disabled = _gold < cost
+			button.text = "[%s]  [%s] %s\n\n%s\n\n%d 金币" % [
+				shortcut,
+				String(choice.get("rarity_name", "普通")),
+				String(choice.get("name", "商品")),
+				String(choice.get("description", "")),
+				cost,
+			]
+		elif _flow_state.event_active:
+			button.disabled = false
+			button.text = "[%s]  [事件] %s\n\n%s" % [
+				shortcut,
+				String(choice.get("name", "事件")),
+				String(choice.get("description", "")),
+			]
+		else:
+			button.disabled = false
+			button.text = "[%s]  [%s] %s\n\n%s" % [
+				shortcut,
+				String(choice.get("rarity_name", "普通")),
+				String(choice.get("name", "强化")),
+				String(choice.get("description", "")),
+			]
 
 
 func _pick_upgrade_choices() -> Array[Dictionary]:
@@ -1962,15 +1857,19 @@ func _on_upgrade_button_pressed(choice_index: int) -> void:
 
 
 func choose_upgrade(choice_index: int) -> bool:
-	if not _choosing_upgrade or choice_index < 0 or choice_index >= _upgrade_choices.size():
+	if (
+		not _flow_state.choosing_upgrade
+		or choice_index < 0
+		or choice_index >= _upgrade_choices.size()
+	):
 		return false
-	if _event_active:
+	if _flow_state.event_active:
 		return _resolve_event_choice(choice_index)
 	var choice: Dictionary = _upgrade_choices[choice_index]
-	if _shopping:
+	if _flow_state.shopping:
 		var cost: int = int(choice.get("cost", 0))
 		if _gold < cost:
-			_status_label.text = "金币不足：需要 %d，当前 %d" % [cost, _gold]
+			_set_status("金币不足：需要 %d，当前 %d" % [cost, _gold])
 			return false
 		_gold -= cost
 	var upgrade_id: StringName = choice.get("id", &"")
@@ -1988,7 +1887,7 @@ func choose_upgrade(choice_index: int) -> bool:
 
 
 func _resolve_event_choice(choice_index: int) -> bool:
-	if not _event_active or choice_index < 0 or choice_index >= _upgrade_choices.size():
+	if not _flow_state.event_active or choice_index < 0 or choice_index >= _upgrade_choices.size():
 		return false
 	var choice: Dictionary = _upgrade_choices[choice_index]
 	var amount: int = int(choice.get("amount", 0))
@@ -2013,7 +1912,7 @@ func _resolve_event_choice(choice_index: int) -> bool:
 
 
 func _leave_shop() -> void:
-	if not _shopping:
+	if not _flow_state.shopping:
 		return
 	_last_upgrade_name = "未购物"
 	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
@@ -2023,7 +1922,7 @@ func _leave_shop() -> void:
 
 
 func _complete_run() -> void:
-	if _run_complete:
+	if _flow_state.run_complete:
 		return
 	_set_run_phase(RunFlowState.Phase.COMPLETE)
 	if _telemetry != null:
@@ -2032,11 +1931,11 @@ func _complete_run() -> void:
 	player.set_input_enabled(false)
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "本局完成"
-	_upgrade_hint.text = "已通过 %d 个房间。按 R 开启随机新一局" % ROOMS_PER_RUN
+	_refresh_choice_overlay_prompts()
 	for button in _upgrade_buttons:
 		button.visible = false
 	var unlocked_names: String = _bank_run_progress(true)
-	_status_label.text = "胜利——首领已击败，本局星屑已结算%s" % unlocked_names
+	_set_status("胜利——首领已击败，本局星屑已结算%s" % unlocked_names)
 	_update_economy_hud()
 	_update_controls()
 	_update_room_label()
@@ -2066,13 +1965,13 @@ func _spawn_reward_chest() -> void:
 	_chest.setup(
 		24,
 		24,
-		String(_settings.call(&"get_binding_name", &"interact"))
+		_get_action_prompt(&"interact")
 	)
 	_chest.opened.connect(_on_chest_opened)
 	add_child(_chest)
 	_set_run_phase(RunFlowState.Phase.CHEST)
 	player.set_input_enabled(true)
-	_status_label.text = "宝藏已出现——跟随宝箱上方提示"
+	_set_status("宝藏已出现——跟随宝箱上方提示")
 	_update_controls()
 
 
@@ -2093,7 +1992,7 @@ func _spawn_risk_chest() -> void:
 	_chest.setup(
 		42,
 		28,
-		String(_settings.call(&"get_binding_name", &"interact")),
+		_get_action_prompt(&"interact"),
 		true
 	)
 	_chest.opened.connect(_on_chest_opened)
@@ -2104,19 +2003,19 @@ func _spawn_risk_chest() -> void:
 
 
 func _open_current_chest() -> bool:
-	if not _awaiting_chest or not is_instance_valid(_chest):
+	if not _flow_state.awaiting_chest or not is_instance_valid(_chest):
 		return false
 	return _chest.try_open(player.global_position)
 
 
 func open_current_chest_for_test() -> bool:
-	if not _awaiting_chest or not is_instance_valid(_chest):
+	if not _flow_state.awaiting_chest or not is_instance_valid(_chest):
 		return false
 	return _chest.force_open()
 
 
 func _on_chest_opened(gold_reward: int, heal_reward: int) -> void:
-	if not _awaiting_chest:
+	if not _flow_state.awaiting_chest:
 		return
 	if _current_encounter == EncounterType.RISK_CHEST:
 		_pending_risk_gold = gold_reward
@@ -2124,14 +2023,14 @@ func _on_chest_opened(gold_reward: int, heal_reward: int) -> void:
 		_set_run_phase(RunFlowState.Phase.RISK_AMBUSH)
 		player.set_input_enabled(true)
 		_spawn_risk_ambush()
-		_status_label.text = "风险宝箱触发伏兵——清除全部敌人领取奖励"
+		_set_status("风险宝箱触发伏兵——清除全部敌人领取奖励")
 		_update_controls()
 		return
 	_gold += gold_reward
 	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	var restored_health: int = player.heal(heal_reward)
 	player.set_input_enabled(false)
-	_status_label.text = "宝箱：金币 +%d，生命恢复 %d" % [gold_reward, restored_health]
+	_set_status("宝箱：金币 +%d，生命恢复 %d" % [gold_reward, restored_health])
 	_update_economy_hud()
 	call_deferred(&"_show_upgrade_choice")
 
@@ -2180,7 +2079,7 @@ func _on_enemy_projectile_requested(
 	projectile_style: int,
 	source_enemy: RogueEnemy = null
 ) -> void:
-	if not _run_active:
+	if not _flow_state.run_active:
 		return
 	var projectile: Area2D = ENEMY_PROJECTILE_SCRIPT.new() as Area2D
 	add_child(projectile)
@@ -2235,6 +2134,11 @@ func _update_lives_hud() -> void:
 		)
 
 
+func _set_status(message: String) -> void:
+	if _hud_presenter != null:
+		_hud_presenter.set_status(message)
+
+
 func _on_boss_health_changed(current_health: int, maximum_health: int) -> void:
 	var boss_name: String = "赤晶史莱姆王"
 	if is_instance_valid(_boss_enemy) and _boss_enemy.get_enemy_family() == ENEMY_FAMILY_GOBLIN:
@@ -2246,12 +2150,12 @@ func _on_boss_health_changed(current_health: int, maximum_health: int) -> void:
 
 func _on_boss_phase_changed(phase: int) -> void:
 	var phase_name: String = "狂暴阶段" if phase >= 3 else "强化阶段"
-	_status_label.text = "首领进入%s——观察地面与瞄准预警" % phase_name
+	_set_status("首领进入%s——观察地面与瞄准预警" % phase_name)
 	_trigger_camera_shake(13.0 if phase >= 3 else 9.0, 0.18)
 
 
 func _on_player_died() -> void:
-	if _death_restart_pending:
+	if _flow_state.death_restart_pending:
 		return
 	if _telemetry != null:
 		var death_reason: StringName = player.get_last_death_reason()
@@ -2264,11 +2168,11 @@ func _on_player_died() -> void:
 	_clear_projectiles()
 	_hide_upgrade_overlay()
 	var unlocked_names: String = _bank_run_progress(false)
-	_status_label.text = "战败——本局星屑已结算%s，即将重新生成路线" % unlocked_names
+	_set_status("战败——本局星屑已结算%s，即将重新生成路线" % unlocked_names)
 	_update_economy_hud()
 	_update_controls()
 	_update_lives_hud()
-	_status_label.text = "战败 — 剩余命数 %d / %d" % [_lives_remaining, MAX_RUN_LIVES]
+	_set_status("战败 — 剩余命数 %d / %d" % [_lives_remaining, MAX_RUN_LIVES])
 	var expected_generation: int = _run_generation
 	get_tree().create_timer(DEATH_RESTART_DELAY).timeout.connect(
 		_finish_death_sequence.bind(expected_generation)
@@ -2276,13 +2180,13 @@ func _on_player_died() -> void:
 
 
 func _restart_run_after_death(expected_generation: int) -> void:
-	if not _death_restart_pending or expected_generation != _run_generation:
+	if not _flow_state.death_restart_pending or expected_generation != _run_generation:
 		return
 	_start_new_run()
 
 
 func _finish_death_sequence(expected_generation: int) -> void:
-	if not _death_restart_pending or expected_generation != _run_generation:
+	if not _flow_state.death_restart_pending or expected_generation != _run_generation:
 		return
 	if _lives_remaining > 0:
 		_start_new_run()
@@ -2314,7 +2218,7 @@ func _update_room_label() -> void:
 	var chapter_name: String = _get_chapter_name(_current_room_index)
 	_hud_presenter.update_room(
 		not _current_room_data.is_empty(),
-		_run_complete,
+		_flow_state.run_complete,
 		_run_number,
 		_run_seed,
 		_current_room_index + 1,
@@ -2342,16 +2246,24 @@ func _update_equipment_hud() -> void:
 
 
 func _update_ability_hud() -> void:
-	if _hud_presenter != null:
-		_hud_presenter.update_abilities(player)
+	if _hud_presenter == null or _settings == null:
+		return
+	_hud_presenter.update_abilities(player, {
+		"attack": _get_action_prompt(&"attack"),
+		"dash": _get_action_prompt(&"dash"),
+		"skill": _get_action_prompt(&"skill"),
+		"aim_up": _get_action_prompt(&"aim_up"),
+		"aim_down": _get_action_prompt(&"aim_down"),
+		"cycle_weapon": _get_action_prompt(&"cycle_weapon"),
+	})
 
 
 func _cycle_weapon() -> void:
-	if _progression == null or _choosing_upgrade or player.is_dead():
+	if _progression == null or _flow_state.choosing_upgrade or player.is_dead():
 		return
 	var unlocked: Array[StringName] = _progression.get_unlocked_weapons()
 	if unlocked.size() <= 1:
-		_status_label.text = "尚未解锁其他武器；击败精英并完成更多轮次可解锁"
+		_set_status("尚未解锁其他武器；击败精英并完成更多轮次可解锁")
 		return
 	var current_index: int = unlocked.find(player.get_weapon_id())
 	var next_index: int = posmod(current_index + 1, unlocked.size())
@@ -2360,7 +2272,7 @@ func _cycle_weapon() -> void:
 		_progression.select_weapon(next_weapon)
 		if save_enabled:
 			_progression.save_progress()
-		_status_label.text = "切换武器：%s" % player.get_weapon_name()
+		_set_status("切换武器：%s" % player.get_weapon_name())
 		_update_equipment_hud()
 
 

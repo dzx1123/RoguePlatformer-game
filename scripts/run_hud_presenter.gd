@@ -18,6 +18,7 @@ var dash_slot: Control
 var skill_slot: Control
 var weapon_slot_panels: Array[Panel] = []
 var weapon_slot_labels: Array[Label] = []
+var weapon_switch_label: Label
 var _weapon_state_key: String = ""
 
 
@@ -36,6 +37,7 @@ func bind(hud: CanvasLayer) -> bool:
 	attack_slot = hud.get_node_or_null("AbilityBar/AttackAbility") as Control
 	dash_slot = hud.get_node_or_null("AbilityBar/DashAbility") as Control
 	skill_slot = hud.get_node_or_null("AbilityBar/SkillAbility") as Control
+	weapon_switch_label = hud.get_node_or_null("WeaponPanel/WeaponSwitch/Label") as Label
 	weapon_slot_panels.clear()
 	weapon_slot_labels.clear()
 	for weapon_index: int in range(WeaponCatalog.all_weapon_ids().size()):
@@ -62,6 +64,7 @@ func is_bound() -> bool:
 		and attack_slot != null
 		and dash_slot != null
 		and skill_slot != null
+		and weapon_switch_label != null
 		and weapon_slot_panels.size() == WeaponCatalog.all_weapon_ids().size()
 	)
 
@@ -205,17 +208,27 @@ func update_weapon_slots(player: RoguePlayer, progression: ProgressionStore) -> 
 		slot.tooltip_text = "%s · %s" % [weapon_name, slot_state]
 
 
-func update_abilities(player: RoguePlayer) -> void:
+func update_abilities(player: RoguePlayer, prompts: Dictionary = {}) -> void:
 	if attack_slot == null or dash_slot == null or skill_slot == null:
 		return
+	var attack_prompt: String = String(prompts.get("attack", "J"))
+	var dash_prompt: String = String(prompts.get("dash", "K"))
+	var skill_prompt: String = String(prompts.get("skill", "L"))
+	var up_prompt: String = String(prompts.get("aim_up", "W"))
+	var down_prompt: String = String(prompts.get("aim_down", "S"))
+	var cycle_weapon_prompt: String = String(prompts.get("cycle_weapon", "Q"))
+	if weapon_switch_label != null:
+		weapon_switch_label.text = "%s\n切换" % cycle_weapon_prompt
 	var weapon_data: Dictionary = WeaponCatalog.get_weapon(player.get_weapon_id())
 	var weapon_accent: Color = weapon_data.get("accent", Color("#78d9ef"))
 	attack_slot.call(
 		&"configure",
 		0,
 		"普通攻击",
-		"J",
-		"使用%s发动普通攻击，可配合 W / S 改变挥砍方向。" % player.get_weapon_name(),
+		attack_prompt,
+		"使用%s发动普通攻击，可配合 %s / %s 改变挥砍方向。" % [
+			player.get_weapon_name(), up_prompt, down_prompt,
+		],
 		weapon_accent
 	)
 	attack_slot.call(
@@ -227,7 +240,7 @@ func update_abilities(player: RoguePlayer) -> void:
 		&"configure",
 		1,
 		"闪避冲刺",
-		"K",
+		dash_prompt,
 		"向当前朝向高速闪避。冷却：2.0 秒。",
 		Color("#65dcff")
 	)
@@ -240,7 +253,7 @@ func update_abilities(player: RoguePlayer) -> void:
 		&"configure",
 		2,
 		player.get_skill_name(),
-		"L",
+		skill_prompt,
 		"向前突进并释放多重月弧，造成高额范围伤害。",
 		weapon_accent.lightened(0.12)
 	)

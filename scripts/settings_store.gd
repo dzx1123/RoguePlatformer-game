@@ -26,6 +26,25 @@ const DEFAULT_BINDINGS := {
 	"restart": [KEY_R],
 	"pause": [KEY_ESCAPE],
 }
+const CONTROLLER_BINDING_NAMES := {
+	"move_left": "LS← / D←",
+	"move_right": "LS→ / D→",
+	"jump": "A",
+	"aim_up": "LS↑ / D↑",
+	"aim_down": "LS↓ / D↓",
+	"attack": "X",
+	"dash": "B",
+	"skill": "Y",
+	"interact": "RB",
+	"cycle_weapon": "LB",
+	"restart": "View",
+	"pause": "Menu",
+}
+const CHOICE_KEY_BINDINGS := {
+	"choice_1": [KEY_1, KEY_KP_1],
+	"choice_2": [KEY_2, KEY_KP_2],
+	"choice_3": [KEY_3, KEY_KP_3],
+}
 
 var _bindings: Dictionary = {}
 var _save_path: String = SAVE_PATH
@@ -121,6 +140,8 @@ func apply() -> void:
 func _apply_controller_defaults() -> void:
 	_add_joy_axis(&"move_left", JOY_AXIS_LEFT_X, -1.0)
 	_add_joy_axis(&"move_right", JOY_AXIS_LEFT_X, 1.0)
+	_add_joy_axis(&"aim_up", JOY_AXIS_LEFT_Y, -1.0)
+	_add_joy_axis(&"aim_down", JOY_AXIS_LEFT_Y, 1.0)
 	_add_joy_button(&"move_left", JOY_BUTTON_DPAD_LEFT)
 	_add_joy_button(&"move_right", JOY_BUTTON_DPAD_RIGHT)
 	_add_joy_button(&"aim_up", JOY_BUTTON_DPAD_UP)
@@ -134,14 +155,68 @@ func _apply_controller_defaults() -> void:
 	_add_joy_button(&"restart", JOY_BUTTON_BACK)
 	_add_joy_button(&"pause", JOY_BUTTON_START)
 
+	# Context actions stay outside DEFAULT_BINDINGS: they are fixed menu controls,
+	# not entries in the keyboard-rebinding grid.
+	for action_value in CHOICE_KEY_BINDINGS:
+		var action_name := StringName(String(action_value))
+		_ensure_action(action_name)
+		for key_code in CHOICE_KEY_BINDINGS[action_value]:
+			_add_key(action_name, int(key_code))
+	_add_joy_button(&"choice_1", JOY_BUTTON_X)
+	_add_joy_button(&"choice_2", JOY_BUTTON_Y)
+	_add_joy_button(&"choice_3", JOY_BUTTON_B)
+
+	# Godot's built-in UI actions are made explicit so every menu works with
+	# either the left stick or D-pad on a fresh project/input-map install.
+	_add_joy_axis(&"ui_left", JOY_AXIS_LEFT_X, -1.0)
+	_add_joy_axis(&"ui_right", JOY_AXIS_LEFT_X, 1.0)
+	_add_joy_axis(&"ui_up", JOY_AXIS_LEFT_Y, -1.0)
+	_add_joy_axis(&"ui_down", JOY_AXIS_LEFT_Y, 1.0)
+	_add_joy_button(&"ui_left", JOY_BUTTON_DPAD_LEFT)
+	_add_joy_button(&"ui_right", JOY_BUTTON_DPAD_RIGHT)
+	_add_joy_button(&"ui_up", JOY_BUTTON_DPAD_UP)
+	_add_joy_button(&"ui_down", JOY_BUTTON_DPAD_DOWN)
+	_add_joy_button(&"ui_accept", JOY_BUTTON_A)
+	_add_joy_button(&"ui_cancel", JOY_BUTTON_B)
+
+
+func _ensure_action(action_name: StringName) -> void:
+	if not InputMap.has_action(action_name):
+		InputMap.add_action(action_name)
+
+
+func _add_key(action_name: StringName, key_code: int) -> void:
+	_ensure_action(action_name)
+	for existing_event in InputMap.action_get_events(action_name):
+		if existing_event is InputEventKey and existing_event.keycode == key_code:
+			return
+	var event := InputEventKey.new()
+	event.keycode = key_code
+	InputMap.action_add_event(action_name, event)
+
 
 func _add_joy_button(action_name: StringName, button_index: int) -> void:
+	_ensure_action(action_name)
+	for existing_event in InputMap.action_get_events(action_name):
+		if (
+			existing_event is InputEventJoypadButton
+			and existing_event.button_index == button_index
+		):
+			return
 	var event := InputEventJoypadButton.new()
 	event.button_index = button_index
 	InputMap.action_add_event(action_name, event)
 
 
 func _add_joy_axis(action_name: StringName, axis: int, axis_value: float) -> void:
+	_ensure_action(action_name)
+	for existing_event in InputMap.action_get_events(action_name):
+		if (
+			existing_event is InputEventJoypadMotion
+			and existing_event.axis == axis
+			and is_equal_approx(existing_event.axis_value, axis_value)
+		):
+			return
 	var event := InputEventJoypadMotion.new()
 	event.axis = axis
 	event.axis_value = axis_value
@@ -177,6 +252,20 @@ func get_binding_name(action_name: StringName) -> String:
 	if codes.is_empty():
 		return "未绑定"
 	return OS.get_keycode_string(codes[0])
+
+
+func get_controller_binding_name(action_name: StringName) -> String:
+	return String(CONTROLLER_BINDING_NAMES.get(String(action_name), "未绑定"))
+
+
+func get_action_prompt(action_name: StringName, using_controller: bool) -> String:
+	if using_controller:
+		return get_controller_binding_name(action_name)
+	return get_binding_name(action_name)
+
+
+func get_combined_binding_name(action_name: StringName) -> String:
+	return "%s / %s" % [get_binding_name(action_name), get_controller_binding_name(action_name)]
 
 
 func get_binding_codes(action_name: String) -> Array[int]:
@@ -322,9 +411,21 @@ func _apply_bus_volume(bus_name: StringName, linear_volume: float) -> void:
 	AudioServer.set_bus_volume_db(bus_index, linear_to_db(maxf(linear_volume, 0.001)))
 
 
-func _apply_display() -> void:
-	if DisplayServer.get_name() == "headless":
-		return
+func apply_display() -> bool:
+	return _apply_display()
+
+
+func can_apply_display() -> bool:
+	return DisplayServer.get_name() != "headless" and not Engine.is_embedded_in_editor()
+
+
+func get_requested_resolution() -> Vector2i:
+	return RESOLUTION_OPTIONS[_resolution_index]
+
+
+func _apply_display() -> bool:
+	if not can_apply_display():
+		return false
 	DisplayServer.window_set_vsync_mode(
 		DisplayServer.VSYNC_ENABLED if _vsync_enabled else DisplayServer.VSYNC_DISABLED
 	)
@@ -332,7 +433,10 @@ func _apply_display() -> void:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 	else:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		# Fullscreen forces borderless on. Restore the native frame before resizing.
+		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
 		DisplayServer.window_set_size(RESOLUTION_OPTIONS[_resolution_index])
+	return true
 
 
 func _is_valid_settings_data(data: Dictionary) -> bool:

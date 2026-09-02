@@ -4,6 +4,7 @@ const DEFAULT_DURATION_SECONDS := 1800.0
 const REPORT_DIR := "res://tests/artifacts/stress"
 
 var _duration_seconds: float = DEFAULT_DURATION_SECONDS
+var _report_file_name: String = "soak_report.json"
 var _main: Node2D
 var _player: RoguePlayer
 var _started_msec: int = 0
@@ -21,6 +22,7 @@ var _peak_node_count: int = 0
 
 func _initialize() -> void:
 	_duration_seconds = _read_duration_argument()
+	_report_file_name = _read_report_argument()
 	Engine.max_fps = 120
 	call_deferred(&"_run_stress")
 
@@ -65,9 +67,14 @@ func _run_stress() -> void:
 		return
 	if not _write_report(true, ""):
 		return
-	print("long_session_stress: PASS duration=%.1fs rooms=%d runs=%d attacks=%d" % [
+	var success_summary := "long_session_stress: PASS duration=%.1fs rooms=%d runs=%d attacks=%d" % [
 		_elapsed_seconds(), _rooms_resolved, _runs_completed, _attack_hits,
-	])
+	]
+	_release_inputs()
+	_main.queue_free()
+	for _cleanup_frame: int in range(4):
+		await process_frame
+	print(success_summary)
 	quit(0)
 
 
@@ -186,6 +193,15 @@ func _read_duration_argument() -> float:
 	return DEFAULT_DURATION_SECONDS
 
 
+func _read_report_argument() -> String:
+	for argument: String in OS.get_cmdline_user_args():
+		if argument.begins_with("--report="):
+			var requested_name := argument.trim_prefix("--report=").get_file()
+			if requested_name.get_extension().to_lower() == "json":
+				return requested_name
+	return "soak_report.json"
+
+
 func _elapsed_seconds() -> float:
 	if _started_msec <= 0:
 		return 0.0
@@ -239,7 +255,7 @@ func _validate_result() -> bool:
 
 
 func _write_report(success: bool, failure_message: String) -> bool:
-	var report_path := "%s/soak_report.json" % REPORT_DIR
+	var report_path := "%s/%s" % [REPORT_DIR, _report_file_name]
 	var report_file := FileAccess.open(report_path, FileAccess.WRITE)
 	if report_file == null:
 		push_error("Could not open stress report for writing")
