@@ -133,6 +133,7 @@ var _upgrade_tween: Tween
 var _entry_overlay: Control
 var _entry_title: Label
 var _entry_subtitle: Label
+var _entry_progress_panel: Panel
 var _start_button: Button
 var _difficulty_buttons: Array[Button] = []
 var _entry_flow_active: bool = false
@@ -145,6 +146,7 @@ var _camera_shake_strength: float = 0.0
 var _lives_remaining: int = MAX_RUN_LIVES
 var _settings: RefCounted
 var _pause_overlay: Control
+var _pause_overview_button: Button
 var _settings_overlay: Control
 var _build_overview: RunBuildOverview
 var _settings_key_buttons: Dictionary = {}
@@ -441,6 +443,8 @@ func _refresh_input_prompts() -> void:
 	_update_ability_hud()
 	_refresh_settings_key_buttons()
 	_refresh_choice_overlay_prompts()
+	if is_instance_valid(_pause_overview_button):
+		_pause_overview_button.text = "构筑总览  [%s]" % _get_action_prompt(&"build_overview")
 	if is_instance_valid(_chest):
 		_chest.set_interaction_prompt(_get_action_prompt(&"interact"))
 	if is_instance_valid(_room_exit_portal):
@@ -974,10 +978,47 @@ func _create_entry_ui() -> void:
 	footer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_entry_overlay.add_child(footer)
 
+	_entry_progress_panel = Panel.new()
+	_entry_progress_panel.name = "ProfileSummary"
+	_entry_progress_panel.position = Vector2(350.0, 640.0)
+	_entry_progress_panel.size = Vector2(580.0, 76.0)
+	_entry_progress_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_entry_progress_panel.add_theme_stylebox_override(
+		"panel",
+		_create_surface_style(
+			Color(0.006, 0.035, 0.070, 0.94),
+			Color(0.40, 0.84, 0.98, 0.72),
+			14,
+			1,
+			10
+		)
+	)
+	_entry_overlay.add_child(_entry_progress_panel)
+	var profile_heading := Label.new()
+	profile_heading.name = "Heading"
+	profile_heading.position = Vector2(18.0, 9.0)
+	profile_heading.size = Vector2(544.0, 20.0)
+	profile_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	profile_heading.text = "自动存档 01  ·  局外进度"
+	profile_heading.add_theme_font_size_override("font_size", 14)
+	profile_heading.add_theme_color_override("font_color", Color(0.58, 0.90, 1.0, 1.0))
+	profile_heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_entry_progress_panel.add_child(profile_heading)
+	var profile_value := Label.new()
+	profile_value.name = "Value"
+	profile_value.position = Vector2(18.0, 31.0)
+	profile_value.size = Vector2(544.0, 38.0)
+	profile_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	profile_value.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	profile_value.add_theme_font_size_override("font_size", 14)
+	profile_value.add_theme_color_override("font_color", Color(0.86, 0.95, 1.0, 1.0))
+	profile_value.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_entry_progress_panel.add_child(profile_value)
+
 	var difficulty_data := [
-		{"name": "简单", "description": "敌人生命与伤害降低，适合熟悉操作", "color": Color(0.36, 0.86, 0.58, 1.0)},
-		{"name": "中等", "description": "标准挑战，推荐第一次游玩", "color": Color(0.35, 0.72, 0.98, 1.0)},
-		{"name": "困难", "description": "敌人更耐打且攻击更致命", "color": Color(1.0, 0.42, 0.35, 1.0)},
+		{"name": "简单", "description": "低攻击欲望 · 较长预警\n前五房用于熟悉操作", "color": Color(0.36, 0.86, 0.58, 1.0)},
+		{"name": "中等", "description": "标准成长曲线 · 稳步加压\n推荐首次完整挑战", "color": Color(0.35, 0.72, 0.98, 1.0)},
+		{"name": "困难", "description": "积极追击 · 更短攻击间隔\n面向熟悉构筑的玩家", "color": Color(1.0, 0.42, 0.35, 1.0)},
 	]
 	for difficulty_index in range(difficulty_data.size()):
 		var data: Dictionary = difficulty_data[difficulty_index]
@@ -1046,6 +1087,8 @@ func _reset_entry_layout() -> void:
 	if frame != null:
 		frame.position = Vector2(418.0, 364.0)
 		frame.size = Vector2(444.0, 210.0)
+	if is_instance_valid(_entry_progress_panel):
+		_entry_progress_panel.position = Vector2(350.0, 640.0)
 	for difficulty_index in range(_difficulty_buttons.size()):
 		_difficulty_buttons[difficulty_index].position = Vector2(
 			170.0 + float(difficulty_index) * 314.0,
@@ -1067,6 +1110,7 @@ func _play_entry_transition(showing_difficulty: bool) -> void:
 		controls.append(_start_button)
 		controls.append(_entry_overlay.get_node("EntrySettings") as Button)
 		controls.append(_entry_overlay.get_node("EntryQuit") as Button)
+		controls.append(_entry_progress_panel)
 	if frame != null and frame.visible:
 		frame.pivot_offset = frame.size * 0.5
 		frame.modulate = Color(1.0, 1.0, 1.0, 0.0)
@@ -1102,21 +1146,47 @@ func _create_pause_ui() -> void:
 	hud.add_child(_pause_overlay)
 
 	var dimmer := ColorRect.new()
+	dimmer.name = "PauseDimmer"
 	dimmer.size = DISPLAY_SIZE
-	dimmer.color = Color(0.01, 0.02, 0.04, 0.72)
+	dimmer.color = Color(0.004, 0.012, 0.028, 0.82)
 	dimmer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pause_overlay.add_child(dimmer)
 
-	var panel := ColorRect.new()
-	panel.position = Vector2(425.0, 180.0)
-	panel.size = Vector2(430.0, 400.0)
-	panel.color = Color(0.045, 0.085, 0.12, 0.98)
+	var panel := Panel.new()
+	panel.name = "PausePanel"
+	panel.position = Vector2(405.0, 150.0)
+	panel.size = Vector2(470.0, 470.0)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override(
+		"panel",
+		_create_surface_style(
+			Color(0.010, 0.040, 0.075, 0.985),
+			Color(0.38, 0.85, 0.98, 0.72),
+			18,
+			2,
+			18
+		)
+	)
 	_pause_overlay.add_child(panel)
+	var accent_rule := ColorRect.new()
+	accent_rule.position = Vector2(28.0, 24.0)
+	accent_rule.size = Vector2(414.0, 2.0)
+	accent_rule.color = Color(0.42, 0.90, 1.0, 0.74)
+	accent_rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(accent_rule)
+	var kicker := Label.new()
+	kicker.position = Vector2(0.0, 38.0)
+	kicker.size = Vector2(470.0, 22.0)
+	kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	kicker.text = "RUN SUSPENDED  ·  月蚀回响"
+	kicker.add_theme_font_size_override("font_size", 13)
+	kicker.add_theme_color_override("font_color", Color(0.48, 0.82, 0.94, 0.90))
+	kicker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(kicker)
 
 	var title := Label.new()
-	title.position = Vector2(455.0, 215.0)
-	title.size = Vector2(370.0, 52.0)
+	title.position = Vector2(455.0, 220.0)
+	title.size = Vector2(370.0, 50.0)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.text = "已暂停"
 	title.add_theme_font_size_override("font_size", 32)
@@ -1124,24 +1194,24 @@ func _create_pause_ui() -> void:
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pause_overlay.add_child(title)
 
-	var resume_button := _create_menu_button("Resume", "继续游戏", Vector2(495.0, 285.0), Vector2(290.0, 54.0))
+	var resume_button := _create_menu_button("Resume", "继续游戏", Vector2(475.0, 292.0), Vector2(330.0, 54.0))
 	resume_button.pressed.connect(_resume_game)
 	_pause_overlay.add_child(resume_button)
-	var overview_button := _create_menu_button(
+	_pause_overview_button = _create_menu_button(
 		"PauseBuildOverview",
-		"构筑总览  [Tab]",
-		Vector2(495.0, 475.0),
-		Vector2(290.0, 48.0)
+		"构筑总览",
+		Vector2(475.0, 492.0),
+		Vector2(330.0, 48.0)
 	)
-	overview_button.pressed.connect(_open_build_overview.bind(true))
-	_pause_overlay.add_child(overview_button)
-	var settings_button := _create_menu_button("PauseSettings", "设置", Vector2(495.0, 352.0), Vector2(290.0, 48.0))
+	_pause_overview_button.pressed.connect(_open_build_overview.bind(true))
+	_pause_overlay.add_child(_pause_overview_button)
+	var settings_button := _create_menu_button("PauseSettings", "设置与操作", Vector2(475.0, 358.0), Vector2(330.0, 48.0))
 	settings_button.pressed.connect(_open_settings.bind(true))
 	_pause_overlay.add_child(settings_button)
-	var menu_button := _create_menu_button("ReturnToMenu", "返回主菜单", Vector2(495.0, 413.0), Vector2(290.0, 48.0))
+	var menu_button := _create_menu_button("ReturnToMenu", "返回主菜单", Vector2(475.0, 425.0), Vector2(330.0, 48.0))
 	menu_button.pressed.connect(_return_to_main_menu)
 	_pause_overlay.add_child(menu_button)
-	_configure_vertical_focus([resume_button, overview_button, settings_button, menu_button])
+	_configure_vertical_focus([resume_button, settings_button, menu_button, _pause_overview_button])
 	_pause_overlay.visible = false
 
 
@@ -1202,7 +1272,7 @@ func _create_settings_ui() -> void:
 
 	var dimmer := ColorRect.new()
 	dimmer.size = DISPLAY_SIZE
-	dimmer.color = Color(0.004, 0.012, 0.028, 0.52)
+	dimmer.color = Color(0.004, 0.012, 0.028, 0.88)
 	dimmer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_settings_overlay.add_child(dimmer)
 	var panel := Panel.new()
@@ -1359,8 +1429,8 @@ func _create_settings_ui() -> void:
 	guide_panel.visible = false
 	_settings_guide_label = RichTextLabel.new()
 	_settings_guide_label.name = "OperationGuide"
-	_settings_guide_label.position = Vector2(720.0, 372.0)
-	_settings_guide_label.size = Vector2(466.0, 268.0)
+	_settings_guide_label.position = Vector2(720.0, 380.0)
+	_settings_guide_label.size = Vector2(466.0, 260.0)
 	_settings_guide_label.bbcode_enabled = true
 	_settings_guide_label.fit_content = false
 	_settings_guide_label.scroll_active = false
@@ -1375,9 +1445,11 @@ func _create_settings_ui() -> void:
 		[&"dash", "闪避冲刺"], [ &"skill", "主动技能"], [ &"interact", "互动"], [ &"cycle_weapon", "切换武器"], [ &"restart", "重开本局"], [ &"pause", "暂停菜单"],
 	]
 	for action_index in range(actions.size()):
-		var row: int = action_index % 4
-		var column: int = int(action_index / 4)
-		var position := Vector2(84.0 + float(column) * 194.0, 382.0 + float(row) * 57.0)
+		# Three columns keep every binding inside the left card. The previous
+		# four-column grid let the final column overlap the field guide.
+		var row: int = action_index % 5
+		var column: int = int(action_index / 5)
+		var position := Vector2(84.0 + float(column) * 194.0, 382.0 + float(row) * 51.0)
 		var action_name: StringName = actions[action_index][0]
 		var action_label := Label.new()
 		action_label.position = position
@@ -1671,17 +1743,23 @@ func _return_to_main_menu() -> void:
 
 func _open_settings(from_pause: bool) -> void:
 	_settings_from_pause = from_pause
+	if from_pause:
+		_pause_overlay.visible = false
 	_awaiting_rebind_action = &""
-	_settings_volume_slider.value = float(_settings.call(&"get_master_volume"))
-	_settings_music_slider.value = float(_settings.call(&"get_music_volume"))
-	_settings_effects_slider.value = float(_settings.call(&"get_effects_volume"))
-	_settings_voice_slider.value = float(_settings.call(&"get_voice_volume"))
-	_settings_damage_numbers_toggle.button_pressed = bool(_settings.call(&"get_damage_numbers_enabled"))
+	_settings_volume_slider.set_value_no_signal(float(_settings.call(&"get_master_volume")))
+	_settings_music_slider.set_value_no_signal(float(_settings.call(&"get_music_volume")))
+	_settings_effects_slider.set_value_no_signal(float(_settings.call(&"get_effects_volume")))
+	_settings_voice_slider.set_value_no_signal(float(_settings.call(&"get_voice_volume")))
+	_settings_damage_numbers_toggle.set_pressed_no_signal(
+		bool(_settings.call(&"get_damage_numbers_enabled"))
+	)
 	_settings_resolution_selector.select(int(_settings.call(&"get_resolution_index")))
-	_settings_fullscreen_toggle.button_pressed = bool(_settings.call(&"get_fullscreen_enabled"))
-	_settings_vsync_toggle.button_pressed = bool(_settings.call(&"get_vsync_enabled"))
-	_settings_reduced_effects_toggle.button_pressed = bool(
-		_settings.call(&"get_reduced_effects_enabled")
+	_settings_fullscreen_toggle.set_pressed_no_signal(
+		bool(_settings.call(&"get_fullscreen_enabled"))
+	)
+	_settings_vsync_toggle.set_pressed_no_signal(bool(_settings.call(&"get_vsync_enabled")))
+	_settings_reduced_effects_toggle.set_pressed_no_signal(
+		bool(_settings.call(&"get_reduced_effects_enabled"))
 	)
 	_settings_overlay.visible = true
 	_refresh_input_prompts()
@@ -1695,6 +1773,7 @@ func _close_settings() -> void:
 	if not _settings_from_pause:
 		_show_start_screen()
 	else:
+		_pause_overlay.visible = true
 		_ensure_context_focus()
 
 
@@ -1731,8 +1810,7 @@ func _refresh_settings_operation_guide() -> void:
 	var pause_key: String = _get_action_prompt(&"pause")
 	var scheme_name := "Xbox 手柄" if _using_controller_input else "键盘"
 	_settings_guide_label.text = (
-		"[font_size=22][color=#f2c66d]操作说明[/color][/font_size]\n"
-		+ "[color=#8fb6c9]当前提示：%s[/color]\n" % scheme_name
+		"[color=#8fb6c9]当前提示：%s[/color]\n" % scheme_name
 		+ "[color=#68d8e8]移动与探索[/color]\n"
 		+ "[color=#ffffff]%s / %s[/color]  左右移动\n" % [left_key, right_key]
 		+ "[color=#ffffff]%s[/color]  跳跃；空中可再次跳跃\n" % jump_key
@@ -1872,6 +1950,8 @@ func _show_start_screen() -> void:
 	var entry_quit: Button = _entry_overlay.get_node("EntryQuit") as Button
 	entry_settings.visible = true
 	entry_quit.visible = true
+	_entry_progress_panel.visible = true
+	_refresh_entry_progress_summary()
 	for button in _difficulty_buttons:
 		button.visible = false
 	_play_entry_transition(false)
@@ -1889,10 +1969,44 @@ func _show_difficulty_selection() -> void:
 	_start_button.visible = false
 	(_entry_overlay.get_node("EntrySettings") as Button).visible = false
 	(_entry_overlay.get_node("EntryQuit") as Button).visible = false
+	_entry_progress_panel.visible = false
 	for button in _difficulty_buttons:
 		button.visible = true
 	_play_entry_transition(true)
 	_ensure_context_focus()
+
+
+func _refresh_entry_progress_summary() -> void:
+	if not is_instance_valid(_entry_progress_panel):
+		return
+	var value_label: Label = _entry_progress_panel.get_node("Value") as Label
+	if _progression == null:
+		value_label.text = "正在读取局外进度…"
+		return
+	var snapshot: Dictionary = _progression.get_snapshot()
+	var shards: int = int(snapshot.get("meta_shards", 0))
+	var completed: int = int(snapshot.get("runs_completed", 0))
+	var bosses: int = int(snapshot.get("bosses_defeated", 0))
+	var unlocked: Array = snapshot.get("unlocked_weapons", []) as Array
+	var next_goal := "武器库已全部解锁"
+	if not unlocked.has(WeaponCatalog.TWIN_BLADES):
+		next_goal = "再获得 %d 星屑解锁影织双刃" % maxi(
+			0,
+			ProgressionStore.TWIN_BLADES_UNLOCK_SHARDS - shards
+		)
+	elif not unlocked.has(WeaponCatalog.GREATSWORD):
+		next_goal = "再完成 %d 次路线解锁坠星巨刃" % maxi(
+			0,
+			ProgressionStore.GREATSWORD_UNLOCK_WINS - completed
+		)
+	value_label.text = "星屑 %d  ·  完成路线 %d  ·  击败首领 %d  ·  武器 %d/%d\n%s" % [
+		shards,
+		completed,
+		bosses,
+		unlocked.size(),
+		WeaponCatalog.all_weapon_ids().size(),
+		next_goal,
+	]
 
 
 func _start_game_with_difficulty(difficulty: int) -> void:
@@ -3510,6 +3624,10 @@ func get_upgrade_choices() -> Array[Dictionary]:
 
 func is_awaiting_chest() -> bool:
 	return _flow_state.awaiting_chest
+
+
+func is_awaiting_exit() -> bool:
+	return _flow_state.awaiting_exit
 
 
 func is_shopping() -> bool:

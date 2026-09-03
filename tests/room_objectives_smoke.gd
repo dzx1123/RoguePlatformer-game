@@ -67,6 +67,11 @@ func _run_test() -> void:
 				_fail("Reward chest could not be opened")
 				return
 			await _wait_physics_frames(6)
+		if bool(main.call(&"is_awaiting_exit")):
+			if not bool(main.call(&"_activate_room_exit")):
+				_fail("Room objective exit portal could not be activated")
+				return
+			await _wait_physics_frames(20)
 		if bool(main.call(&"is_choosing_upgrade")):
 			if not bool(main.call(&"choose_upgrade", 0)):
 				_fail("Room objective did not return to the upgrade flow")

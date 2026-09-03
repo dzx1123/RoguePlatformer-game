@@ -56,6 +56,8 @@ func _run_test() -> void:
 		return
 	_defeat_current_room(main)
 	await _wait_physics_frames(32)
+	if not await _enter_room_exit(main):
+		return
 	main.call(&"choose_upgrade", 0)
 	await _wait_physics_frames(5)
 	if String(main.call(&"get_current_encounter_name")) != "宝藏房":
@@ -89,6 +91,8 @@ func _run_test() -> void:
 	if int(main.call(&"get_gold")) < gold_before_treasure + 24:
 		_fail("Reward chest did not add its gold reward")
 		return
+	if not await _enter_room_exit(main):
+		return
 	if not bool(main.call(&"is_choosing_upgrade")):
 		_fail("Opening the chest did not continue to the room upgrade")
 		return
@@ -112,6 +116,8 @@ func _run_test() -> void:
 		return
 	_defeat_current_room(main)
 	await _wait_physics_frames(32)
+	if not await _enter_room_exit(main):
+		return
 	main.call(&"choose_upgrade", 0)
 	await _wait_physics_frames(5)
 
@@ -148,6 +154,8 @@ func _run_test() -> void:
 		return
 	boss.defeat()
 	await _wait_physics_frames(36)
+	if not await _enter_room_exit(main):
+		return
 	if bool(main.call(&"is_run_complete")) or not bool(main.call(&"is_choosing_upgrade")):
 		_fail("The first chapter boss incorrectly ended the ten-room run")
 		return
@@ -238,6 +246,8 @@ func _run_test() -> void:
 			main.call(&"open_current_chest_for_test")
 			await _wait_physics_frames(5)
 		if room_number < 20:
+			if bool(main.call(&"is_awaiting_exit")) and not await _enter_room_exit(main):
+				return
 			if bool(main.call(&"is_shopping")):
 				main.call(&"_leave_shop")
 			elif not bool(main.call(&"choose_upgrade", 0)):
@@ -328,6 +338,17 @@ func _disable_enemies(main: Node2D) -> void:
 	for enemy_value in enemies:
 		var enemy: RogueEnemy = enemy_value as RogueEnemy
 		enemy.set_physics_process(false)
+
+
+func _enter_room_exit(main: Node2D) -> bool:
+	if not bool(main.call(&"is_awaiting_exit")):
+		_fail("Cleared room did not open the exit portal")
+		return false
+	if not bool(main.call(&"_activate_room_exit")):
+		_fail("Exit portal could not be activated")
+		return false
+	await _wait_physics_frames(20)
+	return true
 
 
 func _wait_physics_frames(frame_count: int) -> void:

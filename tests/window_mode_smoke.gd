@@ -12,6 +12,10 @@ func _initialize() -> void:
 
 
 func _run_test() -> void:
+	if DisplayServer.get_name() == "headless":
+		print("window_mode_smoke: PASS headless guard")
+		quit(0)
+		return
 	_original_mode = DisplayServer.window_get_mode()
 	_original_size = DisplayServer.window_get_size()
 	_original_vsync = DisplayServer.window_get_vsync_mode()

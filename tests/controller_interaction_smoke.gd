@@ -29,9 +29,9 @@ func _run_test() -> void:
 	if (
 		not choice_overlay.visible
 		or not choice_hint.text.contains("X / Y / B")
-		or not (choice_buttons[0] as Button).text.begins_with("[X]")
-		or not (choice_buttons[1] as Button).text.begins_with("[Y]")
-		or not (choice_buttons[2] as Button).text.begins_with("[B]")
+		or not ((choice_buttons[0] as Button).get_node("CardRarity") as Label).text.begins_with("[X]")
+		or not ((choice_buttons[1] as Button).get_node("CardRarity") as Label).text.begins_with("[Y]")
+		or not ((choice_buttons[2] as Button).get_node("CardRarity") as Label).text.begins_with("[B]")
 	):
 		return _fail("Card-choice overlay did not expose controller prompts")
 	var focus_owner: Control = root.gui_get_focus_owner()
@@ -63,8 +63,13 @@ func _run_test() -> void:
 	await _tap_joy_button(JOY_BUTTON_RIGHT_SHOULDER)
 	await process_frame
 	await process_frame
+	if not bool(main.get("_flow_state").awaiting_exit):
+		return _fail("RB did not open the reward chest and reveal the room-exit portal")
+	await _tap_joy_button(JOY_BUTTON_A)
+	for _frame_index: int in range(20):
+		await physics_frame
 	if not bool(main.get("_flow_state").choosing_upgrade):
-		return _fail("RB did not open the reward chest and advance to card choice")
+		return _fail("A did not enter the room-exit portal and advance to card choice")
 
 	main.call(&"_return_to_main_menu")
 	await process_frame

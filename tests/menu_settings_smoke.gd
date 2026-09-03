@@ -36,9 +36,20 @@ func _run_test() -> void:
 		_fail("Settings menu did not expose bindings, options, and the operation guide")
 		return
 	var guide_text: String = operation_guide.get_parsed_text()
-	if not guide_text.contains("操作说明") or not guide_text.contains("开宝箱") or not guide_text.contains("空中可再次跳跃"):
+	if not guide_text.contains("移动与探索") or not guide_text.contains("开宝箱") or not guide_text.contains("空中可再次跳跃"):
 		_fail("Settings operation guide did not contain the moved gameplay instructions")
 		return
+	var bindings_card: Control = settings_menu.get_node("SettingsBindingsCard") as Control
+	var guide_card: Control = settings_menu.get_node("SettingsGuideCard") as Control
+	for child: Node in settings_menu.get_children():
+		if child is Button and child.name.begins_with("Bind_"):
+			var binding_button := child as Button
+			if not bindings_card.get_global_rect().encloses(binding_button.get_global_rect()):
+				_fail("Binding control escaped its card: %s" % binding_button.name)
+				return
+			if binding_button.get_global_rect().intersects(guide_card.get_global_rect()):
+				_fail("Binding control overlaps the field guide: %s" % binding_button.name)
+				return
 	var has_controller_jump := false
 	for input_event: InputEvent in InputMap.action_get_events(&"jump"):
 		if input_event is InputEventJoypadButton:
@@ -91,6 +102,22 @@ func _run_test() -> void:
 	var paused_hud: CanvasLayer = game_main.get_node("HUD") as CanvasLayer
 	if not paused_hud.can_process():
 		_fail("HUD cannot process while the game is paused")
+		return
+	var pause_menu: Control = game_main.get_node("HUD/PauseMenu") as Control
+	var pause_overview: Button = pause_menu.get_node("PauseBuildOverview") as Button
+	if not pause_overview.text.contains("RS"):
+		_fail("Pause menu did not switch the build overview prompt to controller")
+		return
+	(pause_menu.get_node("PauseSettings") as Button).emit_signal("pressed")
+	await process_frame
+	var paused_settings: Control = game_main.get_node("HUD/SettingsMenu") as Control
+	if pause_menu.visible or not paused_settings.visible:
+		_fail("Settings opened from pause did not replace the pause layer")
+		return
+	(paused_settings.get_node("CloseSettings") as Button).emit_signal("pressed")
+	await process_frame
+	if not pause_menu.visible or paused_settings.visible:
+		_fail("Closing settings did not restore the pause layer")
 		return
 	game_main.call(&"_on_always_key_pressed", escape_event)
 	if paused:

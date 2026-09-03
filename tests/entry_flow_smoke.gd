@@ -15,12 +15,20 @@ func _run_test() -> void:
 	if entry_flow == null or not entry_flow.visible:
 		_fail("The start screen was not shown on game entry")
 		return
+	var profile_summary: Panel = entry_flow.get_node("ProfileSummary") as Panel
+	var profile_value: Label = profile_summary.get_node("Value") as Label
+	if not profile_summary.visible or not profile_value.text.contains("局外") and not profile_value.text.contains("星屑"):
+		_fail("Start screen did not show the autosave/meta-progression summary")
+		return
 	var start_button: Button = entry_flow.get_node("StartGame") as Button
 	start_button.emit_signal("pressed")
 	await process_frame
 	var easy_button: Button = entry_flow.get_node("Difficulty_0") as Button
 	if not easy_button.visible:
 		_fail("Difficulty choices were not displayed after starting")
+		return
+	if profile_summary.visible:
+		_fail("Profile summary overlaps difficulty selection")
 		return
 	easy_button.emit_signal("pressed")
 	await physics_frame

@@ -33,6 +33,8 @@ func _run_test() -> void:
 	var baseline_stats: Dictionary = player.call(&"get_run_stats") as Dictionary
 	_defeat_current_room(main)
 	await _wait_physics_frames(32)
+	if not await _enter_room_exit(main):
+		return
 	if not bool(main.call(&"is_choosing_upgrade")):
 		_fail("Clearing a non-final room did not open the upgrade choice")
 		return
@@ -103,6 +105,8 @@ func _run_test() -> void:
 				return
 			await _wait_physics_frames(5)
 		if room_number < 20:
+			if bool(main.call(&"is_awaiting_exit")) and not await _enter_room_exit(main):
+				return
 			if not bool(main.call(&"is_choosing_upgrade")):
 				_fail("Room %d did not lead to an upgrade choice" % room_number)
 				return
@@ -141,6 +145,14 @@ func _disable_current_enemies(main: Node2D) -> void:
 	for enemy_value in enemies:
 		var enemy: RogueEnemy = enemy_value as RogueEnemy
 		enemy.set_physics_process(false)
+
+
+func _enter_room_exit(main: Node2D) -> bool:
+	if not bool(main.call(&"_activate_room_exit")):
+		_fail("Cleared room exit portal could not be activated")
+		return false
+	await _wait_physics_frames(20)
+	return true
 
 
 func _stats_changed(before: Dictionary, after: Dictionary) -> bool:

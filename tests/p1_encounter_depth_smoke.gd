@@ -77,6 +77,10 @@ func _run_test() -> void:
 				if challenge_enemies.size() < 7 or elite_count < 1:
 					_fail("Challenge room did not add reinforcements and an elite")
 					return
+			if String(main.call(&"get_current_objective_name")) == "holdout":
+				if not bool(main.call(&"complete_room_objective_for_test")):
+					_fail("Holdout room %d could not resolve its beacon objective" % room_number)
+					return
 			_defeat_current_room(main)
 			await _wait_physics_frames(36)
 			if encounter_name == "宝藏房" and bool(main.call(&"is_awaiting_chest")):
@@ -86,9 +90,12 @@ func _run_test() -> void:
 		if room_number < 20:
 			if bool(main.call(&"is_shopping")):
 				main.call(&"_leave_shop")
-			elif not bool(main.call(&"choose_upgrade", 0)):
-				_fail("Room %d did not advance after its reward" % room_number)
-				return
+			else:
+				if bool(main.call(&"is_awaiting_exit")) and not await _enter_room_exit(main):
+					return
+				if not bool(main.call(&"choose_upgrade", 0)):
+					_fail("Room %d did not advance after its reward" % room_number)
+					return
 			await _wait_physics_frames(4)
 
 	if not saw_event or not saw_challenge or not saw_risk:
@@ -109,6 +116,14 @@ func _defeat_current_room(main: Node2D) -> void:
 		var enemy := enemy_value as RogueEnemy
 		if is_instance_valid(enemy):
 			enemy.defeat()
+
+
+func _enter_room_exit(main: Node2D) -> bool:
+	if not bool(main.call(&"_activate_room_exit")):
+		_fail("Cleared room exit portal could not be activated")
+		return false
+	await _wait_physics_frames(20)
+	return true
 
 
 func _wait_physics_frames(frame_count: int) -> void:

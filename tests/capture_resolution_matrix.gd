@@ -27,6 +27,7 @@ func _capture_matrix() -> void:
 	await _wait_frames(20)
 	var report_entries: Array[Dictionary] = []
 	for window_size: Vector2i in TEST_SIZES:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 		DisplayServer.window_set_size(window_size)
 		await _wait_frames(12)
 		var gameplay_entry: Dictionary = await _save_capture(
@@ -36,8 +37,13 @@ func _capture_matrix() -> void:
 		if gameplay_entry.is_empty():
 			return
 		report_entries.append(gameplay_entry)
-		var settings_overlay: Control = main.get_node("HUD/SettingsMenu") as Control
-		settings_overlay.visible = true
+		main.call(&"_pause_game")
+		await _wait_frames(3)
+		var pause_entry: Dictionary = await _save_capture("pause", window_size)
+		if pause_entry.is_empty():
+			return
+		report_entries.append(pause_entry)
+		main.call(&"_open_settings", true)
 		await _wait_frames(5)
 		var settings_entry: Dictionary = await _save_capture(
 			"settings",
@@ -46,7 +52,28 @@ func _capture_matrix() -> void:
 		if settings_entry.is_empty():
 			return
 		report_entries.append(settings_entry)
-		settings_overlay.visible = false
+		main.call(&"_close_settings")
+		main.call(&"_resume_game")
+		main.call(&"_show_upgrade_choice")
+		await _wait_seconds(0.55)
+		var upgrade_entry: Dictionary = await _save_capture("upgrade", window_size)
+		if upgrade_entry.is_empty():
+			return
+		report_entries.append(upgrade_entry)
+		main.call(&"choose_upgrade", 0)
+		main.call(&"_return_to_main_menu")
+		await _wait_seconds(0.82)
+		var entry_screen: Dictionary = await _save_capture("entry", window_size)
+		if entry_screen.is_empty():
+			return
+		report_entries.append(entry_screen)
+		main.call(&"_show_difficulty_selection")
+		await _wait_seconds(0.72)
+		var difficulty_entry: Dictionary = await _save_capture("difficulty", window_size)
+		if difficulty_entry.is_empty():
+			return
+		report_entries.append(difficulty_entry)
+		main.call(&"_start_game_with_difficulty", 1)
 		await _wait_frames(3)
 	if not _write_report(report_entries):
 		return
@@ -97,6 +124,10 @@ func _write_report(entries: Array[Dictionary]) -> bool:
 func _wait_frames(frame_count: int) -> void:
 	for _frame_index: int in range(frame_count):
 		await process_frame
+
+
+func _wait_seconds(duration: float) -> void:
+	await create_timer(duration, true).timeout
 
 
 func _fail(message: String) -> void:
