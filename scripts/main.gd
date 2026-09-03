@@ -6,6 +6,7 @@ const ENEMY_SCRIPT := preload("res://scripts/rogue_enemy.gd")
 const ENEMY_PROJECTILE_SCRIPT := preload("res://scripts/enemy_projectile.gd")
 const ROOM_CATALOG_SCRIPT := preload("res://scripts/run_room_catalog.gd")
 const CHEST_SCRIPT := preload("res://scripts/reward_chest.gd")
+const ROOM_EXIT_PORTAL_SCRIPT := preload("res://scripts/room_exit_portal.gd")
 const COMBAT_VFX_SCRIPT := preload("res://scripts/combat_vfx.gd")
 const DAMAGE_NUMBER_SCRIPT := preload("res://scripts/damage_number.gd")
 const SOUNDSCAPE_SCRIPT := preload("res://scripts/soundscape.gd")
@@ -18,8 +19,10 @@ const UPGRADE_SERVICE_SCRIPT := preload("res://scripts/run_upgrade_service.gd")
 const RUN_FLOW_STATE_SCRIPT := preload("res://scripts/run_flow_state.gd")
 const RUN_HUD_BUILDER_SCRIPT := preload("res://scripts/run_hud_builder.gd")
 const RUN_HUD_PRESENTER_SCRIPT := preload("res://scripts/run_hud_presenter.gd")
+const RUN_BUILD_OVERVIEW_SCRIPT := preload("res://scripts/run_build_overview.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
-const BUILD_LABEL := "月蚀混战扩展版 2026.08.31C"
+const MENU_MOONLIT_SANCTUM_BACKGROUND := preload("res://assets/backgrounds/menu_moonlit_sanctum_v1.png")
+const BUILD_LABEL := "月蚀混战测试版 0.4.0 · 2026.09.03"
 const ROOMS_PER_RUN := 20
 const GOBLIN_CHAPTER_START := 5
 const MIXED_CHAPTER_START := 10
@@ -35,6 +38,11 @@ const ENEMY_RANK_ELITE := 1
 const ENEMY_RANK_BOSS := 2
 const ENEMY_FAMILY_SLIME := 0
 const ENEMY_FAMILY_GOBLIN := 1
+const ENEMY_ARCHETYPE_STANDARD := 0
+const ENEMY_ARCHETYPE_SHIELD_GUARD := 1
+const ENEMY_ARCHETYPE_FLYER := 2
+const ENEMY_ARCHETYPE_CASTER := 3
+const ENEMY_ARCHETYPE_AMBUSHER := 4
 const CHOICE_ACTIONS: Array[StringName] = [&"choice_1", &"choice_2", &"choice_3"]
 const CHOICE_CONTROLLER_LABELS: Array[String] = ["X", "Y", "B"]
 
@@ -47,12 +55,21 @@ enum EncounterType {
 	EVENT,
 	CHALLENGE,
 	RISK_CHEST,
+	HOLDOUT,
 }
 
 enum Difficulty {
 	EASY,
 	MEDIUM,
 	HARD,
+}
+
+enum RoomObjective {
+	CLEAR_ALL,
+	TIME_TRIAL,
+	HOLDOUT,
+	ELITE_HUNT,
+	BRANCH_REWARD,
 }
 
 @export var save_enabled: bool = true
@@ -84,9 +101,23 @@ var _last_upgrade_name: String = ""
 var _current_encounter: int = EncounterType.NORMAL
 var _current_combat_profile: Dictionary = {}
 var _chest: RewardChest
+var _room_exit_portal: RoomExitPortal
 var _pending_risk_gold: int = 0
 var _pending_risk_heal: int = 0
 var _challenge_reward_granted: bool = false
+var _current_objective: int = RoomObjective.CLEAR_ALL
+var _objective_timer_remaining: float = 0.0
+var _objective_hold_progress: float = 0.0
+var _objective_hold_duration: float = 0.0
+var _objective_resolved: bool = false
+var _objective_failed: bool = false
+var _objective_reward_granted: bool = false
+var _objective_anchor: Vector2 = Vector2.ZERO
+var _objective_radius: float = 0.0
+var _objective_trap_zones: Array[Rect2] = []
+var _objective_trap_pulse_remaining: float = 0.0
+var _objective_trap_flash_remaining: float = 0.0
+var _hunt_target: RogueEnemy
 var _gold: int = 10
 var _run_shards: int = 0
 var _progression: ProgressionStore
@@ -98,12 +129,14 @@ var _upgrade_title: Label
 var _upgrade_hint: Label
 var _upgrade_buttons: Array[Button] = []
 var _upgrade_choices: Array[Dictionary] = []
+var _upgrade_tween: Tween
 var _entry_overlay: Control
 var _entry_title: Label
 var _entry_subtitle: Label
 var _start_button: Button
 var _difficulty_buttons: Array[Button] = []
 var _entry_flow_active: bool = false
+var _entry_tween: Tween
 var _selected_difficulty: int = Difficulty.MEDIUM
 var _camera_base_position := Vector2.ZERO
 var _camera_shake_remaining: float = 0.0
@@ -113,6 +146,7 @@ var _lives_remaining: int = MAX_RUN_LIVES
 var _settings: RefCounted
 var _pause_overlay: Control
 var _settings_overlay: Control
+var _build_overview: RunBuildOverview
 var _settings_key_buttons: Dictionary = {}
 var _settings_volume_slider: HSlider
 var _settings_music_slider: HSlider
@@ -129,6 +163,7 @@ var _settings_display_status_label: Label
 var _settings_from_pause: bool = false
 var _awaiting_rebind_action: StringName = &""
 var _is_game_paused: bool = false
+var _build_overview_opened_from_pause: bool = false
 var _using_controller_input: bool = false
 var _display_apply_generation: int = 0
 var _pause_input_handler: Node
@@ -160,6 +195,8 @@ func _ready() -> void:
 	_pause_input_handler.input_device_changed.connect(_on_input_device_changed)
 	_pause_input_handler.controller_pause_pressed.connect(_on_controller_pause_pressed)
 	_pause_input_handler.controller_cancel_pressed.connect(_on_controller_cancel_pressed)
+	_pause_input_handler.controller_overview_pressed.connect(_on_controller_overview_pressed)
+	_pause_input_handler.controller_action_pressed.connect(_on_always_controller_button_pressed)
 	if not Input.joy_connection_changed.is_connected(_on_joy_connection_changed):
 		Input.joy_connection_changed.connect(_on_joy_connection_changed)
 	_configure_camera()
@@ -172,6 +209,7 @@ func _ready() -> void:
 	_create_entry_ui()
 	_create_pause_ui()
 	_create_settings_ui()
+	_create_build_overview()
 	_using_controller_input = not Input.get_connected_joypads().is_empty()
 	_pause_input_handler.call(&"set_initial_device", _using_controller_input)
 	_refresh_input_prompts()
@@ -210,6 +248,8 @@ func _process(_delta: float) -> void:
 		return
 	if _telemetry != null:
 		_telemetry.tick(_delta)
+	if _flow_state.run_active:
+		_update_room_objective(_delta)
 	if _flow_state.choosing_upgrade and _process_choice_shortcuts():
 		return
 	if not _entry_flow_active and Input.is_action_just_pressed(&"restart"):
@@ -286,6 +326,7 @@ func _configure_inputs() -> void:
 	_register_action(&"cycle_weapon", [KEY_Q])
 	_register_action(&"restart", [KEY_R])
 	_register_action(&"pause", [KEY_ESCAPE])
+	_register_action(&"build_overview", [KEY_TAB])
 	_settings.call(&"apply")
 
 
@@ -316,6 +357,20 @@ func _on_always_key_pressed(event: InputEventKey) -> void:
 			_awaiting_rebind_action = &""
 			_refresh_settings_key_buttons()
 		get_viewport().set_input_as_handled()
+		return
+	if _flow_state.awaiting_exit and not event.is_action_pressed(&"pause"):
+		_activate_room_exit()
+		get_viewport().set_input_as_handled()
+		return
+	if is_instance_valid(_build_overview) and _build_overview.visible:
+		if event.keycode == KEY_ESCAPE or event.is_action_pressed(&"build_overview"):
+			_close_build_overview()
+			get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(&"build_overview"):
+		if not _entry_flow_active and not _settings_overlay.visible:
+			_open_build_overview(_is_game_paused)
+			get_viewport().set_input_as_handled()
 		return
 	if not event.is_action_pressed(&"pause"):
 		return
@@ -352,6 +407,23 @@ func _on_controller_cancel_pressed() -> void:
 	get_viewport().set_input_as_handled()
 
 
+func _on_controller_overview_pressed() -> void:
+	if _entry_flow_active or _settings_overlay.visible:
+		return
+	if is_instance_valid(_build_overview) and _build_overview.visible:
+		_close_build_overview()
+	else:
+		_open_build_overview(_is_game_paused)
+	get_viewport().set_input_as_handled()
+
+
+func _on_always_controller_button_pressed(_event: InputEventJoypadButton) -> void:
+	if not _flow_state.awaiting_exit:
+		return
+	_activate_room_exit()
+	get_viewport().set_input_as_handled()
+
+
 func _on_input_device_changed(using_controller: bool) -> void:
 	_using_controller_input = using_controller
 	_refresh_input_prompts()
@@ -371,6 +443,10 @@ func _refresh_input_prompts() -> void:
 	_refresh_choice_overlay_prompts()
 	if is_instance_valid(_chest):
 		_chest.set_interaction_prompt(_get_action_prompt(&"interact"))
+	if is_instance_valid(_room_exit_portal):
+		_room_exit_portal.set_prompt_text(
+			"按任意键 / A 进入" if _using_controller_input else "按任意键进入"
+		)
 	if is_instance_valid(_settings_controller_status_label):
 		var connected_count: int = Input.get_connected_joypads().size()
 		if connected_count > 0:
@@ -463,49 +539,319 @@ func _create_upgrade_ui() -> void:
 	hud.add_child(_upgrade_overlay)
 
 	var dimmer := ColorRect.new()
+	dimmer.name = "UpgradeDimmer"
 	dimmer.size = DISPLAY_SIZE
-	dimmer.color = Color(0.015, 0.025, 0.04, 0.82)
+	dimmer.color = Color(0.006, 0.014, 0.035, 0.82)
 	dimmer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_upgrade_overlay.add_child(dimmer)
 
-	var panel := ColorRect.new()
-	panel.position = Vector2(155.0, 165.0)
-	panel.size = Vector2(970.0, 390.0)
-	panel.color = Color(0.055, 0.095, 0.13, 0.98)
+	var panel := Panel.new()
+	panel.name = "UpgradePanel"
+	panel.position = Vector2(80.0, 110.0)
+	panel.size = Vector2(1120.0, 518.0)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override(
+		"panel",
+		_create_surface_style(
+			Color(0.018, 0.055, 0.095, 0.975),
+			Color(0.30, 0.86, 1.0, 0.82),
+			18,
+			2,
+			18
+		)
+	)
 	_upgrade_overlay.add_child(panel)
 
+	var upper_rule := ColorRect.new()
+	upper_rule.position = Vector2(42.0, 22.0)
+	upper_rule.size = Vector2(1036.0, 2.0)
+	upper_rule.color = Color(0.42, 0.91, 1.0, 0.72)
+	upper_rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(upper_rule)
+
+	var kicker := Label.new()
+	kicker.name = "UpgradeKicker"
+	kicker.position = Vector2(0.0, 38.0)
+	kicker.size = Vector2(1120.0, 28.0)
+	kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	kicker.text = "LUNAR RELIC  ·  CHOOSE ONE"
+	kicker.add_theme_font_size_override("font_size", 15)
+	kicker.add_theme_color_override("font_color", Color(0.42, 0.85, 1.0, 0.92))
+	kicker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(kicker)
+
 	_upgrade_title = Label.new()
-	_upgrade_title.position = Vector2(190.0, 195.0)
-	_upgrade_title.size = Vector2(900.0, 50.0)
+	_upgrade_title.position = Vector2(55.0, 70.0)
+	_upgrade_title.size = Vector2(1010.0, 52.0)
 	_upgrade_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_upgrade_title.add_theme_font_size_override("font_size", 29)
+	_upgrade_title.add_theme_font_size_override("font_size", 33)
 	_upgrade_title.add_theme_color_override("font_color", Color(0.90, 0.97, 1.0, 1.0))
 	_upgrade_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_upgrade_overlay.add_child(_upgrade_title)
+	panel.add_child(_upgrade_title)
 
 	_upgrade_hint = Label.new()
-	_upgrade_hint.position = Vector2(190.0, 490.0)
-	_upgrade_hint.size = Vector2(900.0, 38.0)
+	_upgrade_hint.position = Vector2(70.0, 458.0)
+	_upgrade_hint.size = Vector2(980.0, 34.0)
 	_upgrade_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_upgrade_hint.add_theme_font_size_override("font_size", 17)
+	_upgrade_hint.add_theme_font_size_override("font_size", 16)
 	_upgrade_hint.add_theme_color_override("font_color", Color(0.62, 0.78, 0.86, 1.0))
 	_upgrade_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_upgrade_overlay.add_child(_upgrade_hint)
+	panel.add_child(_upgrade_hint)
 
 	for choice_index in range(3):
 		var button := Button.new()
 		button.name = "Upgrade_%d" % (choice_index + 1)
-		button.position = Vector2(190.0 + float(choice_index) * 300.0, 275.0)
-		button.size = Vector2(280.0, 185.0)
-		button.add_theme_font_size_override("font_size", 18)
+		button.position = Vector2(50.0 + float(choice_index) * 340.0, 156.0)
+		button.size = Vector2(300.0, 270.0)
+		button.pivot_offset = button.size * 0.5
+		button.add_theme_font_size_override("font_size", 19)
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		button.pressed.connect(_on_upgrade_button_pressed.bind(choice_index))
-		_upgrade_overlay.add_child(button)
+		button.mouse_entered.connect(_on_upgrade_card_hovered.bind(button, true))
+		button.mouse_exited.connect(_on_upgrade_card_hovered.bind(button, false))
+		button.focus_entered.connect(_on_upgrade_card_hovered.bind(button, true))
+		button.focus_exited.connect(_on_upgrade_card_hovered.bind(button, false))
+		_create_upgrade_card_content(button)
+		_style_upgrade_card(button, {})
+		panel.add_child(button)
 		_upgrade_buttons.append(button)
 	_configure_horizontal_focus(_upgrade_buttons)
 
 	_hide_upgrade_overlay()
+
+
+func _create_surface_style(
+	background_color: Color,
+	border_color: Color,
+	corner_radius: int = 12,
+	border_width: int = 1,
+	shadow_size: int = 0
+) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = background_color
+	style.border_color = border_color
+	style.set_border_width_all(border_width)
+	style.corner_radius_top_left = corner_radius
+	style.corner_radius_top_right = corner_radius
+	style.corner_radius_bottom_left = corner_radius
+	style.corner_radius_bottom_right = corner_radius
+	if shadow_size > 0:
+		style.shadow_color = Color(0.0, 0.012, 0.035, 0.72)
+		style.shadow_size = shadow_size
+		style.shadow_offset = Vector2(0.0, 6.0)
+	return style
+
+
+func _style_upgrade_card(button: Button, choice: Dictionary) -> void:
+	var rarity_name: String = String(choice.get("rarity_name", "普通"))
+	if _flow_state.event_active:
+		rarity_name = "事件"
+	var accent := Color(0.44, 0.84, 0.96, 1.0)
+	match rarity_name:
+		"稀有":
+			accent = Color(0.53, 0.55, 1.0, 1.0)
+		"传说":
+			accent = Color(1.0, 0.69, 0.26, 1.0)
+		"事件":
+			accent = Color(0.72, 0.46, 1.0, 1.0)
+	button.add_theme_stylebox_override(
+		"normal",
+		_create_surface_style(
+			Color(0.025, 0.085, 0.14, 0.98),
+			Color(accent, 0.68),
+			14,
+			2,
+			10
+		)
+	)
+	button.add_theme_stylebox_override(
+		"hover",
+		_create_surface_style(
+			Color(0.055, 0.15, 0.22, 1.0),
+			Color(accent, 1.0),
+			14,
+			3,
+			14
+		)
+	)
+	button.add_theme_stylebox_override(
+		"pressed",
+		_create_surface_style(
+			Color(0.10, 0.22, 0.30, 1.0),
+			Color(1.0, 1.0, 1.0, 0.95),
+			14,
+			3,
+			8
+		)
+	)
+	button.add_theme_stylebox_override(
+		"disabled",
+		_create_surface_style(
+			Color(0.025, 0.042, 0.06, 0.88),
+			Color(0.25, 0.34, 0.40, 0.52),
+			14,
+			1
+		)
+	)
+	button.add_theme_color_override("font_color", Color(0.86, 0.96, 1.0, 1.0))
+	button.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	button.add_theme_color_override("font_pressed_color", Color(1.0, 0.96, 0.80, 1.0))
+	button.add_theme_color_override("font_disabled_color", Color(0.40, 0.48, 0.54, 1.0))
+	var accent_bar: ColorRect = button.get_node_or_null("CardAccent") as ColorRect
+	var separator: ColorRect = button.get_node_or_null("CardSeparator") as ColorRect
+	var rarity_label: Label = button.get_node_or_null("CardRarity") as Label
+	var title_label: Label = button.get_node_or_null("CardTitle") as Label
+	var footer_label: Label = button.get_node_or_null("CardFooter") as Label
+	if accent_bar != null:
+		accent_bar.color = Color(accent, 0.92)
+	if separator != null:
+		separator.color = Color(accent, 0.62)
+	if rarity_label != null:
+		rarity_label.add_theme_color_override("font_color", Color(accent, 1.0))
+	if title_label != null:
+		title_label.add_theme_color_override("font_color", Color(0.92, 0.98, 1.0, 1.0))
+	if footer_label != null:
+		footer_label.add_theme_color_override("font_color", Color(accent, 0.84))
+
+
+func _create_upgrade_card_content(button: Button) -> void:
+	var accent_bar := ColorRect.new()
+	accent_bar.name = "CardAccent"
+	accent_bar.position = Vector2(18.0, 16.0)
+	accent_bar.size = Vector2(264.0, 4.0)
+	accent_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(accent_bar)
+
+	var rarity_label := Label.new()
+	rarity_label.name = "CardRarity"
+	rarity_label.position = Vector2(20.0, 27.0)
+	rarity_label.size = Vector2(260.0, 22.0)
+	rarity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rarity_label.add_theme_font_size_override("font_size", 14)
+	rarity_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(rarity_label)
+
+	var separator := ColorRect.new()
+	separator.name = "CardSeparator"
+	separator.position = Vector2(30.0, 57.0)
+	separator.size = Vector2(240.0, 1.0)
+	separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(separator)
+
+	var title_label := Label.new()
+	title_label.name = "CardTitle"
+	title_label.position = Vector2(24.0, 71.0)
+	title_label.size = Vector2(252.0, 56.0)
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title_label.add_theme_font_size_override("font_size", 23)
+	title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(title_label)
+
+	var sigil_label := Label.new()
+	sigil_label.name = "CardSigil"
+	sigil_label.position = Vector2(0.0, 128.0)
+	sigil_label.size = Vector2(300.0, 24.0)
+	sigil_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sigil_label.text = "◇"
+	sigil_label.add_theme_font_size_override("font_size", 22)
+	sigil_label.add_theme_color_override("font_color", Color(0.60, 0.90, 1.0, 0.82))
+	sigil_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(sigil_label)
+
+	var description_label := Label.new()
+	description_label.name = "CardDescription"
+	description_label.position = Vector2(26.0, 156.0)
+	description_label.size = Vector2(248.0, 60.0)
+	description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	description_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	description_label.add_theme_font_size_override("font_size", 16)
+	description_label.add_theme_color_override("font_color", Color(0.68, 0.82, 0.90, 1.0))
+	description_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(description_label)
+
+	var footer_label := Label.new()
+	footer_label.name = "CardFooter"
+	footer_label.position = Vector2(20.0, 230.0)
+	footer_label.size = Vector2(260.0, 22.0)
+	footer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	footer_label.add_theme_font_size_override("font_size", 13)
+	footer_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(footer_label)
+
+
+func _set_upgrade_card_content(
+	button: Button,
+	shortcut: String,
+	rarity_name: String,
+	card_name: String,
+	description: String,
+	footer_text: String
+) -> void:
+	button.text = ""
+	button.tooltip_text = "%s · %s" % [card_name, description]
+	(button.get_node("CardRarity") as Label).text = "[%s]  %s" % [shortcut, rarity_name]
+	(button.get_node("CardTitle") as Label).text = card_name
+	(button.get_node("CardDescription") as Label).text = description
+	(button.get_node("CardFooter") as Label).text = footer_text
+
+
+func _on_upgrade_card_hovered(button: Button, emphasized: bool) -> void:
+	if button.disabled or not button.visible:
+		return
+	var choice_index: int = _upgrade_buttons.find(button)
+	if choice_index < 0:
+		return
+	var resting_position := Vector2(50.0 + float(choice_index) * 340.0, 156.0)
+	var target_position := resting_position + (Vector2(0.0, -8.0) if emphasized else Vector2.ZERO)
+	var target_scale := Vector2.ONE * (1.028 if emphasized else 1.0)
+	var tween := button.create_tween().set_parallel(true)
+	tween.tween_property(button, "position", target_position, 0.12)
+	tween.tween_property(button, "scale", target_scale, 0.12)
+
+
+func _play_upgrade_overlay_intro() -> void:
+	if not is_instance_valid(_upgrade_overlay) or not _upgrade_overlay.visible:
+		return
+	if _upgrade_tween != null and _upgrade_tween.is_valid():
+		_upgrade_tween.kill()
+	var dimmer: ColorRect = _upgrade_overlay.get_node("UpgradeDimmer") as ColorRect
+	var panel: Panel = _upgrade_overlay.get_node("UpgradePanel") as Panel
+	if dimmer == null or panel == null:
+		return
+	dimmer.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	panel.pivot_offset = panel.size * 0.5
+	panel.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	panel.scale = Vector2.ONE * 0.96
+	_upgrade_title.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	_upgrade_hint.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	for choice_index in range(_upgrade_buttons.size()):
+		var button: Button = _upgrade_buttons[choice_index]
+		if not button.visible:
+			continue
+		var resting_position := Vector2(50.0 + float(choice_index) * 340.0, 156.0)
+		button.position = resting_position + Vector2(0.0, 42.0)
+		button.scale = Vector2.ONE * 0.90
+		button.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	_upgrade_tween = create_tween().set_parallel(true)
+	_upgrade_tween.tween_property(dimmer, "modulate:a", 1.0, 0.22)
+	_upgrade_tween.tween_property(panel, "modulate:a", 1.0, 0.20)
+	_upgrade_tween.tween_property(panel, "scale", Vector2.ONE, 0.30)
+	_upgrade_tween.tween_property(_upgrade_title, "modulate:a", 1.0, 0.24).set_delay(0.06)
+	_upgrade_tween.tween_property(_upgrade_hint, "modulate:a", 1.0, 0.20).set_delay(0.16)
+	for choice_index in range(_upgrade_buttons.size()):
+		var button: Button = _upgrade_buttons[choice_index]
+		if not button.visible:
+			continue
+		var resting_position := Vector2(50.0 + float(choice_index) * 340.0, 156.0)
+		var delay: float = 0.14 + float(choice_index) * 0.09
+		_upgrade_tween.tween_property(button, "modulate:a", 1.0, 0.20).set_delay(delay)
+		_upgrade_tween.tween_property(button, "position", resting_position, 0.30).set_delay(delay)
+		_upgrade_tween.tween_property(button, "scale", Vector2.ONE, 0.30).set_delay(delay)
 
 
 func _create_entry_ui() -> void:
@@ -516,63 +862,117 @@ func _create_entry_ui() -> void:
 	_entry_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	hud.add_child(_entry_overlay)
 
-	var background := ColorRect.new()
-	background.size = DISPLAY_SIZE
-	background.color = Color(0.018, 0.035, 0.06, 0.98)
-	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_entry_overlay.add_child(background)
+	var menu_artwork := TextureRect.new()
+	menu_artwork.name = "MenuArtwork"
+	menu_artwork.position = Vector2.ZERO
+	menu_artwork.size = DISPLAY_SIZE
+	menu_artwork.texture = MENU_MOONLIT_SANCTUM_BACKGROUND
+	menu_artwork.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	menu_artwork.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	menu_artwork.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_entry_overlay.add_child(menu_artwork)
 
-	var accent_left := ColorRect.new()
-	accent_left.position = Vector2(135.0, 155.0)
-	accent_left.size = Vector2(5.0, 405.0)
-	accent_left.color = Color(0.22, 0.78, 0.92, 0.9)
-	accent_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_entry_overlay.add_child(accent_left)
+	var vignette := ColorRect.new()
+	vignette.name = "MenuVignette"
+	vignette.size = DISPLAY_SIZE
+	vignette.color = Color(0.004, 0.014, 0.040, 0.43)
+	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_entry_overlay.add_child(vignette)
+
+	var frame := Panel.new()
+	frame.name = "EntryFrame"
+	frame.position = Vector2(418.0, 364.0)
+	frame.size = Vector2(444.0, 210.0)
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.add_theme_stylebox_override(
+		"panel",
+		_create_surface_style(
+			Color(0.008, 0.030, 0.070, 0.34),
+			Color(0.36, 0.84, 1.0, 0.26),
+			20,
+			1,
+			14
+		)
+	)
+	_entry_overlay.add_child(frame)
+
+	var kicker := Label.new()
+	kicker.name = "EntryKicker"
+	kicker.position = Vector2(300.0, 164.0)
+	kicker.size = Vector2(680.0, 24.0)
+	kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	kicker.text = "LUNAR ECLIPSE  //  ROGUELITE PROTOCOL"
+	kicker.add_theme_font_size_override("font_size", 14)
+	kicker.add_theme_color_override("font_color", Color(0.54, 0.86, 1.0, 0.88))
+	kicker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_entry_overlay.add_child(kicker)
 
 	_entry_title = Label.new()
-	_entry_title.position = Vector2(180.0, 185.0)
-	_entry_title.size = Vector2(920.0, 82.0)
+	_entry_title.position = Vector2(250.0, 198.0)
+	_entry_title.size = Vector2(780.0, 76.0)
 	_entry_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_entry_title.add_theme_font_size_override("font_size", 46)
-	_entry_title.add_theme_color_override("font_color", Color(0.84, 0.95, 1.0, 1.0))
+	_entry_title.add_theme_font_size_override("font_size", 54)
+	_entry_title.add_theme_color_override("font_color", Color(0.90, 0.97, 1.0, 1.0))
+	_entry_title.add_theme_color_override("font_outline_color", Color(0.004, 0.016, 0.042, 0.72))
+	_entry_title.add_theme_constant_override("outline_size", 4)
 	_entry_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_entry_overlay.add_child(_entry_title)
 
 	_entry_subtitle = Label.new()
-	_entry_subtitle.position = Vector2(230.0, 278.0)
-	_entry_subtitle.size = Vector2(820.0, 62.0)
+	_entry_subtitle.position = Vector2(270.0, 274.0)
+	_entry_subtitle.size = Vector2(740.0, 50.0)
 	_entry_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_entry_subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_entry_subtitle.add_theme_font_size_override("font_size", 18)
-	_entry_subtitle.add_theme_color_override("font_color", Color(0.55, 0.74, 0.84, 1.0))
+	_entry_subtitle.add_theme_font_size_override("font_size", 17)
+	_entry_subtitle.add_theme_color_override("font_color", Color(0.68, 0.82, 0.91, 0.94))
 	_entry_subtitle.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_entry_overlay.add_child(_entry_subtitle)
 
 	_start_button = Button.new()
 	_start_button.name = "StartGame"
-	_start_button.position = Vector2(470.0, 410.0)
-	_start_button.size = Vector2(340.0, 74.0)
-	_start_button.add_theme_font_size_override("font_size", 25)
+	_start_button.position = Vector2(442.0, 382.0)
+	_start_button.size = Vector2(396.0, 58.0)
+	_start_button.pivot_offset = _start_button.size * 0.5
+	_start_button.add_theme_font_size_override("font_size", 22)
+	_start_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_style_entry_button(_start_button, Color(0.28, 0.88, 1.0, 1.0), true)
 	_start_button.pressed.connect(_show_difficulty_selection)
 	_entry_overlay.add_child(_start_button)
 
 	var entry_settings := Button.new()
 	entry_settings.name = "EntrySettings"
-	entry_settings.position = Vector2(470.0, 495.0)
-	entry_settings.size = Vector2(340.0, 52.0)
+	entry_settings.position = Vector2(442.0, 452.0)
+	entry_settings.size = Vector2(396.0, 42.0)
+	entry_settings.pivot_offset = entry_settings.size * 0.5
 	entry_settings.text = "设置"
 	entry_settings.add_theme_font_size_override("font_size", 19)
+	entry_settings.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_style_entry_button(entry_settings, Color(0.43, 0.70, 0.82, 1.0), false)
 	entry_settings.pressed.connect(_open_settings.bind(false))
 	_entry_overlay.add_child(entry_settings)
 
 	var entry_quit := Button.new()
 	entry_quit.name = "EntryQuit"
-	entry_quit.position = Vector2(470.0, 558.0)
-	entry_quit.size = Vector2(340.0, 42.0)
+	entry_quit.position = Vector2(442.0, 506.0)
+	entry_quit.size = Vector2(396.0, 34.0)
+	entry_quit.pivot_offset = entry_quit.size * 0.5
 	entry_quit.text = "退出游戏"
 	entry_quit.add_theme_font_size_override("font_size", 16)
+	entry_quit.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_style_entry_button(entry_quit, Color(0.52, 0.60, 0.68, 1.0), false)
 	entry_quit.pressed.connect(_quit_game)
 	_entry_overlay.add_child(entry_quit)
+
+	var footer := Label.new()
+	footer.name = "EntryFooter"
+	footer.position = Vector2(240.0, 598.0)
+	footer.size = Vector2(800.0, 24.0)
+	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	footer.text = "选择难度后开始新的月蚀路线 · 操作说明与无障碍选项位于设置"
+	footer.add_theme_font_size_override("font_size", 14)
+	footer.add_theme_color_override("font_color", Color(0.45, 0.67, 0.78, 0.92))
+	footer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_entry_overlay.add_child(footer)
 
 	var difficulty_data := [
 		{"name": "简单", "description": "敌人生命与伤害降低，适合熟悉操作", "color": Color(0.36, 0.86, 0.58, 1.0)},
@@ -583,12 +983,15 @@ func _create_entry_ui() -> void:
 		var data: Dictionary = difficulty_data[difficulty_index]
 		var button := Button.new()
 		button.name = "Difficulty_%d" % difficulty_index
-		button.position = Vector2(230.0 + float(difficulty_index) * 280.0, 390.0)
-		button.size = Vector2(260.0, 138.0)
-		button.add_theme_font_size_override("font_size", 19)
+		button.position = Vector2(170.0 + float(difficulty_index) * 314.0, 388.0)
+		button.size = Vector2(298.0, 174.0)
+		button.pivot_offset = button.size * 0.5
+		button.add_theme_font_size_override("font_size", 20)
 		button.add_theme_color_override("font_color", data["color"])
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		button.text = "%s\n\n%s" % [data["name"], data["description"]]
+		_style_entry_button(button, data["color"], true)
 		button.pressed.connect(_start_game_with_difficulty.bind(difficulty_index))
 		button.visible = false
 		_entry_overlay.add_child(button)
@@ -597,6 +1000,96 @@ func _create_entry_ui() -> void:
 	_configure_vertical_focus([_start_button, entry_settings, entry_quit])
 
 	_entry_overlay.visible = false
+
+
+func _style_entry_button(button: Button, accent: Color, prominent: bool) -> void:
+	var normal_color := (
+		Color(0.028, 0.115, 0.18, 0.54)
+		if prominent
+		else Color(0.012, 0.052, 0.090, 0.34)
+	)
+	var hover_color := (
+		Color(0.075, 0.24, 0.34, 0.76)
+		if prominent
+		else Color(0.038, 0.13, 0.20, 0.60)
+	)
+	button.add_theme_stylebox_override(
+		"normal",
+		_create_surface_style(normal_color, Color(accent, 0.46), 14, 1, 8)
+	)
+	button.add_theme_stylebox_override(
+		"hover",
+		_create_surface_style(hover_color, Color(accent, 0.94), 14, 1, 14)
+	)
+	button.add_theme_stylebox_override(
+		"pressed",
+		_create_surface_style(Color(0.12, 0.30, 0.40, 0.86), Color(1.0, 1.0, 1.0, 0.78), 14, 1, 4)
+	)
+	button.add_theme_stylebox_override(
+		"focus",
+		_create_surface_style(hover_color, Color(0.90, 0.98, 1.0, 0.90), 14, 1, 12)
+	)
+	button.add_theme_color_override("font_color", Color(0.82, 0.94, 1.0, 1.0))
+	button.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	button.add_theme_color_override("font_pressed_color", Color(0.94, 0.99, 1.0, 1.0))
+
+
+func _reset_entry_layout() -> void:
+	_entry_title.position = Vector2(250.0, 198.0)
+	_entry_subtitle.position = Vector2(270.0, 274.0)
+	_start_button.position = Vector2(442.0, 382.0)
+	var entry_settings: Button = _entry_overlay.get_node("EntrySettings") as Button
+	var entry_quit: Button = _entry_overlay.get_node("EntryQuit") as Button
+	entry_settings.position = Vector2(442.0, 452.0)
+	entry_quit.position = Vector2(442.0, 506.0)
+	var frame: Panel = _entry_overlay.get_node("EntryFrame") as Panel
+	if frame != null:
+		frame.position = Vector2(418.0, 364.0)
+		frame.size = Vector2(444.0, 210.0)
+	for difficulty_index in range(_difficulty_buttons.size()):
+		_difficulty_buttons[difficulty_index].position = Vector2(
+			170.0 + float(difficulty_index) * 314.0,
+			388.0
+		)
+
+
+func _play_entry_transition(showing_difficulty: bool) -> void:
+	if _entry_tween != null and _entry_tween.is_valid():
+		_entry_tween.kill()
+	var frame: Panel = _entry_overlay.get_node("EntryFrame") as Panel
+	var kicker: Label = _entry_overlay.get_node("EntryKicker") as Label
+	var footer: Label = _entry_overlay.get_node("EntryFooter") as Label
+	var controls: Array[Control] = [_entry_title, _entry_subtitle, kicker, footer]
+	if showing_difficulty:
+		for button in _difficulty_buttons:
+			controls.append(button)
+	else:
+		controls.append(_start_button)
+		controls.append(_entry_overlay.get_node("EntrySettings") as Button)
+		controls.append(_entry_overlay.get_node("EntryQuit") as Button)
+	if frame != null and frame.visible:
+		frame.pivot_offset = frame.size * 0.5
+		frame.modulate = Color(1.0, 1.0, 1.0, 0.0)
+		frame.scale = Vector2.ONE * 0.985
+	for control in controls:
+		if control == null or not control.visible:
+			continue
+		control.modulate = Color(1.0, 1.0, 1.0, 0.0)
+		control.position += Vector2(0.0, 12.0)
+		control.scale = Vector2.ONE * 0.985
+	_entry_tween = create_tween().set_parallel(true)
+	if frame != null and frame.visible:
+		_entry_tween.tween_property(frame, "modulate:a", 1.0, 0.26)
+		_entry_tween.tween_property(frame, "scale", Vector2.ONE, 0.30)
+	var visible_index: int = 0
+	for control in controls:
+		if control == null or not control.visible:
+			continue
+		var delay: float = 0.08 + float(visible_index) * 0.06
+		_entry_tween.tween_property(control, "modulate:a", 1.0, 0.20).set_delay(delay)
+		_entry_tween.tween_property(control, "position:y", control.position.y - 12.0, 0.26).set_delay(delay)
+		_entry_tween.tween_property(control, "scale", Vector2.ONE, 0.28).set_delay(delay)
+		visible_index += 1
 
 
 func _create_pause_ui() -> void:
@@ -616,7 +1109,7 @@ func _create_pause_ui() -> void:
 
 	var panel := ColorRect.new()
 	panel.position = Vector2(425.0, 180.0)
-	panel.size = Vector2(430.0, 340.0)
+	panel.size = Vector2(430.0, 400.0)
 	panel.color = Color(0.045, 0.085, 0.12, 0.98)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pause_overlay.add_child(panel)
@@ -634,14 +1127,68 @@ func _create_pause_ui() -> void:
 	var resume_button := _create_menu_button("Resume", "继续游戏", Vector2(495.0, 285.0), Vector2(290.0, 54.0))
 	resume_button.pressed.connect(_resume_game)
 	_pause_overlay.add_child(resume_button)
+	var overview_button := _create_menu_button(
+		"PauseBuildOverview",
+		"构筑总览  [Tab]",
+		Vector2(495.0, 475.0),
+		Vector2(290.0, 48.0)
+	)
+	overview_button.pressed.connect(_open_build_overview.bind(true))
+	_pause_overlay.add_child(overview_button)
 	var settings_button := _create_menu_button("PauseSettings", "设置", Vector2(495.0, 352.0), Vector2(290.0, 48.0))
 	settings_button.pressed.connect(_open_settings.bind(true))
 	_pause_overlay.add_child(settings_button)
 	var menu_button := _create_menu_button("ReturnToMenu", "返回主菜单", Vector2(495.0, 413.0), Vector2(290.0, 48.0))
 	menu_button.pressed.connect(_return_to_main_menu)
 	_pause_overlay.add_child(menu_button)
-	_configure_vertical_focus([resume_button, settings_button, menu_button])
+	_configure_vertical_focus([resume_button, overview_button, settings_button, menu_button])
 	_pause_overlay.visible = false
+
+
+func _create_build_overview() -> void:
+	_build_overview = RUN_BUILD_OVERVIEW_SCRIPT.new() as RunBuildOverview
+	_build_overview.name = "BuildOverview"
+	_build_overview.close_requested.connect(_close_build_overview)
+	hud.add_child(_build_overview)
+
+
+func _refresh_build_overview() -> void:
+	if not is_instance_valid(_build_overview) or _settings == null:
+		return
+	_build_overview.refresh(player, _get_action_prompt(&"build_overview"))
+
+
+func _open_build_overview(from_pause: bool = false) -> void:
+	if (
+		not is_instance_valid(_build_overview)
+		or _entry_flow_active
+		or _flow_state.run_complete
+		or _build_overview.visible
+	):
+		return
+	_build_overview_opened_from_pause = from_pause
+	_refresh_build_overview()
+	_build_overview.visible = true
+	if from_pause:
+		_pause_overlay.visible = false
+	else:
+		_is_game_paused = true
+		get_tree().paused = true
+	_build_overview.focus_close_button()
+
+
+func _close_build_overview() -> void:
+	if not is_instance_valid(_build_overview) or not _build_overview.visible:
+		return
+	var return_to_pause: bool = _build_overview_opened_from_pause
+	_build_overview.visible = false
+	_build_overview_opened_from_pause = false
+	if return_to_pause:
+		_pause_overlay.visible = true
+		_ensure_context_focus()
+	else:
+		get_tree().paused = false
+		_is_game_paused = false
 
 
 func _create_settings_ui() -> void:
@@ -655,17 +1202,17 @@ func _create_settings_ui() -> void:
 
 	var dimmer := ColorRect.new()
 	dimmer.size = DISPLAY_SIZE
-	dimmer.color = Color(0.006, 0.014, 0.028, 0.88)
+	dimmer.color = Color(0.004, 0.012, 0.028, 0.52)
 	dimmer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_settings_overlay.add_child(dimmer)
 	var panel := Panel.new()
-	panel.position = Vector2(70.0, 30.0)
-	panel.size = Vector2(1140.0, 660.0)
+	panel.position = Vector2.ZERO
+	panel.size = DISPLAY_SIZE
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.026, 0.061, 0.092, 0.98)
-	panel_style.border_color = Color(0.26, 0.64, 0.72, 0.72)
-	panel_style.set_border_width_all(2)
+	panel_style.bg_color = Color(0.0, 0.0, 0.0, 0.0)
+	panel_style.border_color = Color(0.0, 0.0, 0.0, 0.0)
+	panel_style.set_border_width_all(0)
 	panel_style.corner_radius_top_left = 14
 	panel_style.corner_radius_top_right = 14
 	panel_style.corner_radius_bottom_left = 14
@@ -674,44 +1221,76 @@ func _create_settings_ui() -> void:
 	panel_style.shadow_size = 18
 	panel.add_theme_stylebox_override("panel", panel_style)
 	_settings_overlay.add_child(panel)
+	panel.visible = false
+
+	var header_card := _create_settings_glass_card(
+		"SettingsHeader", Vector2(360.0, 48.0), Vector2(560.0, 86.0), Color("#74e3ff")
+	)
+	var audio_card := _create_settings_glass_card(
+		"SettingsAudioCard", Vector2(64.0, 164.0), Vector2(580.0, 150.0), Color("#67dff4")
+	)
+	var system_card := _create_settings_glass_card(
+		"SettingsSystemCard", Vector2(660.0, 164.0), Vector2(556.0, 154.0), Color("#73dff3")
+	)
+	var bindings_card := _create_settings_glass_card(
+		"SettingsBindingsCard", Vector2(64.0, 340.0), Vector2(602.0, 332.0), Color("#7aa8ff")
+	)
+	var guide_card := _create_settings_glass_card(
+		"SettingsGuideCard", Vector2(690.0, 340.0), Vector2(526.0, 332.0), Color("#8ddff2")
+	)
+	_create_settings_card_heading(audio_card, "音频 / AUDIO", Color("#75e5f5"))
+	_create_settings_card_heading(system_card, "显示与辅助 / SYSTEM", Color("#75e5f5"))
+	_create_settings_card_heading(bindings_card, "按键映射 / INPUT BINDINGS", Color("#9ab9ff"))
+	_create_settings_card_heading(guide_card, "战斗提示 / FIELD GUIDE", Color("#b5edff"))
 
 	var title := Label.new()
-	title.position = Vector2(100.0, 50.0)
-	title.size = Vector2(1080.0, 46.0)
+	title.position = Vector2(380.0, 60.0)
+	title.size = Vector2(520.0, 42.0)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.text = "设置与操作"
-	title.add_theme_font_size_override("font_size", 30)
-	title.add_theme_color_override("font_color", Color(0.85, 0.95, 1.0, 1.0))
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", Color(0.89, 0.97, 1.0, 1.0))
+	title.add_theme_color_override("font_outline_color", Color(0.0, 0.03, 0.07, 0.70))
+	title.add_theme_constant_override("outline_size", 2)
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_settings_overlay.add_child(title)
+	var subtitle := Label.new()
+	subtitle.position = Vector2(380.0, 101.0)
+	subtitle.size = Vector2(520.0, 20.0)
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle.text = "调整你的月蚀路线 · 所有说明收纳于此"
+	subtitle.add_theme_font_size_override("font_size", 13)
+	subtitle.add_theme_color_override("font_color", Color(0.54, 0.79, 0.91, 0.92))
+	subtitle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_settings_overlay.add_child(subtitle)
 
 	_settings_volume_slider = _create_settings_audio_slider(
-		"MasterVolume", "主音量", Vector2(100.0, 118.0), 150.0,
+		"MasterVolume", "主音量", Vector2(88.0, 204.0), 166.0,
 		_on_master_volume_changed
 	)
 	_settings_music_slider = _create_settings_audio_slider(
-		"MusicVolume", "音乐", Vector2(330.0, 118.0), 150.0,
+		"MusicVolume", "音乐", Vector2(366.0, 204.0), 166.0,
 		_on_music_volume_changed
 	)
 	_settings_effects_slider = _create_settings_audio_slider(
-		"EffectsVolume", "音效", Vector2(560.0, 118.0), 150.0,
+		"EffectsVolume", "音效", Vector2(88.0, 254.0), 166.0,
 		_on_effects_volume_changed
 	)
 	_settings_voice_slider = _create_settings_audio_slider(
-		"VoiceVolume", "语音", Vector2(790.0, 118.0), 150.0,
+		"VoiceVolume", "语音", Vector2(366.0, 254.0), 166.0,
 		_on_voice_volume_changed
 	)
 	_settings_damage_numbers_toggle = CheckButton.new()
 	_settings_damage_numbers_toggle.name = "DamageNumbersToggle"
-	_settings_damage_numbers_toggle.position = Vector2(1010.0, 118.0)
-	_settings_damage_numbers_toggle.size = Vector2(175.0, 34.0)
+	_settings_damage_numbers_toggle.position = Vector2(936.0, 248.0)
+	_settings_damage_numbers_toggle.size = Vector2(210.0, 34.0)
 	_settings_damage_numbers_toggle.text = "显示伤害数字"
 	_settings_damage_numbers_toggle.add_theme_font_size_override("font_size", 17)
 	_settings_damage_numbers_toggle.toggled.connect(_on_damage_numbers_toggled)
 	_settings_overlay.add_child(_settings_damage_numbers_toggle)
 
 	var resolution_label := Label.new()
-	resolution_label.position = Vector2(125.0, 160.0)
+	resolution_label.position = Vector2(684.0, 202.0)
 	resolution_label.size = Vector2(74.0, 34.0)
 	resolution_label.text = "分辨率"
 	resolution_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -719,32 +1298,33 @@ func _create_settings_ui() -> void:
 	_settings_overlay.add_child(resolution_label)
 	_settings_resolution_selector = OptionButton.new()
 	_settings_resolution_selector.name = "ResolutionSelector"
-	_settings_resolution_selector.position = Vector2(200.0, 160.0)
-	_settings_resolution_selector.size = Vector2(174.0, 34.0)
+	_settings_resolution_selector.position = Vector2(762.0, 202.0)
+	_settings_resolution_selector.size = Vector2(160.0, 34.0)
 	var resolution_options: Array = _settings.call(&"get_resolution_options") as Array
 	for resolution_value: Variant in resolution_options:
 		var resolution: Vector2i = resolution_value
 		_settings_resolution_selector.add_item("%d × %d" % [resolution.x, resolution.y])
 	_settings_resolution_selector.item_selected.connect(_on_resolution_selected)
+	_style_settings_action_button(_settings_resolution_selector)
 	_settings_overlay.add_child(_settings_resolution_selector)
 	_settings_fullscreen_toggle = _create_settings_toggle(
-		"FullscreenToggle", "全屏", Vector2(392.0, 158.0),
+		"FullscreenToggle", "全屏", Vector2(940.0, 200.0),
 		_on_fullscreen_toggled
 	)
 	_settings_vsync_toggle = _create_settings_toggle(
-		"VsyncToggle", "垂直同步", Vector2(535.0, 158.0),
+		"VsyncToggle", "垂直同步", Vector2(1070.0, 200.0),
 		_on_vsync_toggled
 	)
 	_settings_reduced_effects_toggle = _create_settings_toggle(
-		"ReducedEffectsToggle", "减弱闪光/震动", Vector2(680.0, 158.0),
+		"ReducedEffectsToggle", "减弱闪光/震动", Vector2(684.0, 248.0),
 		_on_reduced_effects_toggled
 	)
 	_settings_controller_status_label = Label.new()
 	_settings_controller_status_label.name = "ControllerStatus"
-	_settings_controller_status_label.position = Vector2(870.0, 160.0)
-	_settings_controller_status_label.size = Vector2(325.0, 34.0)
+	_settings_controller_status_label.position = Vector2(684.0, 281.0)
+	_settings_controller_status_label.size = Vector2(510.0, 17.0)
 	_settings_controller_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_settings_controller_status_label.add_theme_font_size_override("font_size", 14)
+	_settings_controller_status_label.add_theme_font_size_override("font_size", 12)
 	_settings_controller_status_label.add_theme_color_override(
 		"font_color", Color(0.56, 0.82, 0.88, 1.0)
 	)
@@ -752,9 +1332,9 @@ func _create_settings_ui() -> void:
 
 	_settings_display_status_label = Label.new()
 	_settings_display_status_label.name = "DisplayStatus"
-	_settings_display_status_label.position = Vector2(125.0, 192.0)
-	_settings_display_status_label.size = Vector2(590.0, 32.0)
-	_settings_display_status_label.add_theme_font_size_override("font_size", 13)
+	_settings_display_status_label.position = Vector2(684.0, 298.0)
+	_settings_display_status_label.size = Vector2(510.0, 15.0)
+	_settings_display_status_label.add_theme_font_size_override("font_size", 11)
 	_settings_display_status_label.add_theme_color_override(
 		"font_color", Color(0.58, 0.74, 0.84, 1.0)
 	)
@@ -763,66 +1343,195 @@ func _create_settings_ui() -> void:
 
 	var guide_panel := Panel.new()
 	guide_panel.name = "OperationGuidePanel"
-	guide_panel.position = Vector2(755.0, 210.0)
-	guide_panel.size = Vector2(405.0, 380.0)
+	guide_panel.position = Vector2(702.0, 352.0)
+	guide_panel.size = Vector2(502.0, 308.0)
 	guide_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var guide_style := StyleBoxFlat.new()
-	guide_style.bg_color = Color(0.016, 0.038, 0.060, 0.94)
-	guide_style.border_color = Color(0.74, 0.52, 0.22, 0.70)
+	guide_style.bg_color = Color(0.008, 0.028, 0.057, 0.18)
+	guide_style.border_color = Color(0.52, 0.84, 0.96, 0.18)
 	guide_style.set_border_width_all(1)
-	guide_style.corner_radius_top_left = 10
-	guide_style.corner_radius_top_right = 10
-	guide_style.corner_radius_bottom_left = 10
-	guide_style.corner_radius_bottom_right = 10
+	guide_style.corner_radius_top_left = 12
+	guide_style.corner_radius_top_right = 12
+	guide_style.corner_radius_bottom_left = 12
+	guide_style.corner_radius_bottom_right = 12
 	guide_panel.add_theme_stylebox_override("panel", guide_style)
 	_settings_overlay.add_child(guide_panel)
+	guide_panel.visible = false
 	_settings_guide_label = RichTextLabel.new()
 	_settings_guide_label.name = "OperationGuide"
-	_settings_guide_label.position = Vector2(782.0, 232.0)
-	_settings_guide_label.size = Vector2(351.0, 336.0)
+	_settings_guide_label.position = Vector2(720.0, 372.0)
+	_settings_guide_label.size = Vector2(466.0, 268.0)
 	_settings_guide_label.bbcode_enabled = true
 	_settings_guide_label.fit_content = false
 	_settings_guide_label.scroll_active = false
 	_settings_guide_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_settings_guide_label.add_theme_font_size_override("normal_font_size", 15)
+	_settings_guide_label.add_theme_font_size_override("normal_font_size", 13)
 	_settings_guide_label.add_theme_color_override("default_color", Color(0.74, 0.86, 0.91, 1.0))
 	_settings_overlay.add_child(_settings_guide_label)
 
 	var actions := [
+		[&"build_overview", "构筑总览"],
 		[&"move_left", "向左"], [ &"move_right", "向右"], [ &"jump", "跳跃"], [ &"attack", "攻击"], [ &"aim_up", "上劈方向"], [ &"aim_down", "下劈方向"],
 		[&"dash", "闪避冲刺"], [ &"skill", "主动技能"], [ &"interact", "互动"], [ &"cycle_weapon", "切换武器"], [ &"restart", "重开本局"], [ &"pause", "暂停菜单"],
 	]
 	for action_index in range(actions.size()):
-		var row: int = action_index % 6
-		var column: int = int(action_index / 6)
-		var position := Vector2(125.0 + float(column) * 310.0, 220.0 + float(row) * 50.0)
+		var row: int = action_index % 4
+		var column: int = int(action_index / 4)
+		var position := Vector2(84.0 + float(column) * 194.0, 382.0 + float(row) * 57.0)
 		var action_name: StringName = actions[action_index][0]
 		var action_label := Label.new()
 		action_label.position = position
-		action_label.size = Vector2(112.0, 40.0)
+		action_label.size = Vector2(62.0, 38.0)
 		action_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		action_label.text = String(actions[action_index][1])
-		action_label.add_theme_font_size_override("font_size", 17)
+		action_label.add_theme_font_size_override("font_size", 14)
+		action_label.add_theme_color_override("font_color", Color(0.74, 0.86, 0.94, 0.96))
 		action_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_settings_overlay.add_child(action_label)
 		var key_button := Button.new()
 		key_button.name = "Bind_%s" % action_name
-		key_button.position = position + Vector2(118.0, 0.0)
-		key_button.size = Vector2(165.0, 40.0)
-		key_button.add_theme_font_size_override("font_size", 16)
+		key_button.position = position + Vector2(66.0, 0.0)
+		key_button.size = Vector2(122.0, 38.0)
+		key_button.add_theme_font_size_override("font_size", 14)
+		_style_settings_action_button(key_button)
 		key_button.pressed.connect(_begin_rebind.bind(action_name))
 		_settings_overlay.add_child(key_button)
 		_settings_key_buttons[action_name] = key_button
 
-	var reset_button := _create_menu_button("ResetBindings", "恢复默认键位", Vector2(315.0, 608.0), Vector2(250.0, 48.0))
+	var reset_button := _create_menu_button("ResetBindings", "恢复默认键位", Vector2(390.0, 700.0), Vector2(220.0, 44.0))
 	reset_button.pressed.connect(_reset_bindings)
 	_settings_overlay.add_child(reset_button)
-	var back_button := _create_menu_button("CloseSettings", "返回", Vector2(715.0, 608.0), Vector2(250.0, 48.0))
+	var back_button := _create_menu_button("CloseSettings", "返回", Vector2(670.0, 700.0), Vector2(220.0, 44.0))
 	back_button.pressed.connect(_close_settings)
 	_settings_overlay.add_child(back_button)
 	_refresh_settings_operation_guide()
 	_refresh_display_status()
 	_settings_overlay.visible = false
+
+
+func _create_settings_glass_card(
+	card_name: String,
+	card_position: Vector2,
+	card_size: Vector2,
+	accent: Color
+) -> Panel:
+	var card := Panel.new()
+	card.name = card_name
+	card.position = card_position
+	card.size = card_size
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_theme_stylebox_override(
+		"panel",
+		_create_surface_style(
+			Color(0.008, 0.030, 0.064, 0.48),
+			Color(accent, 0.30),
+			16,
+			1,
+			10
+		)
+	)
+	_settings_overlay.add_child(card)
+	var accent_mark := ColorRect.new()
+	accent_mark.position = Vector2(20.0, 13.0)
+	accent_mark.size = Vector2(46.0, 2.0)
+	accent_mark.color = Color(accent, 0.82)
+	accent_mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(accent_mark)
+	return card
+
+
+func _create_settings_card_heading(card: Panel, heading_text: String, accent: Color) -> void:
+	var heading := Label.new()
+	heading.position = Vector2(20.0, 18.0)
+	heading.size = Vector2(card.size.x - 40.0, 20.0)
+	heading.text = heading_text
+	heading.add_theme_font_size_override("font_size", 13)
+	heading.add_theme_color_override("font_color", Color(accent, 0.94))
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(heading)
+
+
+func _style_settings_action_button(button: BaseButton) -> void:
+	button.add_theme_stylebox_override(
+		"normal",
+		_create_surface_style(
+			Color(0.014, 0.052, 0.088, 0.42),
+			Color(0.45, 0.79, 0.94, 0.26),
+			9,
+			1,
+			4
+		)
+	)
+	button.add_theme_stylebox_override(
+		"hover",
+		_create_surface_style(
+			Color(0.06, 0.17, 0.25, 0.70),
+			Color(0.48, 0.90, 1.0, 0.86),
+			9,
+			1,
+			8
+		)
+	)
+	button.add_theme_stylebox_override(
+		"pressed",
+		_create_surface_style(
+			Color(0.11, 0.27, 0.35, 0.84),
+			Color(0.86, 0.97, 1.0, 0.92),
+			9,
+			1,
+			3
+		)
+	)
+	button.add_theme_stylebox_override(
+		"focus",
+		_create_surface_style(
+			Color(0.045, 0.13, 0.21, 0.66),
+			Color(0.84, 0.96, 1.0, 0.88),
+			9,
+			1,
+			7
+		)
+	)
+	button.add_theme_color_override("font_color", Color(0.80, 0.91, 0.97, 1.0))
+	button.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	button.add_theme_color_override("font_pressed_color", Color(0.92, 0.99, 1.0, 1.0))
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+
+
+func _create_settings_knob_texture(accent: Color) -> ImageTexture:
+	var image := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	for y in range(16):
+		for x in range(16):
+			var point := Vector2(float(x) + 0.5, float(y) + 0.5)
+			var distance_to_center := point.distance_to(Vector2(8.0, 8.0))
+			if distance_to_center <= 6.6:
+				image.set_pixel(x, y, Color(accent, 0.98))
+			elif distance_to_center <= 7.6:
+				image.set_pixel(x, y, Color(0.80, 0.96, 1.0, 0.38))
+	return ImageTexture.create_from_image(image)
+
+
+func _create_settings_switch_texture(is_enabled: bool, accent: Color) -> ImageTexture:
+	var image := Image.create(36, 20, false, Image.FORMAT_RGBA8)
+	var body_color := (
+		Color(accent, 0.84)
+		if is_enabled
+		else Color(0.18, 0.30, 0.40, 0.92)
+	)
+	var knob_center := Vector2(26.0 if is_enabled else 10.0, 10.0)
+	for y in range(20):
+		for x in range(36):
+			var point := Vector2(float(x) + 0.5, float(y) + 0.5)
+			var inside_body := (
+				point.distance_to(Vector2(10.0, 10.0)) <= 9.0
+				or point.distance_to(Vector2(26.0, 10.0)) <= 9.0
+				or (point.x >= 10.0 and point.x <= 26.0 and point.y >= 1.0 and point.y <= 19.0)
+			)
+			if inside_body:
+				image.set_pixel(x, y, body_color)
+			if point.distance_to(knob_center) <= 6.0:
+				image.set_pixel(x, y, Color(0.94, 0.99, 1.0, 1.0))
+	return ImageTexture.create_from_image(image)
 
 
 func _create_settings_audio_slider(
@@ -838,6 +1547,7 @@ func _create_settings_audio_slider(
 	label.text = label_text
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", 16)
+	label.add_theme_color_override("font_color", Color(0.76, 0.88, 0.95, 0.96))
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_settings_overlay.add_child(label)
 	var slider := HSlider.new()
@@ -847,6 +1557,20 @@ func _create_settings_audio_slider(
 	slider.min_value = 0.0
 	slider.max_value = 1.0
 	slider.step = 0.05
+	slider.add_theme_stylebox_override(
+		"slider",
+		_create_surface_style(Color(0.007, 0.028, 0.050, 0.72), Color(0.33, 0.70, 0.84, 0.30), 6, 1)
+	)
+	slider.add_theme_stylebox_override(
+		"grabber_area",
+		_create_surface_style(Color(0.16, 0.61, 0.72, 0.52), Color(0.45, 0.90, 0.98, 0.58), 6, 1)
+	)
+	slider.add_theme_stylebox_override(
+		"grabber_area_highlight",
+		_create_surface_style(Color(0.22, 0.72, 0.86, 0.66), Color(0.70, 0.97, 1.0, 0.78), 6, 1)
+	)
+	slider.add_theme_icon_override("grabber", _create_settings_knob_texture(Color("#7ceaff")))
+	slider.add_theme_icon_override("grabber_highlight", _create_settings_knob_texture(Color("#d5f9ff")))
 	slider.value_changed.connect(changed_callback)
 	_settings_overlay.add_child(slider)
 	return slider
@@ -863,7 +1587,16 @@ func _create_settings_toggle(
 	toggle.position = button_position
 	toggle.size = Vector2(180.0 if button_text.length() > 4 else 130.0, 36.0)
 	toggle.text = button_text
-	toggle.add_theme_font_size_override("font_size", 16)
+	toggle.add_theme_font_size_override("font_size", 14)
+	toggle.add_theme_color_override("font_color", Color(0.76, 0.88, 0.95, 0.96))
+	toggle.add_theme_color_override("font_hover_color", Color(0.96, 1.0, 1.0, 1.0))
+	toggle.add_theme_constant_override("h_separation", 8)
+	var switch_accent := Color("#78e3f7")
+	toggle.add_theme_icon_override("unchecked", _create_settings_switch_texture(false, switch_accent))
+	toggle.add_theme_icon_override("checked", _create_settings_switch_texture(true, switch_accent))
+	toggle.add_theme_icon_override("unchecked_disabled", _create_settings_switch_texture(false, Color(0.38, 0.46, 0.52, 1.0)))
+	toggle.add_theme_icon_override("checked_disabled", _create_settings_switch_texture(true, Color(0.38, 0.46, 0.52, 1.0)))
+	toggle.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	toggle.toggled.connect(toggled_callback)
 	_settings_overlay.add_child(toggle)
 	return toggle
@@ -876,6 +1609,7 @@ func _create_menu_button(node_name: String, button_text: String, button_position
 	button.size = button_size
 	button.text = button_text
 	button.add_theme_font_size_override("font_size", 18)
+	_style_settings_action_button(button)
 	return button
 
 
@@ -915,6 +1649,9 @@ func _resume_game() -> void:
 	_is_game_paused = false
 	_pause_overlay.visible = false
 	_settings_overlay.visible = false
+	if is_instance_valid(_build_overview):
+		_build_overview.visible = false
+	_build_overview_opened_from_pause = false
 	_awaiting_rebind_action = &""
 
 
@@ -923,6 +1660,7 @@ func _return_to_main_menu() -> void:
 	_set_run_phase(RunFlowState.Phase.IDLE)
 	_hide_upgrade_overlay()
 	_clear_chest()
+	_clear_room_exit_portal()
 	_clear_projectiles()
 	_clear_enemies()
 	_clear_platform_colliders()
@@ -1122,8 +1860,12 @@ func _show_start_screen() -> void:
 	_entry_flow_active = true
 	player.set_input_enabled(false)
 	_entry_overlay.visible = true
+	_reset_entry_layout()
+	(_entry_overlay.get_node("EntryFrame") as Panel).visible = true
 	_entry_title.text = "月蚀回廊"
 	_entry_subtitle.text = "LUNAR ECLIPSE CORRIDOR  ·  %s" % BUILD_LABEL
+	(_entry_overlay.get_node("EntryKicker") as Label).text = "LUNAR ECLIPSE  //  ROGUELITE PROTOCOL"
+	(_entry_overlay.get_node("EntryFooter") as Label).text = "选择难度后开始新的月蚀路线 · 操作说明与无障碍选项位于设置"
 	_start_button.text = "开始冒险"
 	_start_button.visible = true
 	var entry_settings: Button = _entry_overlay.get_node("EntrySettings") as Button
@@ -1132,17 +1874,24 @@ func _show_start_screen() -> void:
 	entry_quit.visible = true
 	for button in _difficulty_buttons:
 		button.visible = false
+	_play_entry_transition(false)
 	_ensure_context_focus()
 
 
 func _show_difficulty_selection() -> void:
+	_entry_overlay.visible = true
+	_reset_entry_layout()
+	(_entry_overlay.get_node("EntryFrame") as Panel).visible = false
 	_entry_title.text = "选择难度"
 	_entry_subtitle.text = "难度会改变每房战斗预算、精英与远程比例和敌人行为；前期克制，后期逐步升级。"
+	(_entry_overlay.get_node("EntryKicker") as Label).text = "SELECT YOUR ROUTE  //  RISK DEFINES THE RUN"
+	(_entry_overlay.get_node("EntryFooter") as Label).text = "选择一项难度开始冒险 · 后续可在设置中查看完整操作说明"
 	_start_button.visible = false
 	(_entry_overlay.get_node("EntrySettings") as Button).visible = false
 	(_entry_overlay.get_node("EntryQuit") as Button).visible = false
 	for button in _difficulty_buttons:
 		button.visible = true
+	_play_entry_transition(true)
 	_ensure_context_focus()
 
 
@@ -1150,6 +1899,8 @@ func _start_game_with_difficulty(difficulty: int) -> void:
 	_selected_difficulty = clampi(difficulty, Difficulty.EASY, Difficulty.HARD)
 	_lives_remaining = MAX_RUN_LIVES
 	_entry_flow_active = false
+	if _entry_tween != null and _entry_tween.is_valid():
+		_entry_tween.kill()
 	_entry_overlay.visible = false
 	_start_new_run()
 
@@ -1207,6 +1958,7 @@ func _start_new_run() -> void:
 	_run_shards = 0
 	_hide_upgrade_overlay()
 	_clear_chest()
+	_clear_room_exit_portal()
 	_clear_projectiles()
 	_clear_enemies()
 	_clear_platform_colliders()
@@ -1251,7 +2003,9 @@ func _load_room(pool_index: int) -> void:
 	_pending_risk_gold = 0
 	_pending_risk_heal = 0
 	_challenge_reward_granted = false
+	_reset_room_objective()
 	_clear_chest()
+	_clear_room_exit_portal()
 	_clear_projectiles()
 	_clear_enemies()
 	_clear_platform_colliders()
@@ -1261,6 +2015,7 @@ func _load_room(pool_index: int) -> void:
 		_current_room_index + 1
 	)
 	_current_encounter = _get_encounter_for_room(_current_room_index)
+	_current_objective = _get_room_objective(_current_encounter)
 	_current_combat_profile = _get_combat_profile()
 	if _telemetry != null:
 		_telemetry.begin_room(
@@ -1280,6 +2035,7 @@ func _load_room(pool_index: int) -> void:
 
 	var recovery: int = 0 if _current_room_index == 0 else ROOM_ENTRY_RECOVERY
 	player.enter_room(ROOM_PLAYER_SPAWN, recovery)
+	_configure_room_objective()
 	_spawn_room_enemies()
 	var room_title: String = _current_room_data.get("title", "未知房间")
 	if _current_encounter == EncounterType.SHOP:
@@ -1295,7 +2051,9 @@ func _load_room(pool_index: int) -> void:
 			_set_status("风险宝箱已出现——开启后击败伏兵才能领取奖励")
 		else:
 			_set_run_phase(RunFlowState.Phase.COMBAT)
-			if _current_encounter == EncounterType.CHALLENGE:
+			if _current_objective in [RoomObjective.TIME_TRIAL, RoomObjective.HOLDOUT]:
+				_set_status(_get_objective_status_text())
+			elif _current_encounter == EncounterType.CHALLENGE:
 				_set_status("进入 %s·挑战房——高压敌群，胜利获得额外金币与星屑" % room_title)
 			elif _last_upgrade_name.is_empty():
 				_set_status("进入 %s·%s——清除全部敌人" % [
@@ -1308,6 +2066,202 @@ func _load_room(pool_index: int) -> void:
 	_update_controls()
 	_update_room_label()
 	queue_redraw()
+
+
+func _reset_room_objective() -> void:
+	_current_objective = RoomObjective.CLEAR_ALL
+	_objective_timer_remaining = 0.0
+	_objective_hold_progress = 0.0
+	_objective_hold_duration = 0.0
+	_objective_resolved = false
+	_objective_failed = false
+	_objective_reward_granted = false
+	_objective_anchor = Vector2.ZERO
+	_objective_radius = 0.0
+	_objective_trap_zones.clear()
+	_objective_trap_pulse_remaining = 0.0
+	_objective_trap_flash_remaining = 0.0
+	_hunt_target = null
+
+
+func _get_room_objective(encounter: int) -> int:
+	match encounter:
+		EncounterType.CHALLENGE:
+			return RoomObjective.TIME_TRIAL
+		EncounterType.HOLDOUT:
+			return RoomObjective.HOLDOUT
+		EncounterType.ELITE:
+			return RoomObjective.ELITE_HUNT
+		EncounterType.RISK_CHEST:
+			return RoomObjective.BRANCH_REWARD
+	return RoomObjective.CLEAR_ALL
+
+
+func _configure_room_objective() -> void:
+	if _current_objective in [RoomObjective.CLEAR_ALL, RoomObjective.BRANCH_REWARD]:
+		return
+	if platform_rects.is_empty():
+		return
+	var objective_surface: Rect2 = _get_objective_surface()
+	if objective_surface.size.x <= 0.0:
+		return
+	var anchor_x: float = clampf(
+		WORLD_SIZE.x * 0.5,
+		objective_surface.position.x + 40.0,
+		objective_surface.end.x - 40.0
+	)
+	_objective_anchor = Vector2(anchor_x, objective_surface.position.y - 18.0)
+	if _current_objective == RoomObjective.TIME_TRIAL:
+		_objective_timer_remaining = maxf(
+			18.0,
+			31.0 - float(maxi(_current_room_index, 0)) * 0.40 - float(_selected_difficulty) * 2.0
+		)
+		_configure_objective_traps(objective_surface)
+	elif _current_objective == RoomObjective.HOLDOUT:
+		_objective_hold_duration = 7.5 + float(_selected_difficulty) * 0.75
+		_objective_radius = 92.0
+		_configure_objective_traps(objective_surface)
+	queue_redraw()
+
+
+func _get_objective_surface() -> Rect2:
+	var best_surface: Rect2 = platform_rects[0]
+	var best_score: float = INF
+	for surface: Rect2 in platform_rects:
+		var elevated_platform_penalty: float = 0.0 if surface.size.y >= 100.0 else 420.0
+		var center_distance: float = absf(surface.get_center().x - WORLD_SIZE.x * 0.5)
+		var width_bonus: float = minf(surface.size.x, 280.0) * 0.10
+		var score: float = center_distance + elevated_platform_penalty - width_bonus
+		if score < best_score:
+			best_score = score
+			best_surface = surface
+	return best_surface
+
+
+func _configure_objective_traps(surface: Rect2) -> void:
+	_objective_trap_zones.clear()
+	if surface.size.x < 140.0:
+		return
+	var minimum_center_x: float = surface.position.x + 44.0
+	var maximum_center_x: float = surface.end.x - 44.0
+	var trap_offsets: Array[float] = [-0.30, 0.30]
+	for offset: float in trap_offsets:
+		var center_x: float = clampf(
+			_objective_anchor.x + surface.size.x * offset,
+			minimum_center_x,
+			maximum_center_x
+		)
+		if absf(center_x - _objective_anchor.x) < 54.0:
+			continue
+		_objective_trap_zones.append(
+			Rect2(center_x - 34.0, surface.position.y - 44.0, 68.0, 58.0)
+		)
+	_objective_trap_pulse_remaining = 1.65
+
+
+func _update_room_objective(delta: float) -> void:
+	if _current_objective == RoomObjective.TIME_TRIAL and not _objective_failed:
+		_objective_timer_remaining = maxf(0.0, _objective_timer_remaining - delta)
+		if _objective_timer_remaining <= 0.0:
+			_objective_failed = true
+			_set_status("TIME TRIAL EXPIRED | clear the remaining enemies without the bonus")
+			queue_redraw()
+		else:
+			_set_status(_get_objective_status_text())
+	elif _current_objective == RoomObjective.HOLDOUT and not _objective_resolved:
+		if _is_player_holding_objective():
+			_objective_hold_progress = minf(
+				_objective_hold_duration,
+				_objective_hold_progress + delta
+			)
+		if _objective_hold_progress >= _objective_hold_duration:
+			_objective_resolved = true
+			_grant_objective_reward()
+			_set_status("BEACON SECURED | clear any remaining enemies")
+			if _enemies.is_empty():
+				call_deferred(&"_on_room_cleared")
+		else:
+			_set_status(_get_objective_status_text())
+	if not _objective_failed and not _objective_resolved:
+		_update_objective_traps(delta)
+	queue_redraw()
+
+
+func _is_player_holding_objective() -> bool:
+	if _objective_radius <= 0.0:
+		return false
+	return (
+		absf(player.global_position.x - _objective_anchor.x) <= _objective_radius
+		and absf(player.global_position.y - _objective_anchor.y) <= 112.0
+	)
+
+
+func _update_objective_traps(delta: float) -> void:
+	if _objective_trap_zones.is_empty() or player.is_dead():
+		return
+	_objective_trap_flash_remaining = maxf(0.0, _objective_trap_flash_remaining - delta)
+	_objective_trap_pulse_remaining = maxf(0.0, _objective_trap_pulse_remaining - delta)
+	if _objective_trap_pulse_remaining > 0.0:
+		return
+	_objective_trap_pulse_remaining = 2.35
+	_objective_trap_flash_remaining = 0.34
+	var trap_damage: int = 8 + mini(maxi(_current_room_index, 0), 8)
+	var player_was_hit: bool = false
+	for trap_zone: Rect2 in _objective_trap_zones:
+		if trap_zone.grow(18.0).has_point(player.global_position):
+			if player.receive_enemy_attack(trap_zone.get_center(), trap_damage, &"arcane_trap"):
+				player_was_hit = true
+	if player_was_hit:
+		_trigger_camera_shake(6.0, 0.10)
+
+
+func _grant_objective_reward() -> void:
+	if _objective_reward_granted:
+		return
+	var bonus_gold: int = 0
+	var bonus_shards: int = 0
+	match _current_objective:
+		RoomObjective.TIME_TRIAL:
+			bonus_gold = 16 + maxi(_current_room_index, 0)
+			bonus_shards = 2
+		RoomObjective.HOLDOUT:
+			bonus_gold = 12 + maxi(_current_room_index, 0)
+			bonus_shards = 2
+		RoomObjective.ELITE_HUNT:
+			bonus_gold = 10 + maxi(_current_room_index, 0)
+			bonus_shards = 1
+		_:
+			return
+	_objective_reward_granted = true
+	_gold += bonus_gold
+	_run_shards += bonus_shards
+	_update_economy_hud()
+
+
+func _get_objective_status_text() -> String:
+	match _current_objective:
+		RoomObjective.TIME_TRIAL:
+			if _objective_failed:
+				return "TIME TRIAL EXPIRED | clear remaining %d" % _enemies.size()
+			return "TIME TRIAL  %04.1fs | clear remaining %d" % [
+				_objective_timer_remaining,
+				_enemies.size(),
+			]
+		RoomObjective.HOLDOUT:
+			var hold_ratio: float = (
+				0.0
+				if _objective_hold_duration <= 0.0
+				else _objective_hold_progress / _objective_hold_duration
+			)
+			return "HOLD THE BEACON  %d%% | enemies %d" % [
+				roundi(hold_ratio * 100.0),
+				_enemies.size(),
+			]
+		RoomObjective.ELITE_HUNT:
+			return "ELITE HUNT | eliminate the marked captain"
+		RoomObjective.BRANCH_REWARD:
+			return "BRANCH REWARD | choose whether to open the risk chest"
+	return "CLEAR THE ROOM | enemies %d" % _enemies.size()
 
 
 func _create_platform_colliders() -> void:
@@ -1395,6 +2349,13 @@ func _spawn_room_enemies() -> void:
 		var role: int = int(descriptor.get("role", ENEMY_ROLE_MELEE))
 		var rank: int = int(descriptor.get("rank", ENEMY_RANK_NORMAL))
 		var family: int = _get_enemy_family_for_spawn(_current_room_index, spawn_index)
+		var archetype: int = _get_enemy_archetype_for_spawn(
+			_current_room_index,
+			spawn_index,
+			role,
+			rank,
+			family
+		)
 		var vertical_offset: float = 28.0 if rank == ENEMY_RANK_ELITE else 22.0
 		_spawn_enemy(
 			Vector2(lerpf(minimum_x, maximum_x, horizontal_ratio), surface.position.y - vertical_offset),
@@ -1403,7 +2364,8 @@ func _spawn_room_enemies() -> void:
 			role,
 			rank,
 			family,
-			spawn_index
+			spawn_index,
+			archetype
 		)
 
 
@@ -1414,7 +2376,8 @@ func _spawn_enemy(
 	role: int,
 	rank: int = ENEMY_RANK_NORMAL,
 	family: int = ENEMY_FAMILY_SLIME,
-	spawn_order: int = -1
+	spawn_order: int = -1,
+	archetype: int = ENEMY_ARCHETYPE_STANDARD
 ) -> void:
 	var enemy: RogueEnemy = ENEMY_SCRIPT.new() as RogueEnemy
 	var variant: int = 1
@@ -1441,6 +2404,8 @@ func _spawn_enemy(
 			if role == ENEMY_ROLE_RANGED
 			else "MeleeRedCrystalSlime_%02d"
 		) % (_enemies.size() + 1)
+	if archetype != ENEMY_ARCHETYPE_STANDARD:
+		enemy.name = "%s_%s" % [_get_enemy_archetype_node_prefix(archetype), enemy.name]
 	enemy.position = spawn_position
 	var combat_profile: Dictionary = _get_combat_profile()
 	var behavior_profile: Dictionary = (
@@ -1463,8 +2428,16 @@ func _spawn_enemy(
 		family,
 		_get_difficulty_speed_multiplier(),
 		_get_difficulty_aggression_multiplier(),
-		behavior_profile
+		behavior_profile,
+		archetype
 	)
+	if (
+		_current_objective == RoomObjective.ELITE_HUNT
+		and rank == ENEMY_RANK_ELITE
+		and not is_instance_valid(_hunt_target)
+	):
+		_hunt_target = enemy
+		enemy.name = "HuntCaptain_%s" % enemy.name
 	enemy.set_target(player)
 	enemy.defeated.connect(_on_enemy_defeated.bind(enemy))
 	enemy.projectile_requested.connect(_on_enemy_projectile_requested.bind(enemy))
@@ -1603,6 +2576,11 @@ func _on_enemy_defeated(enemy: RogueEnemy) -> void:
 	_spawn_defeat_vfx(enemy.global_position, enemy)
 	_gold += enemy.get_gold_reward()
 	_run_shards += enemy.get_essence_reward()
+	if _current_objective == RoomObjective.ELITE_HUNT and enemy == _hunt_target:
+		_objective_resolved = true
+		_grant_objective_reward()
+		_set_status("HUNT CAPTAIN DEFEATED | clear the remaining escorts")
+		queue_redraw()
 	if enemy.is_boss():
 		if _telemetry != null:
 			_telemetry.record_boss_defeat()
@@ -1680,6 +2658,9 @@ func _on_room_cleared() -> void:
 		or not _enemies.is_empty()
 	):
 		return
+	if _current_objective == RoomObjective.HOLDOUT and not _objective_resolved:
+		_set_status(_get_objective_status_text())
+		return
 	var resolved_risk_ambush: bool = _flow_state.risk_ambush_active
 	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_clear_projectiles()
@@ -1696,18 +2677,67 @@ func _on_room_cleared() -> void:
 		_pending_risk_gold = 0
 		_pending_risk_heal = 0
 		_update_economy_hud()
-	if _current_encounter == EncounterType.CHALLENGE and not _challenge_reward_granted:
-		_challenge_reward_granted = true
-		var challenge_gold: int = 18 + _current_room_index
-		_gold += challenge_gold
-		_run_shards += 2
-		_set_status("挑战完成：额外金币 +%d，星屑 +2" % challenge_gold)
-		_update_economy_hud()
+	if _current_objective == RoomObjective.TIME_TRIAL and not _objective_failed:
+		_grant_objective_reward()
 	player.set_input_enabled(false)
 	if _current_room_index >= _room_sequence.size() - 1:
 		_complete_run()
 	else:
-		_show_upgrade_choice()
+		_begin_room_exit()
+
+
+func _begin_room_exit() -> void:
+	if _current_room_index >= _room_sequence.size() - 1:
+		_complete_run()
+		return
+	if _flow_state.awaiting_exit:
+		return
+	_clear_room_exit_portal()
+	var exit_surface: Rect2 = (
+		platform_rects[0]
+		if not platform_rects.is_empty()
+		else Rect2(900.0, 640.0, 220.0, 48.0)
+	)
+	var best_score: float = 100000.0
+	for surface in platform_rects:
+		var score: float = (
+			absf(surface.get_center().x - 960.0)
+			+ absf(surface.position.y - 590.0) * 0.28
+		)
+		if score < best_score:
+			best_score = score
+			exit_surface = surface
+	var exit_x: float = clampf(exit_surface.get_center().x, 120.0, WORLD_SIZE.x - 120.0)
+	_room_exit_portal = ROOM_EXIT_PORTAL_SCRIPT.new() as RoomExitPortal
+	_room_exit_portal.name = "RoomExitPortal"
+	_room_exit_portal.position = Vector2(exit_x, exit_surface.position.y - 24.0)
+	_room_exit_portal.z_index = 3
+	_room_exit_portal.setup("按任意键 / A 进入" if _using_controller_input else "按任意键进入")
+	add_child(_room_exit_portal)
+	_set_run_phase(RunFlowState.Phase.EXIT_PORTAL)
+	player.set_input_enabled(false)
+	_set_status("战斗结束——月蚀之门已开启，按任意键进入下一房")
+	_update_controls()
+
+
+func _activate_room_exit() -> bool:
+	if not _flow_state.awaiting_exit:
+		return false
+	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
+	player.set_input_enabled(false)
+	if is_instance_valid(_room_exit_portal):
+		_room_exit_portal.play_activation()
+	_set_status("穿过月蚀之门——准备选择强化")
+	var expected_generation: int = _run_generation
+	get_tree().create_timer(0.22).timeout.connect(_finish_room_exit.bind(expected_generation))
+	return true
+
+
+func _finish_room_exit(expected_generation: int) -> void:
+	if expected_generation != _run_generation or _flow_state.phase != RunFlowState.Phase.ROOM_LOADING:
+		return
+	_clear_room_exit_portal()
+	_show_upgrade_choice()
 
 
 func _show_upgrade_choice() -> void:
@@ -1721,6 +2751,7 @@ func _show_upgrade_choice() -> void:
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "房间已清理——选择一项强化"
 	_refresh_choice_overlay_prompts()
+	_play_upgrade_overlay_intro()
 	_ensure_context_focus()
 	_update_controls()
 
@@ -1737,6 +2768,7 @@ func _show_shop() -> void:
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "星尘旅商——购买一项强化"
 	_refresh_choice_overlay_prompts()
+	_play_upgrade_overlay_intro()
 	_ensure_context_focus()
 	_set_status("旅商已抵达——当前拥有 %d 金币" % _gold)
 	_update_controls()
@@ -1770,6 +2802,7 @@ func _show_event_choice() -> void:
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "月蚀奇遇——选择回应"
 	_refresh_choice_overlay_prompts()
+	_play_upgrade_overlay_intro()
 	_ensure_context_focus()
 	_set_status("发现月蚀遗迹——选择一种回应")
 	_update_controls()
@@ -1816,32 +2849,34 @@ func _refresh_choice_overlay_prompts() -> void:
 		var button: Button = _upgrade_buttons[choice_index]
 		var choice: Dictionary = _upgrade_choices[choice_index]
 		var shortcut: String = shortcut_labels[choice_index]
+		var rarity_name: String = String(choice.get("rarity_name", "普通"))
+		var card_name: String = String(choice.get("name", "强化"))
+		var description: String = String(choice.get("description", ""))
+		var footer_text: String = "选择此遗物"
 		button.visible = true
 		if _flow_state.shopping:
 			var cost: int = int(choice.get("cost", 0))
 			button.disabled = _gold < cost
-			button.text = "[%s]  [%s] %s\n\n%s\n\n%d 金币" % [
-				shortcut,
-				String(choice.get("rarity_name", "普通")),
-				String(choice.get("name", "商品")),
-				String(choice.get("description", "")),
-				cost,
-			]
+			footer_text = (
+				"金币不足  ·  需要 %d" % cost
+				if button.disabled
+				else "购买此商品  ·  %d 金币" % cost
+			)
 		elif _flow_state.event_active:
 			button.disabled = false
-			button.text = "[%s]  [事件] %s\n\n%s" % [
-				shortcut,
-				String(choice.get("name", "事件")),
-				String(choice.get("description", "")),
-			]
+			rarity_name = "事件"
+			footer_text = "选择此回应"
 		else:
 			button.disabled = false
-			button.text = "[%s]  [%s] %s\n\n%s" % [
-				shortcut,
-				String(choice.get("rarity_name", "普通")),
-				String(choice.get("name", "强化")),
-				String(choice.get("description", "")),
-			]
+		_set_upgrade_card_content(
+			button,
+			shortcut,
+			rarity_name,
+			card_name,
+			description,
+			footer_text
+		)
+		_style_upgrade_card(button, choice)
 
 
 func _pick_upgrade_choices() -> Array[Dictionary]:
@@ -1875,6 +2910,7 @@ func choose_upgrade(choice_index: int) -> bool:
 	var upgrade_id: StringName = choice.get("id", &"")
 	if not player.apply_run_upgrade(upgrade_id):
 		return false
+	_refresh_build_overview()
 	if _telemetry != null:
 		_telemetry.record_upgrade_choice(upgrade_id, player.get_weapon_id())
 	_last_upgrade_name = String(choice.get("name", "强化"))
@@ -1934,6 +2970,7 @@ func _complete_run() -> void:
 	_refresh_choice_overlay_prompts()
 	for button in _upgrade_buttons:
 		button.visible = false
+	_play_upgrade_overlay_intro()
 	var unlocked_names: String = _bank_run_progress(true)
 	_set_status("胜利——首领已击败，本局星屑已结算%s" % unlocked_names)
 	_update_economy_hud()
@@ -1942,6 +2979,8 @@ func _complete_run() -> void:
 
 
 func _hide_upgrade_overlay() -> void:
+	if _upgrade_tween != null and _upgrade_tween.is_valid():
+		_upgrade_tween.kill()
 	if is_instance_valid(_upgrade_overlay):
 		_upgrade_overlay.visible = false
 	for button in _upgrade_buttons:
@@ -1951,7 +2990,7 @@ func _hide_upgrade_overlay() -> void:
 func _spawn_reward_chest() -> void:
 	_clear_chest()
 	if platform_rects.is_empty():
-		_show_upgrade_choice()
+		_begin_room_exit()
 		return
 	var chest_surface: Rect2 = platform_rects[0]
 	for surface in platform_rects:
@@ -1978,7 +3017,7 @@ func _spawn_reward_chest() -> void:
 func _spawn_risk_chest() -> void:
 	_clear_chest()
 	if platform_rects.is_empty():
-		_show_upgrade_choice()
+		_begin_room_exit()
 		return
 	var chest_surface: Rect2 = platform_rects[0]
 	for surface in platform_rects:
@@ -2032,7 +3071,7 @@ func _on_chest_opened(gold_reward: int, heal_reward: int) -> void:
 	player.set_input_enabled(false)
 	_set_status("宝箱：金币 +%d，生命恢复 %d" % [gold_reward, restored_health])
 	_update_economy_hud()
-	call_deferred(&"_show_upgrade_choice")
+	call_deferred(&"_begin_room_exit")
 
 
 func _spawn_risk_ambush() -> void:
@@ -2070,6 +3109,12 @@ func _clear_chest() -> void:
 	if is_instance_valid(_chest):
 		_chest.queue_free()
 	_chest = null
+
+
+func _clear_room_exit_portal() -> void:
+	if is_instance_valid(_room_exit_portal):
+		_room_exit_portal.queue_free()
+	_room_exit_portal = null
 
 
 func _on_enemy_projectile_requested(
@@ -2165,6 +3210,7 @@ func _on_player_died() -> void:
 	_lives_remaining = maxi(0, _lives_remaining - 1)
 	player.set_input_enabled(false)
 	_clear_chest()
+	_clear_room_exit_portal()
 	_clear_projectiles()
 	_hide_upgrade_overlay()
 	var unlocked_names: String = _bank_run_progress(false)
@@ -2193,6 +3239,7 @@ func _finish_death_sequence(expected_generation: int) -> void:
 		return
 	_set_run_phase(RunFlowState.Phase.IDLE)
 	_clear_chest()
+	_clear_room_exit_portal()
 	_clear_projectiles()
 	_clear_enemies()
 	_clear_platform_colliders()
@@ -2274,6 +3321,7 @@ func _cycle_weapon() -> void:
 			_progression.save_progress()
 		_set_status("切换武器：%s" % player.get_weapon_name())
 		_update_equipment_hud()
+		_refresh_build_overview()
 
 
 func _bank_run_progress(victory: bool) -> String:
@@ -2334,6 +3382,54 @@ func _get_enemy_family_for_spawn(room_index: int, spawn_index: int) -> int:
 	)
 
 
+func _get_enemy_archetype_for_spawn(
+	room_index: int,
+	spawn_index: int,
+	role: int,
+	rank: int,
+	family: int
+) -> int:
+	if rank != ENEMY_RANK_NORMAL or room_index < GOBLIN_CHAPTER_START:
+		return ENEMY_ARCHETYPE_STANDARD
+	var pattern: int = posmod(room_index * 17 + spawn_index * 11 + role * 5 + family * 3, 9)
+	if (
+		room_index >= FINAL_CHAPTER_START
+		and role == ENEMY_ROLE_MELEE
+		and pattern <= 2
+	):
+		return ENEMY_ARCHETYPE_AMBUSHER
+	if (
+		room_index >= MIXED_CHAPTER_START
+		and role == ENEMY_ROLE_RANGED
+		and family == ENEMY_FAMILY_GOBLIN
+		and pattern <= 3
+	):
+		return ENEMY_ARCHETYPE_CASTER
+	if (
+		room_index >= MIXED_CHAPTER_START
+		and role == ENEMY_ROLE_RANGED
+		and family == ENEMY_FAMILY_SLIME
+		and pattern <= 3
+	):
+		return ENEMY_ARCHETYPE_FLYER
+	if family == ENEMY_FAMILY_GOBLIN and role == ENEMY_ROLE_MELEE and pattern <= 3:
+		return ENEMY_ARCHETYPE_SHIELD_GUARD
+	return ENEMY_ARCHETYPE_STANDARD
+
+
+func _get_enemy_archetype_node_prefix(archetype: int) -> String:
+	match archetype:
+		ENEMY_ARCHETYPE_SHIELD_GUARD:
+			return "ShieldGuard"
+		ENEMY_ARCHETYPE_FLYER:
+			return "Flyer"
+		ENEMY_ARCHETYPE_CASTER:
+			return "Caster"
+		ENEMY_ARCHETYPE_AMBUSHER:
+			return "Ambusher"
+	return "Standard"
+
+
 func _get_room_reinforcement_count(room_index: int) -> int:
 	var profile: Dictionary = COMBAT_BUDGET_SCRIPT.create_profile(
 		_selected_difficulty,
@@ -2369,6 +3465,8 @@ func _get_encounter_name(encounter: int) -> String:
 			return "挑战房"
 		EncounterType.RISK_CHEST:
 			return "风险宝箱"
+		EncounterType.HOLDOUT:
+			return "Holdout"
 		_:
 			return "战斗房"
 
@@ -2438,8 +3536,64 @@ func get_current_encounter_name() -> String:
 	return _get_encounter_name(_current_encounter)
 
 
+func get_current_objective_name() -> String:
+	match _current_objective:
+		RoomObjective.TIME_TRIAL:
+			return "time_trial"
+		RoomObjective.HOLDOUT:
+			return "holdout"
+		RoomObjective.ELITE_HUNT:
+			return "elite_hunt"
+		RoomObjective.BRANCH_REWARD:
+			return "branch_reward"
+	return "clear_all"
+
+
+func get_room_objective_snapshot() -> Dictionary:
+	return {
+		"objective": get_current_objective_name(),
+		"timer_remaining": _objective_timer_remaining,
+		"hold_progress": _objective_hold_progress,
+		"hold_duration": _objective_hold_duration,
+		"resolved": _objective_resolved,
+		"failed": _objective_failed,
+		"reward_granted": _objective_reward_granted,
+		"trap_count": _objective_trap_zones.size(),
+		"has_hunt_target": is_instance_valid(_hunt_target),
+	}
+
+
+func complete_room_objective_for_test() -> bool:
+	if _current_objective != RoomObjective.HOLDOUT:
+		return true
+	if _objective_hold_duration <= 0.0:
+		return false
+	_objective_hold_progress = _objective_hold_duration
+	_objective_resolved = true
+	_grant_objective_reward()
+	if _enemies.is_empty():
+		call_deferred(&"_on_room_cleared")
+	return true
+
+
 func get_current_combat_profile() -> Dictionary:
 	return _get_combat_profile().duplicate(true)
+
+
+func open_build_overview_for_test() -> bool:
+	_open_build_overview(false)
+	return is_instance_valid(_build_overview) and _build_overview.visible
+
+
+func close_build_overview_for_test() -> bool:
+	_close_build_overview()
+	return not is_instance_valid(_build_overview) or not _build_overview.visible
+
+
+func get_build_overview_snapshot() -> Dictionary:
+	if not is_instance_valid(_build_overview):
+		return {}
+	return _build_overview.get_snapshot()
 
 
 func get_progression_snapshot() -> Dictionary:
@@ -2519,3 +3673,60 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color(0.015, 0.04, 0.10, 0.12))
 	for rect in platform_rects:
 		_draw_gothic_platform(rect, room_accent)
+	_draw_room_objective_overlay()
+
+
+func _draw_room_objective_overlay() -> void:
+	if not _flow_state.run_active:
+		return
+	if _current_objective in [RoomObjective.TIME_TRIAL, RoomObjective.HOLDOUT]:
+		for trap_zone: Rect2 in _objective_trap_zones:
+			var trap_color: Color = (
+				Color(1.0, 0.30, 0.18, 0.46)
+				if _objective_trap_flash_remaining > 0.0
+				else Color(0.70, 0.16, 0.76, 0.20)
+			)
+			draw_rect(trap_zone, Color(trap_color, 0.12), true)
+			draw_rect(trap_zone, trap_color, false, 1.5)
+			var trap_center: Vector2 = trap_zone.get_center()
+			draw_line(
+				trap_center + Vector2(-22.0, 5.0),
+				trap_center + Vector2(22.0, 5.0),
+				trap_color,
+				2.0
+			)
+	if _current_objective == RoomObjective.HOLDOUT and _objective_radius > 0.0:
+		var hold_ratio: float = (
+			0.0
+			if _objective_hold_duration <= 0.0
+			else _objective_hold_progress / _objective_hold_duration
+		)
+		var beacon_color: Color = Color(0.34, 0.92, 1.0, 0.72)
+		draw_circle(
+			_objective_anchor,
+			_objective_radius,
+			Color(beacon_color, 0.07 + hold_ratio * 0.08)
+		)
+		draw_arc(
+			_objective_anchor,
+			_objective_radius,
+			-PI * 0.5,
+			-PI * 0.5 + TAU * hold_ratio,
+			36,
+			beacon_color,
+			3.0
+		)
+		draw_circle(_objective_anchor, 9.0 + sin(Time.get_ticks_msec() * 0.008) * 1.5, beacon_color)
+	if _current_objective == RoomObjective.ELITE_HUNT and is_instance_valid(_hunt_target):
+		var target_marker: Vector2 = to_local(_hunt_target.global_position) + Vector2(0.0, -74.0)
+		var marker_color: Color = Color(1.0, 0.74, 0.28, 0.88)
+		draw_colored_polygon(
+			PackedVector2Array([
+				target_marker + Vector2(0.0, -10.0),
+				target_marker + Vector2(10.0, 0.0),
+				target_marker + Vector2(0.0, 10.0),
+				target_marker + Vector2(-10.0, 0.0),
+			]),
+			marker_color
+		)
+		draw_arc(target_marker, 15.0, 0.0, TAU, 18, marker_color, 1.8)

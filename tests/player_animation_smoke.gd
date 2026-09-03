@@ -83,6 +83,22 @@ func _run_test() -> void:
 	if player.get_node_or_null("RunBlendSprite") != null:
 		_fail("Run animation still contains the double-exposure layer that caused white flashing")
 		return
+	player.set("_facing", -1.0)
+	player.call(&"_begin_ground_turn", 1.0)
+	var turn_duration: float = float(player.get("_turn_remaining"))
+	player.call(&"_reset_sprite_pose")
+	player.call(&"_animate_turn")
+	if hero_sprite.flip_h or not hero_sprite.texture.resource_path.ends_with("hero_run_0.png"):
+		_fail("Turn anticipation did not retain the planted outgoing-facing pose")
+		return
+	player.set("_turn_remaining", turn_duration * 0.40)
+	player.call(&"_reset_sprite_pose")
+	player.call(&"_animate_turn")
+	if not hero_sprite.flip_h or not hero_sprite.texture.resource_path.ends_with("hero_run_4.png"):
+		_fail("Turn completion did not switch to the planted incoming-facing pose")
+		return
+	player.set("_turn_remaining", 0.0)
+	player.set("_facing", 1.0)
 
 	player.set("_airborne_time", 0.03)
 	player.call(&"_reset_sprite_pose")
@@ -130,6 +146,25 @@ func _run_test() -> void:
 	if dash_texture_paths.size() != 3:
 		_fail("Dash did not progress through anticipation, travel and exit poses")
 		return
+	player.set("_run_cycle", 6.35)
+	player.set("_dash_remaining", dash_duration)
+	player.call(&"_finish_dash")
+	var dash_exit_duration: float = float(player.get("_dash_exit_blend_remaining"))
+	if dash_exit_duration <= 0.0:
+		_fail("Dash release did not enter the planted recovery window")
+		return
+	if int(player.call(&"_resolve_visual_state")) != RoguePlayer.VisualState.DASH_RECOVERY:
+		_fail("Dash release did not expose the recovery visual state")
+		return
+	if absf(float(player.get("_run_cycle"))) > 0.001 or not bool(player.get("_run_has_settled")):
+		_fail("Dash release resumed from an arbitrary running frame")
+		return
+	player.call(&"_reset_sprite_pose")
+	player.call(&"_animate_dash_recovery")
+	if not hero_sprite.texture.resource_path.ends_with("hero_run_0.png"):
+		_fail("Dash release did not use the planted run pose")
+		return
+	player.set("_dash_exit_blend_remaining", 0.0)
 
 	player.call(&"_start_attack")
 	var seen_windup: bool = false
@@ -149,6 +184,36 @@ func _run_test() -> void:
 	if _attack_hit_count != 1:
 		_fail("Attack hit signal count was %d instead of 1" % _attack_hit_count)
 		return
+	player.set("_run_cycle", 5.35)
+	player.set("_run_has_settled", false)
+	player.set("_attack_elapsed", float(player.get("attack_duration")))
+	player.call(&"_finish_attack")
+	var attack_exit_duration: float = float(player.get("_attack_exit_blend_remaining"))
+	if attack_exit_duration <= 0.0:
+		_fail("Attack release did not enter the planted recovery window")
+		return
+	if int(player.call(&"_resolve_visual_state")) != RoguePlayer.VisualState.ATTACK_RECOVERY:
+		_fail("Attack release did not expose the recovery visual state")
+		return
+	if absf(float(player.get("_run_cycle"))) > 0.001 or not bool(player.get("_run_has_settled")):
+		_fail("Attack release resumed from an arbitrary running frame")
+		return
+	player.call(&"_reset_sprite_pose")
+	player.call(&"_animate_attack_recovery")
+	var attack_release_position: Vector2 = hero_sprite.position
+	var attack_release_scale: Vector2 = hero_sprite.scale
+	var attack_release_rotation: float = hero_sprite.rotation
+	player.set("_attack_exit_blend_remaining", attack_exit_duration * 0.5)
+	player.call(&"_reset_sprite_pose")
+	player.call(&"_animate_attack_recovery")
+	if (
+		hero_sprite.position.distance_to(attack_release_position) > 0.01
+		or hero_sprite.scale.distance_to(attack_release_scale) > 0.001
+		or absf(hero_sprite.rotation - attack_release_rotation) > 0.001
+	):
+		_fail("Attack release moved away from its planted anchor")
+		return
+	player.set("_attack_exit_blend_remaining", 0.0)
 
 	var skill_duration: float = float(player.get("_skill_duration"))
 	var skill_progress_samples: Array[float] = [0.08, 0.22, 0.40, 0.50, 0.59, 0.70, 0.82, 0.94]

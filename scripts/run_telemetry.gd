@@ -4,9 +4,11 @@ extends RefCounted
 class_name RunTelemetry
 
 const SAFE_JSON_STORE_SCRIPT := preload("res://scripts/safe_json_store.gd")
+const BALANCE_REVIEW_SCRIPT := preload("res://scripts/balance_review.gd")
 const SAVE_VERSION := 1
 const DEFAULT_SAVE_PATH := "user://run_telemetry.json"
 const MAX_RUN_HISTORY := 60
+const BALANCE_VERSION := "0.5.0-p6-content"
 
 var _save_path: String = DEFAULT_SAVE_PATH
 var _persistence_enabled: bool = true
@@ -325,6 +327,10 @@ func get_summary() -> Dictionary:
 		"upgrade_choice_rates": upgrade_rates,
 		"weapon_clear_rates": weapon_rates,
 	}
+
+
+func get_balance_review() -> Dictionary:
+	return BALANCE_REVIEW_SCRIPT.build(_history, BALANCE_VERSION)
 
 
 func is_run_active() -> bool:

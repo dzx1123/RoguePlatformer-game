@@ -48,6 +48,9 @@ Xbox 手柄默认使用：左摇杆/十字键移动与菜单导航，A 跳跃/�
 
 完整人工验收项目见 `docs/WINDOWS_RELEASE_CHECKLIST.md`。
 
+当前测试包版本、已验证内容、仍需实机确认的项目和反馈模板见
+`docs/TEST_BUILD_NOTES.md`。
+
 ## 项目结构
 
 - `scenes/`：Godot 场景

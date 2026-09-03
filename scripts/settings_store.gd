@@ -5,7 +5,7 @@ class_name RogueSettingsStore
 
 const SAFE_JSON_STORE_SCRIPT := preload("res://scripts/safe_json_store.gd")
 const SAVE_PATH := "user://rogue_settings.json"
-const SAVE_VERSION := 4
+const SAVE_VERSION := 5
 const RESOLUTION_OPTIONS: Array[Vector2i] = [
 	Vector2i(1280, 840),
 	Vector2i(1600, 900),
@@ -25,6 +25,7 @@ const DEFAULT_BINDINGS := {
 	"cycle_weapon": [KEY_Q],
 	"restart": [KEY_R],
 	"pause": [KEY_ESCAPE],
+	"build_overview": [KEY_TAB],
 }
 const CONTROLLER_BINDING_NAMES := {
 	"move_left": "LS← / D←",
@@ -39,6 +40,7 @@ const CONTROLLER_BINDING_NAMES := {
 	"cycle_weapon": "LB",
 	"restart": "View",
 	"pause": "Menu",
+	"build_overview": "RS",
 }
 const CHOICE_KEY_BINDINGS := {
 	"choice_1": [KEY_1, KEY_KP_1],
@@ -154,6 +156,7 @@ func _apply_controller_defaults() -> void:
 	_add_joy_button(&"cycle_weapon", JOY_BUTTON_LEFT_SHOULDER)
 	_add_joy_button(&"restart", JOY_BUTTON_BACK)
 	_add_joy_button(&"pause", JOY_BUTTON_START)
+	_add_joy_button(&"build_overview", JOY_BUTTON_RIGHT_STICK)
 
 	# Context actions stay outside DEFAULT_BINDINGS: they are fixed menu controls,
 	# not entries in the keyboard-rebinding grid.

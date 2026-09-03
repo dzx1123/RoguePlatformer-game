@@ -12,6 +12,7 @@ func _run_test() -> void:
 	var main: Node2D = main_scene.instantiate() as Node2D
 	main.set("save_enabled", false)
 	root.add_child(main)
+	_add_safety_floor(main)
 	var player: RoguePlayer = main.get_node("Player") as RoguePlayer
 	player.attack_hit.connect(_on_attack_hit)
 	for _settle_frame in range(20):
@@ -159,6 +160,20 @@ func _send_attack_key(pressed: bool, is_echo: bool) -> void:
 	key_event.pressed = pressed
 	key_event.echo = is_echo
 	Input.parse_input_event(key_event)
+
+
+func _add_safety_floor(main: Node2D) -> void:
+	var floor := StaticBody2D.new()
+	floor.name = "AttackSpamSafetyFloor"
+	floor.position = Vector2(640.0, 660.0)
+	floor.collision_layer = 1
+	floor.collision_mask = 0
+	var shape := CollisionShape2D.new()
+	var rectangle := RectangleShape2D.new()
+	rectangle.size = Vector2(1440.0, 40.0)
+	shape.shape = rectangle
+	floor.add_child(shape)
+	main.add_child(floor)
 
 
 func _fail(message: String) -> void:

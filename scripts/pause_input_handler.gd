@@ -5,6 +5,8 @@ signal key_pressed(event: InputEventKey)
 signal input_device_changed(using_controller: bool)
 signal controller_pause_pressed
 signal controller_cancel_pressed
+signal controller_overview_pressed
+signal controller_action_pressed(event: InputEventJoypadButton)
 
 var _using_controller: bool = false
 
@@ -22,6 +24,10 @@ func _input(event: InputEvent) -> void:
 			controller_pause_pressed.emit()
 		elif event.is_action_pressed(&"ui_cancel"):
 			controller_cancel_pressed.emit()
+		elif event.is_action_pressed(&"build_overview"):
+			controller_overview_pressed.emit()
+		else:
+			controller_action_pressed.emit(event)
 	elif event is InputEventJoypadMotion and absf(event.axis_value) >= 0.55:
 		_set_using_controller(true)
 

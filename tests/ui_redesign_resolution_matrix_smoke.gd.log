@@ -1,0 +1,7 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+ERROR: Bottom HUD no longer owns the reserved 120-pixel dock
+   at: push_error (core/variant/variant_utility.cpp:1023)
+   GDScript backtrace (most recent call first):
+       [0] _fail (res://tests/resolution_matrix_smoke.gd:99)
+       [1] _run_test (res://tests/resolution_matrix_smoke.gd:49)

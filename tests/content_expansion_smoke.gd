@@ -228,6 +228,10 @@ func _run_test() -> void:
 			if mixed_boss_family != expected_boss_family:
 				_fail("Mixed boss room %d used the wrong chapter leader" % room_number)
 				return
+		if String(main.call(&"get_current_objective_name")) == "holdout":
+			if not bool(main.call(&"complete_room_objective_for_test")):
+				_fail("Holdout room %d could not resolve its beacon objective" % room_number)
+				return
 		_defeat_current_room(main)
 		await _wait_physics_frames(36)
 		if bool(main.call(&"is_awaiting_chest")):

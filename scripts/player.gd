@@ -17,10 +17,13 @@ enum VisualState {
 	JUMP_RISE,
 	JUMP_FALL,
 	LAND,
+	TURN,
 	ATTACK,
+	ATTACK_RECOVERY,
 	SKILL,
 	SKILL_RECOVERY,
 	DASH,
+	DASH_RECOVERY,
 	HURT,
 	DEAD,
 }
@@ -64,8 +67,10 @@ const RUN_FRAME_COUNT := 8.0
 const RUN_PIXELS_PER_FRAME := 19.0
 const RUN_SETTLE_FRAMES_PER_SECOND := 20.0
 const LANDING_SQUASH_DURATION := 0.20
+const TURN_BLEND_DURATION := 0.10
 const ATTACK_HIT_PROGRESS := 0.38
 const ATTACK_FAILSAFE_MARGIN := 0.08
+const ATTACK_EXIT_BLEND_DURATION := 0.085
 const SKILL_HIT_PROGRESS := 0.70
 const SKILL_FAILSAFE_MARGIN := 0.10
 const SKILL_EXIT_BLEND_DURATION := 0.11
@@ -73,6 +78,7 @@ const SKILL_POSE_ECHO_DURATION := 0.075
 const DEATH_DURATION := 0.85
 const RESPAWN_INVULNERABILITY := 1.0
 const DASH_COOLDOWN := 2.0
+const DASH_EXIT_BLEND_DURATION := 0.065
 const DROP_THROUGH_DURATION := 0.20
 
 @export_category("Movement")
@@ -105,9 +111,11 @@ var _facing: float = 1.0
 var _dash_remaining: float = 0.0
 var _dash_cooldown_remaining: float = 0.0
 var _dash_echo_remaining: float = 0.0
+var _dash_exit_blend_remaining: float = 0.0
 var _attack_remaining: float = 0.0
 var _attack_cooldown_remaining: float = 0.0
 var _attack_elapsed: float = 0.0
+var _attack_exit_blend_remaining: float = 0.0
 var _attack_button_latched: bool = false
 var _attack_hit_emitted: bool = false
 var _attack_type: int = AttackType.FORWARD
@@ -130,6 +138,8 @@ var _run_settle_target: float = 0.0
 var _run_is_settling: bool = false
 var _run_has_settled: bool = true
 var _movement_blend: float = 0.0
+var _turn_remaining: float = 0.0
+var _turn_from_facing: float = 1.0
 var _landing_squash_remaining: float = 0.0
 var _airborne_time: float = 0.0
 var _hurt_remaining: float = 0.0
@@ -218,7 +228,10 @@ func _physics_process(delta: float) -> void:
 				or signf(velocity.x) == requested_facing
 			)
 		):
+			var previous_facing: float = _facing
 			_facing = requested_facing
+			if was_on_floor and not is_equal_approx(previous_facing, _facing):
+				_begin_ground_turn(previous_facing)
 
 	if (
 		_input_enabled
@@ -317,7 +330,10 @@ func _physics_process(delta: float) -> void:
 		and speed_ratio > 0.04
 		and _attack_remaining <= 0.0
 		and _skill_remaining <= 0.0
+		and _dash_remaining <= 0.0
 		and _skill_exit_blend_remaining <= 0.0
+		and _attack_exit_blend_remaining <= 0.0
+		and _dash_exit_blend_remaining <= 0.0
 	):
 		_run_cycle = fposmod(
 			_run_cycle + delta * absf(velocity.x) / RUN_PIXELS_PER_FRAME,
@@ -342,9 +358,11 @@ func respawn() -> void:
 	_dash_remaining = 0.0
 	_dash_cooldown_remaining = 0.0
 	_dash_echo_remaining = 0.0
+	_dash_exit_blend_remaining = 0.0
 	_attack_remaining = 0.0
 	_attack_cooldown_remaining = 0.0
 	_attack_elapsed = 0.0
+	_attack_exit_blend_remaining = 0.0
 	_attack_button_latched = false
 	_attack_hit_emitted = false
 	_attack_type = AttackType.FORWARD
@@ -364,6 +382,8 @@ func respawn() -> void:
 	_run_is_settling = false
 	_run_has_settled = true
 	_movement_blend = 0.0
+	_turn_remaining = 0.0
+	_turn_from_facing = _facing
 	_landing_squash_remaining = 0.0
 	_airborne_time = 0.0
 	_hurt_remaining = 0.0
@@ -671,7 +691,27 @@ func get_total_run_upgrade_count() -> int:
 	return total
 
 
+func _begin_ground_turn(previous_facing: float) -> void:
+	_turn_from_facing = previous_facing
+	_turn_remaining = TURN_BLEND_DURATION
+
+
+func _clear_turn_transition() -> void:
+	_turn_remaining = 0.0
+	_turn_from_facing = _facing
+
+
+func _get_display_facing() -> float:
+	if _turn_remaining > TURN_BLEND_DURATION * 0.5:
+		return _turn_from_facing
+	return _facing
+
+
 func _jump() -> void:
+	_clear_turn_transition()
+	_attack_exit_blend_remaining = 0.0
+	_dash_exit_blend_remaining = 0.0
+	_skill_exit_blend_remaining = 0.0
 	velocity.y = jump_velocity
 	_landing_squash_remaining = 0.0
 	_airborne_time = 0.0
@@ -711,8 +751,25 @@ func _start_dash() -> void:
 	_dash_remaining = dash_duration
 	_dash_cooldown_remaining = maxf(0.01, dash_cooldown_duration)
 	_dash_echo_remaining = 0.0
+	_dash_exit_blend_remaining = 0.0
+	_attack_exit_blend_remaining = 0.0
+	_skill_exit_blend_remaining = 0.0
+	_clear_turn_transition()
 	velocity.y = 0.0
 	action_started.emit(&"dash")
+
+
+func _finish_dash() -> void:
+	_dash_remaining = 0.0
+	if _is_dead or _hurt_remaining > 0.0:
+		return
+	# Dash uses the same planted-foot handoff as the other committed actions.
+	# It prevents its travel pose from snapping into a mid-stride run frame.
+	_dash_exit_blend_remaining = DASH_EXIT_BLEND_DURATION
+	_run_cycle = 0.0
+	_run_settle_target = 0.0
+	_run_is_settling = false
+	_run_has_settled = true
 
 
 func _start_attack(attack_type: int = AttackType.FORWARD) -> void:
@@ -729,6 +786,10 @@ func _start_attack(attack_type: int = AttackType.FORWARD) -> void:
 	_attack_remaining = maxf(attack_duration, 0.01)
 	_attack_cooldown_remaining = attack_cooldown_duration
 	_attack_elapsed = 0.0
+	_attack_exit_blend_remaining = 0.0
+	_dash_exit_blend_remaining = 0.0
+	_skill_exit_blend_remaining = 0.0
+	_clear_turn_transition()
 	_attack_hit_emitted = false
 	_attack_type = clampi(attack_type, AttackType.FORWARD, AttackType.DOWNWARD)
 	_downslash_bounce_applied = false
@@ -755,6 +816,9 @@ func _start_skill() -> void:
 	):
 		return
 	_skill_exit_blend_remaining = 0.0
+	_attack_exit_blend_remaining = 0.0
+	_dash_exit_blend_remaining = 0.0
+	_clear_turn_transition()
 	_skill_pose_echo_remaining = 0.0
 	skill_pose_echo.visible = false
 	_skill_remaining = maxf(_skill_duration, 0.01)
@@ -786,11 +850,25 @@ func _finish_skill() -> void:
 
 
 func _finish_attack() -> void:
+	var should_blend_out: bool = (
+		_attack_elapsed > 0.0
+		and not _is_dead
+		and _hurt_remaining <= 0.0
+	)
 	_attack_remaining = 0.0
 	_attack_elapsed = 0.0
 	_attack_hit_emitted = false
 	_attack_type = AttackType.FORWARD
 	_downslash_bounce_applied = false
+	if should_blend_out:
+		# Resume from the same planted-foot anchor used by skill recovery. Without
+		# this hold, a moving attack jumps back to the arbitrary run frame captured
+		# when the attack started, which reads as a one-frame character twitch.
+		_attack_exit_blend_remaining = ATTACK_EXIT_BLEND_DURATION
+		_run_cycle = 0.0
+		_run_settle_target = 0.0
+		_run_is_settling = false
+		_run_has_settled = true
 
 
 func receive_enemy_attack(
@@ -1003,9 +1081,15 @@ func _update_timers(delta: float) -> void:
 	_drop_through_remaining = maxf(0.0, _drop_through_remaining - delta)
 	if was_dropping and _drop_through_remaining <= 0.0:
 		set_collision_mask_value(1, true)
+	var was_dashing: bool = _dash_remaining > 0.0
 	_dash_remaining = maxf(0.0, _dash_remaining - delta)
+	if was_dashing and _dash_remaining <= 0.0:
+		_finish_dash()
 	_dash_cooldown_remaining = maxf(0.0, _dash_cooldown_remaining - delta)
+	_dash_exit_blend_remaining = maxf(0.0, _dash_exit_blend_remaining - delta)
 	_attack_cooldown_remaining = maxf(0.0, _attack_cooldown_remaining - delta)
+	_attack_exit_blend_remaining = maxf(0.0, _attack_exit_blend_remaining - delta)
+	_turn_remaining = maxf(0.0, _turn_remaining - delta)
 	_skill_cooldown_remaining = maxf(0.0, _skill_cooldown_remaining - delta)
 	_skill_exit_blend_remaining = maxf(0.0, _skill_exit_blend_remaining - delta)
 	_hurt_remaining = maxf(0.0, _hurt_remaining - delta)
@@ -1102,12 +1186,18 @@ func _resolve_visual_state() -> int:
 		return VisualState.ATTACK
 	if _dash_remaining > 0.0:
 		return VisualState.DASH
+	if _dash_exit_blend_remaining > 0.0:
+		return VisualState.DASH_RECOVERY
+	if _attack_exit_blend_remaining > 0.0:
+		return VisualState.ATTACK_RECOVERY
 	if _skill_exit_blend_remaining > 0.0:
 		return VisualState.SKILL_RECOVERY
 	if not is_on_floor():
 		return VisualState.JUMP_RISE if velocity.y < 0.0 else VisualState.JUMP_FALL
 	if _landing_squash_remaining > 0.0:
 		return VisualState.LAND
+	if _turn_remaining > 0.0:
+		return VisualState.TURN
 	if _movement_blend > 0.04:
 		return VisualState.RUN
 	return VisualState.IDLE
@@ -1140,14 +1230,20 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 			_animate_jump_fall()
 		VisualState.LAND:
 			_animate_land()
+		VisualState.TURN:
+			_animate_turn()
 		VisualState.ATTACK:
 			_animate_attack()
+		VisualState.ATTACK_RECOVERY:
+			_animate_attack_recovery()
 		VisualState.SKILL:
 			_animate_skill()
 		VisualState.SKILL_RECOVERY:
 			_animate_skill_recovery()
 		VisualState.DASH:
 			_animate_dash()
+		VisualState.DASH_RECOVERY:
+			_animate_dash_recovery()
 		VisualState.HURT:
 			_animate_hurt()
 		VisualState.DEAD:
@@ -1165,10 +1261,13 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 			var minimum_transition_blend: float = (
 				0.56
 				if _visual_state in [
+					VisualState.TURN,
 					VisualState.ATTACK,
+					VisualState.ATTACK_RECOVERY,
 					VisualState.SKILL,
 					VisualState.SKILL_RECOVERY,
 					VisualState.DASH,
+					VisualState.DASH_RECOVERY,
 				]
 				else 0.40
 			)
@@ -1222,9 +1321,9 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 
 func _get_pose_smoothing_rate(visual_state: int) -> float:
 	match visual_state:
-		VisualState.ATTACK, VisualState.SKILL, VisualState.SKILL_RECOVERY, VisualState.DASH:
+		VisualState.ATTACK, VisualState.ATTACK_RECOVERY, VisualState.SKILL, VisualState.SKILL_RECOVERY, VisualState.DASH, VisualState.DASH_RECOVERY:
 			return 36.0
-		VisualState.LAND, VisualState.HURT:
+		VisualState.LAND, VisualState.TURN, VisualState.HURT:
 			return 32.0
 		VisualState.RUN:
 			return 25.0
@@ -1240,7 +1339,7 @@ func _reset_sprite_pose() -> void:
 	hero_sprite.position = Vector2(0.0, -15.0)
 	hero_sprite.scale = Vector2(HERO_SCALE, HERO_SCALE)
 	hero_sprite.rotation = 0.0
-	hero_sprite.flip_h = _facing < 0.0
+	hero_sprite.flip_h = _get_display_facing() < 0.0
 
 
 func _set_texture(texture: Texture2D) -> void:
@@ -1296,6 +1395,27 @@ func _animate_run() -> void:
 	hero_sprite.scale = Vector2(
 		HERO_SCALE * (1.0 + contact_weight * 0.006 * speed_ratio),
 		HERO_SCALE * (1.0 - contact_weight * 0.005 * speed_ratio)
+	)
+
+
+func _animate_turn() -> void:
+	var turn_progress: float = clampf(
+		1.0 - _turn_remaining / maxf(TURN_BLEND_DURATION, 0.001),
+		0.0,
+		1.0
+	)
+	var braking_weight: float = sin(turn_progress * PI)
+	# Frames 0 and 4 are the planted poses used for walk-stop settling, so a
+	# reversal keeps the feet grounded while the torso shifts through the turn.
+	_set_texture(HERO_RUN_0 if turn_progress < 0.5 else HERO_RUN_4)
+	hero_sprite.position += Vector2(
+		-_turn_from_facing * braking_weight * 1.4,
+		braking_weight * 0.35
+	)
+	hero_sprite.rotation = -_turn_from_facing * braking_weight * 0.038
+	hero_sprite.scale = Vector2(
+		HERO_SCALE * (1.0 + braking_weight * 0.012),
+		HERO_SCALE * (1.0 - braking_weight * 0.010)
 	)
 
 
@@ -1366,6 +1486,12 @@ func _animate_dash() -> void:
 		HERO_SCALE * (1.10 + dash_punch * 0.08),
 		HERO_SCALE * (0.90 - dash_punch * 0.05)
 	)
+
+
+func _animate_dash_recovery() -> void:
+	# Rejoin locomotion on a planted pose instead of displaying a single frozen
+	# travel frame between the dash and the next run cycle.
+	_set_texture(HERO_RUN_0)
 
 
 func _animate_hurt() -> void:
@@ -1439,6 +1565,12 @@ func _animate_attack() -> void:
 			HERO_SCALE * lerpf(1.025, 1.0, recovery_time),
 			HERO_SCALE * lerpf(0.98, 1.0, recovery_time)
 		)
+
+
+func _animate_attack_recovery() -> void:
+	# Keep a stable recovery pose for a few display frames, then resume running
+	# from a known planted-foot pose. This is visual-only and never delays input.
+	_set_texture(HERO_RECOVERY)
 
 
 func _animate_up_attack(attack_progress: float) -> void:

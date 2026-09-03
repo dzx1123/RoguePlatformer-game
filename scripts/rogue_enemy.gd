@@ -42,6 +42,14 @@ enum EnemyFamily {
 	GOBLIN,
 }
 
+enum EnemyArchetype {
+	STANDARD,
+	SHIELD_GUARD,
+	FLYER,
+	CASTER,
+	AMBUSHER,
+}
+
 enum ProjectileStyle {
 	CRYSTAL_ORB,
 	ARROW,
@@ -51,6 +59,11 @@ enum BossAttackPattern {
 	LUNGE,
 	VOLLEY,
 	SLAM,
+}
+
+enum BossIdentity {
+	CRYSTAL_KING,
+	WAR_CHIEF,
 }
 
 const GRAVITY := 1800.0
@@ -95,6 +108,7 @@ const SLIME_RUN_FRAME_COUNT := 4
 const SLIME_RUN_FPS := 10.0
 const LOCOMOTION_SETTLE_FPS := 18.0
 const LANDING_MOTION_DURATION := 0.16
+const TURN_BLEND_DURATION := 0.085
 # Generated run sheets use different internal frame registration. These measured
 # anchors keep the head centered and the feet on one floor line before adding a
 # small controlled runtime bounce.
@@ -111,13 +125,18 @@ const BOSS_LUNGE_SPEED := 560.0
 const BOSS_LUNGE_REACH_X := 225.0
 const BOSS_SLAM_REACH_X := 255.0
 const BOSS_SLAM_REACH_Y := 135.0
+const FLYER_HOVER_ACCELERATION := 720.0
+const FLYER_MAX_VERTICAL_SPEED := 190.0
+const FLYER_HOVER_OFFSET_Y := 58.0
 
 var _variant: int = 0
 var _role: int = EnemyRole.MELEE
 var _rank: int = EnemyRank.NORMAL
 var _family: int = EnemyFamily.SLIME
+var _archetype: int = EnemyArchetype.STANDARD
 var _phase: float = 0.0
 var _elapsed: float = 0.0
+var _flight_anchor_y: float = 0.0
 var _patrol_left: float = 0.0
 var _patrol_right: float = 0.0
 var _patrol_direction: float = 1.0
@@ -159,6 +178,8 @@ var _locomotion_blend: float = 0.0
 var _locomotion_active: bool = false
 var _locomotion_is_settling: bool = false
 var _locomotion_settle_target: float = 0.0
+var _turn_remaining: float = 0.0
+var _turn_from_facing: float = 1.0
 var _landing_motion_remaining: float = 0.0
 var _sprite_pose_initialized: bool = false
 var _enemy_sprite: Sprite2D
@@ -166,7 +187,7 @@ var _enemy_sprite: Sprite2D
 
 func _ready() -> void:
 	collision_layer = 4
-	collision_mask = 1
+	collision_mask = 0 if is_flying_enemy() else 1
 
 	var body_collision := CollisionShape2D.new()
 	var body_shape := CapsuleShape2D.new()
@@ -216,31 +237,45 @@ func setup(
 	family: int = EnemyFamily.SLIME,
 	difficulty_speed_multiplier: float = 1.0,
 	difficulty_aggression_multiplier: float = 1.0,
-	behavior_profile: Dictionary = {}
+	behavior_profile: Dictionary = {},
+	archetype: int = EnemyArchetype.STANDARD
 ) -> void:
 	_role = clampi(role, EnemyRole.MELEE, EnemyRole.RANGED)
 	_rank = clampi(rank, EnemyRank.NORMAL, EnemyRank.BOSS)
 	_family = clampi(family, EnemyFamily.SLIME, EnemyFamily.GOBLIN)
+	_archetype = clampi(archetype, EnemyArchetype.STANDARD, EnemyArchetype.AMBUSHER)
+	if is_boss():
+		_archetype = EnemyArchetype.STANDARD
+	elif _archetype == EnemyArchetype.FLYER or _archetype == EnemyArchetype.CASTER:
+		if not is_ranged_enemy():
+			_archetype = EnemyArchetype.STANDARD
+	elif _archetype == EnemyArchetype.SHIELD_GUARD or _archetype == EnemyArchetype.AMBUSHER:
+		if is_ranged_enemy():
+			_archetype = EnemyArchetype.STANDARD
 	_difficulty_health_multiplier = maxf(0.1, difficulty_health_multiplier)
 	_difficulty_damage_multiplier = maxf(0.1, difficulty_damage_multiplier)
 	_difficulty_speed_multiplier = clampf(difficulty_speed_multiplier, 0.55, 2.20)
 	_difficulty_aggression_multiplier = clampf(difficulty_aggression_multiplier, 0.55, 2.40)
 	_configure_behavior(behavior_profile)
+	_configure_archetype_behavior()
 	_variant = variant % 3
 	if _role == EnemyRole.RANGED:
 		_variant = 1
 	elif _variant == 1:
 		_variant = 0
 	_phase = phase
+	_flight_anchor_y = global_position.y
 	_locomotion_cycle = 0.0 if sin(phase) < 0.0 else 4.0
 	_locomotion_blend = 0.0
 	_locomotion_active = false
 	_locomotion_is_settling = false
+	_turn_remaining = 0.0
 	_landing_motion_remaining = 0.0
 	_patrol_left = patrol_left
 	_patrol_right = patrol_right
 	_patrol_direction = -1.0 if sin(phase) < 0.0 else 1.0
 	_facing = _patrol_direction
+	_turn_from_facing = _facing
 	_boss_phase = 1
 	_boss_attack_counter = 0
 	_boss_attack_pattern = BossAttackPattern.LUNGE
@@ -259,7 +294,10 @@ func setup(
 		_max_health = int(round(float(base_health) * ELITE_HEALTH_MULTIPLIER))
 	else:
 		_max_health = base_health
-	_max_health = maxi(1, int(round(float(_max_health) * _difficulty_health_multiplier)))
+	_max_health = maxi(
+		1,
+		int(round(float(_max_health) * _difficulty_health_multiplier * _get_archetype_health_multiplier()))
+	)
 	_current_health = _max_health
 	if is_instance_valid(_enemy_sprite):
 		_update_sprite_animation()
@@ -314,6 +352,66 @@ func is_elite() -> bool:
 
 func is_boss() -> bool:
 	return _rank == EnemyRank.BOSS
+
+
+func get_boss_identity() -> int:
+	return BossIdentity.WAR_CHIEF if _family == EnemyFamily.GOBLIN else BossIdentity.CRYSTAL_KING
+
+
+func _is_war_chief() -> bool:
+	return is_boss() and get_boss_identity() == BossIdentity.WAR_CHIEF
+
+
+func _is_crystal_king() -> bool:
+	return is_boss() and get_boss_identity() == BossIdentity.CRYSTAL_KING
+
+
+func get_archetype() -> int:
+	return _archetype
+
+
+func is_flying_enemy() -> bool:
+	return _archetype == EnemyArchetype.FLYER
+
+
+func _is_shield_guard() -> bool:
+	return _archetype == EnemyArchetype.SHIELD_GUARD
+
+
+func _is_caster() -> bool:
+	return _archetype == EnemyArchetype.CASTER
+
+
+func _is_ambusher() -> bool:
+	return _archetype == EnemyArchetype.AMBUSHER
+
+
+func _configure_archetype_behavior() -> void:
+	match _archetype:
+		EnemyArchetype.FLYER:
+			_ranged_volley_count = maxi(_ranged_volley_count, 2)
+			_ranged_spread = maxf(_ranged_spread, 0.10)
+		EnemyArchetype.CASTER:
+			_ranged_volley_count = maxi(_ranged_volley_count, 3)
+			_ranged_spread = maxf(_ranged_spread, 0.14)
+		EnemyArchetype.AMBUSHER:
+			_reaction_delay = minf(_reaction_delay, 0.24)
+			_telegraph_scale = minf(_telegraph_scale, 0.94)
+			_melee_combo_chance = maxf(_melee_combo_chance, 0.34)
+			_melee_combo_limit = maxi(_melee_combo_limit, 1)
+
+
+func _get_archetype_health_multiplier() -> float:
+	match _archetype:
+		EnemyArchetype.SHIELD_GUARD:
+			return 1.26
+		EnemyArchetype.FLYER:
+			return 0.80
+		EnemyArchetype.CASTER:
+			return 0.90
+		EnemyArchetype.AMBUSHER:
+			return 0.94
+	return 1.0
 
 
 func get_enemy_family() -> int:
@@ -518,8 +616,13 @@ func _apply_player_hit(
 	hurt_invulnerability: float = HURT_INVULNERABILITY,
 	knockback_multiplier: float = 1.0
 ) -> bool:
+	var applied_damage: int = maxi(1, damage)
+	var applied_knockback_multiplier: float = knockback_multiplier
+	if _is_shield_guard() and _is_shield_blocking(attack_origin):
+		applied_damage = maxi(1, roundi(float(applied_damage) * 0.48))
+		applied_knockback_multiplier *= 0.30
 
-	_current_health = maxi(0, _current_health - maxi(1, damage))
+	_current_health = maxi(0, _current_health - applied_damage)
 	_hurt_remaining = 0.18
 	_hurt_invulnerability_remaining = maxf(0.0, hurt_invulnerability)
 	if not is_boss():
@@ -530,8 +633,8 @@ func _apply_player_hit(
 		knockback_direction = facing
 	var knockback_scale: float = 0.20 if is_boss() else (0.58 if is_elite() else 1.0)
 	velocity = Vector2(
-		knockback_direction * 330.0 * knockback_scale * knockback_multiplier,
-		-180.0 * knockback_scale * knockback_multiplier
+		knockback_direction * 330.0 * knockback_scale * applied_knockback_multiplier,
+		-180.0 * knockback_scale * applied_knockback_multiplier
 	)
 	_update_boss_phase()
 	health_changed.emit(_current_health, _max_health)
@@ -572,6 +675,7 @@ func _physics_process(delta: float) -> void:
 	_elapsed += delta
 	_attack_cooldown_remaining = maxf(0.0, _attack_cooldown_remaining - delta)
 	_pursuit_jump_cooldown_remaining = maxf(0.0, _pursuit_jump_cooldown_remaining - delta)
+	_turn_remaining = maxf(0.0, _turn_remaining - delta)
 	_hurt_remaining = maxf(0.0, _hurt_remaining - delta)
 	_hurt_invulnerability_remaining = maxf(0.0, _hurt_invulnerability_remaining - delta)
 
@@ -591,7 +695,7 @@ func _physics_process(delta: float) -> void:
 			and attack_progress >= 0.30
 			and attack_progress <= 0.74
 		):
-			desired_speed = _facing * BOSS_LUNGE_SPEED * _get_boss_phase_speed_scale()
+			desired_speed = _facing * _get_boss_lunge_speed()
 		var action_time: float = _get_attack_duration() - _get_attack_action_delay()
 		if not _attack_action_performed and _attack_remaining <= action_time:
 			_attack_action_performed = true
@@ -625,7 +729,9 @@ func _physics_process(delta: float) -> void:
 		desired_speed,
 		ACCELERATION * _difficulty_speed_multiplier * acceleration_scale * delta
 	)
-	if not is_on_floor():
+	if is_flying_enemy():
+		_update_flight_vertical_velocity(delta)
+	elif not is_on_floor():
 		velocity.y += GRAVITY * delta
 	else:
 		velocity.y = 0.0
@@ -640,13 +746,41 @@ func _physics_process(delta: float) -> void:
 		and _hurt_remaining <= 0.0
 		and absf(velocity.x) > 8.0
 	):
+		var previous_facing: float = _facing
 		_facing = signf(velocity.x)
+		if now_on_floor and not is_equal_approx(previous_facing, _facing):
+			_begin_ground_turn(previous_facing)
 	_update_locomotion_animation(delta)
 	if global_position.y > 820.0:
 		defeat()
 		return
 	_update_sprite_animation(delta)
 	queue_redraw()
+
+
+func _is_shield_blocking(attack_origin: Vector2) -> bool:
+	var attacker_direction: float = signf(attack_origin.x - global_position.x)
+	if is_zero_approx(attacker_direction):
+		return false
+	return is_equal_approx(attacker_direction, _facing)
+
+
+func _update_flight_vertical_velocity(delta: float) -> void:
+	var hover_wave: float = sin(_elapsed * 3.6 + _phase) * 18.0
+	var desired_y: float = _flight_anchor_y + hover_wave
+	if _target_is_visible():
+		desired_y = _target.global_position.y - FLYER_HOVER_OFFSET_Y + hover_wave
+	desired_y = clampf(desired_y, 82.0, 690.0)
+	var desired_vertical_speed: float = clampf(
+		(desired_y - global_position.y) * 4.4,
+		-FLYER_MAX_VERTICAL_SPEED,
+		FLYER_MAX_VERTICAL_SPEED
+	)
+	velocity.y = move_toward(
+		velocity.y,
+		desired_vertical_speed,
+		FLYER_HOVER_ACCELERATION * delta
+	)
 
 
 func _get_desired_speed() -> float:
@@ -691,12 +825,16 @@ func _target_is_visible() -> bool:
 	if is_boss():
 		detection_x = BOSS_DETECTION_RANGE_X
 	detection_x *= clampf(_difficulty_aggression_multiplier, 0.55, 2.20)
+	if _is_ambusher():
+		detection_x *= 0.72
 	return absf(offset.x) <= detection_x and absf(offset.y) <= _get_detection_range_y()
 
 
 func _get_detection_range_y() -> float:
 	if is_boss():
 		return 760.0
+	if is_flying_enemy():
+		return 520.0
 	var vertical_scale: float = clampf(
 		0.55 + _difficulty_aggression_multiplier * 0.45,
 		0.72,
@@ -742,15 +880,32 @@ func _target_in_attack_range() -> bool:
 
 	var offset: Vector2 = _target.global_position - global_position
 	if absf(offset.x) > 6.0:
+		var previous_facing: float = _facing
 		_facing = signf(offset.x)
+		if (
+			is_on_floor()
+			and _attack_remaining <= 0.0
+			and _hurt_remaining <= 0.0
+			and not is_equal_approx(previous_facing, _facing)
+		):
+			_begin_ground_turn(previous_facing)
 	if is_boss():
 		match _peek_next_boss_attack_pattern():
 			BossAttackPattern.VOLLEY:
-				return absf(offset.x) <= 540.0 and absf(offset.y) <= 180.0
+				return (
+					absf(offset.x) <= _get_boss_volley_reach_x()
+					and absf(offset.y) <= _get_boss_volley_reach_y()
+				)
 			BossAttackPattern.SLAM:
-				return absf(offset.x) <= BOSS_SLAM_REACH_X and absf(offset.y) <= BOSS_SLAM_REACH_Y
+				return (
+					absf(offset.x) <= _get_boss_slam_reach_x()
+					and absf(offset.y) <= _get_boss_slam_reach_y()
+				)
 			_:
-				return absf(offset.x) <= BOSS_LUNGE_REACH_X and absf(offset.y) <= 115.0
+				return (
+					absf(offset.x) <= _get_boss_lunge_reach_x()
+					and absf(offset.y) <= _get_boss_lunge_reach_y()
+				)
 	if is_ranged_enemy():
 		return (
 			absf(offset.x) <= RANGED_ATTACK_RANGE_X
@@ -767,6 +922,7 @@ func _start_attack() -> void:
 		var target_delta_x: float = _target.global_position.x - global_position.x
 		if absf(target_delta_x) > 6.0:
 			_facing = signf(target_delta_x)
+	_clear_turn_transition()
 	if is_boss() and is_instance_valid(_target):
 		_boss_attack_pattern = _peek_next_boss_attack_pattern()
 		_boss_attack_counter += 1
@@ -794,6 +950,8 @@ func _get_attack_duration() -> float:
 				base_duration = 0.76
 	else:
 		base_duration = RANGED_ATTACK_DURATION if is_ranged_enemy() else MELEE_ATTACK_DURATION
+		if _is_caster():
+			base_duration *= 1.16
 	return base_duration * _telegraph_scale
 
 
@@ -809,6 +967,8 @@ func _get_attack_action_delay() -> float:
 				base_delay = 0.46
 	else:
 		base_delay = RANGED_ATTACK_FIRE_DELAY if is_ranged_enemy() else MELEE_ATTACK_HIT_DELAY
+		if _is_caster():
+			base_delay *= 1.16
 	return base_delay * _telegraph_scale
 
 
@@ -822,6 +982,14 @@ func _get_attack_cooldown() -> float:
 		)
 	else:
 		base_cooldown = RANGED_ATTACK_COOLDOWN if is_ranged_enemy() else MELEE_ATTACK_COOLDOWN
+	if _is_shield_guard():
+		base_cooldown *= 1.12
+	elif _is_caster():
+		base_cooldown *= 1.14
+	elif is_flying_enemy():
+		base_cooldown *= 1.08
+	elif _is_ambusher():
+		base_cooldown *= 0.80
 	return maxf(
 		0.40 if is_boss() else 0.46,
 		base_cooldown * _attack_cooldown_scale
@@ -857,11 +1025,25 @@ func _get_melee_chase_speed() -> float:
 			* _difficulty_speed_multiplier
 			* _get_boss_phase_speed_scale()
 		)
-	return MELEE_CHASE_SPEED * (1.16 if is_elite() else 1.0) * _difficulty_speed_multiplier
+	var chase_speed: float = (
+		MELEE_CHASE_SPEED * (1.16 if is_elite() else 1.0) * _difficulty_speed_multiplier
+	)
+	if _is_shield_guard():
+		chase_speed *= 0.80
+	elif _is_ambusher():
+		chase_speed *= 1.42
+	return chase_speed
 
 
 func _get_ranged_move_speed() -> float:
-	return RANGED_MOVE_SPEED * (1.18 if is_elite() else 1.0) * _difficulty_speed_multiplier
+	var move_speed: float = (
+		RANGED_MOVE_SPEED * (1.18 if is_elite() else 1.0) * _difficulty_speed_multiplier
+	)
+	if is_flying_enemy():
+		move_speed *= 1.20
+	elif _is_caster():
+		move_speed *= 0.82
+	return move_speed
 
 
 func _hit_target_if_still_close() -> void:
@@ -870,17 +1052,25 @@ func _hit_target_if_still_close() -> void:
 	if is_boss():
 		var boss_melee_offset: Vector2 = _target.global_position - global_position
 		if (
-			absf(boss_melee_offset.x) > BOSS_LUNGE_REACH_X
-			or absf(boss_melee_offset.y) > 115.0
+			absf(boss_melee_offset.x) > _get_boss_lunge_reach_x()
+			or absf(boss_melee_offset.y) > _get_boss_lunge_reach_y()
 		):
 			return
 	elif not _target_in_attack_range():
 		return
 	if _target.has_method(&"receive_enemy_attack"):
 		var damage: int = _get_scaled_damage(
-			32 if is_boss() else (28 if is_elite() else MELEE_DAMAGE)
+			(
+				36
+				if _is_war_chief()
+				else (30 if _is_crystal_king() else (28 if is_elite() else MELEE_DAMAGE))
+			)
 		)
-		var damage_cause: StringName = &"boss_lunge" if is_boss() else &"enemy_melee"
+		var damage_cause: StringName = &"enemy_melee"
+		if _is_war_chief():
+			damage_cause = &"war_chief_charge"
+		elif _is_crystal_king():
+			damage_cause = &"crystal_king_lunge"
 		_target.call(&"receive_enemy_attack", global_position, damage, damage_cause)
 
 
@@ -889,13 +1079,15 @@ func _perform_boss_slam() -> void:
 		return
 	var target_offset: Vector2 = _target.global_position - global_position
 	if (
-		absf(target_offset.x) > BOSS_SLAM_REACH_X
-		or absf(target_offset.y) > BOSS_SLAM_REACH_Y
+		absf(target_offset.x) > _get_boss_slam_reach_x()
+		or absf(target_offset.y) > _get_boss_slam_reach_y()
 	):
 		return
 	if _target.has_method(&"receive_enemy_attack"):
-		var slam_damage: int = _get_scaled_damage(38 + (_boss_phase - 1) * 3)
-		_target.call(&"receive_enemy_attack", global_position, slam_damage, &"boss_slam")
+		var slam_base_damage: int = 34 if _is_crystal_king() else 42
+		var slam_damage: int = _get_scaled_damage(slam_base_damage + (_boss_phase - 1) * 3)
+		var slam_cause: StringName = &"crystal_king_slam" if _is_crystal_king() else &"war_chief_slam"
+		_target.call(&"receive_enemy_attack", global_position, slam_damage, slam_cause)
 
 
 func _fire_projectile() -> void:
@@ -914,6 +1106,11 @@ func _fire_projectile() -> void:
 		* (1.12 if is_boss() else 1.0)
 		* clampf(_difficulty_speed_multiplier, 0.80, 1.65)
 	)
+	if _is_caster():
+		projectile_damage = maxi(1, roundi(float(projectile_damage) * 0.72))
+	elif is_flying_enemy():
+		projectile_damage = maxi(1, roundi(float(projectile_damage) * 0.78))
+		projectile_speed *= 1.08
 	var projectile_style := (
 		ProjectileStyle.ARROW
 		if _family == EnemyFamily.GOBLIN
@@ -921,10 +1118,18 @@ func _fire_projectile() -> void:
 	)
 	if is_boss():
 		var spread_angles: Array[float] = []
-		if _boss_phase >= 3:
-			spread_angles.assign([-0.24, -0.12, 0.0, 0.12, 0.24])
+		if _is_war_chief():
+			if _boss_phase >= 3:
+				spread_angles.assign([-0.20, -0.10, 0.0, 0.10, 0.20])
+			else:
+				spread_angles.assign([-0.13, 0.0, 0.13])
+			projectile_speed *= 1.10
+		elif _boss_phase >= 3:
+			spread_angles.assign([-0.30, -0.15, 0.0, 0.15, 0.30])
+		elif _boss_phase == 2:
+			spread_angles.assign([-0.22, -0.07, 0.07, 0.22])
 		else:
-			spread_angles.assign([-0.16, 0.0, 0.16])
+			spread_angles.assign([0.0])
 		for spread_angle: float in spread_angles:
 			projectile_requested.emit(
 				global_position + Vector2(_facing * 28.0, -12.0),
@@ -960,32 +1165,90 @@ func _update_boss_phase() -> void:
 
 func _peek_next_boss_attack_pattern() -> int:
 	var sequence: Array[int]
-	match _boss_phase:
-		2:
-			sequence = [
-				BossAttackPattern.SLAM,
-				BossAttackPattern.LUNGE,
-				BossAttackPattern.VOLLEY,
-			]
-		3:
-			sequence = [
-				BossAttackPattern.VOLLEY,
-				BossAttackPattern.SLAM,
-				BossAttackPattern.LUNGE,
-			]
-		_:
-			sequence = [BossAttackPattern.LUNGE, BossAttackPattern.VOLLEY]
+	if _is_war_chief():
+		match _boss_phase:
+			2:
+				sequence = [
+					BossAttackPattern.SLAM,
+					BossAttackPattern.LUNGE,
+					BossAttackPattern.VOLLEY,
+				]
+			3:
+				sequence = [
+					BossAttackPattern.VOLLEY,
+					BossAttackPattern.LUNGE,
+					BossAttackPattern.SLAM,
+					BossAttackPattern.LUNGE,
+				]
+			_:
+				sequence = [BossAttackPattern.LUNGE, BossAttackPattern.LUNGE, BossAttackPattern.VOLLEY]
+	else:
+		match _boss_phase:
+			2:
+				sequence = [
+					BossAttackPattern.VOLLEY,
+					BossAttackPattern.SLAM,
+					BossAttackPattern.VOLLEY,
+					BossAttackPattern.LUNGE,
+				]
+			3:
+				sequence = [
+					BossAttackPattern.SLAM,
+					BossAttackPattern.VOLLEY,
+					BossAttackPattern.SLAM,
+					BossAttackPattern.LUNGE,
+					BossAttackPattern.VOLLEY,
+				]
+			_:
+				sequence = [BossAttackPattern.VOLLEY, BossAttackPattern.LUNGE]
 	return sequence[posmod(_boss_attack_counter, sequence.size())]
 
 
 func _get_boss_phase_speed_scale() -> float:
+	if _is_war_chief():
+		match _boss_phase:
+			2:
+				return 1.13
+			3:
+				return 1.28
+			_:
+				return 1.0
 	match _boss_phase:
 		2:
-			return 1.10
+			return 1.07
 		3:
-			return 1.24
+			return 1.18
 		_:
 			return 1.0
+
+
+func _get_boss_lunge_speed() -> float:
+	var identity_scale: float = 1.10 if _is_war_chief() else 0.94
+	return BOSS_LUNGE_SPEED * _get_boss_phase_speed_scale() * identity_scale
+
+
+func _get_boss_lunge_reach_x() -> float:
+	return BOSS_LUNGE_REACH_X * (1.12 if _is_war_chief() else 0.94)
+
+
+func _get_boss_lunge_reach_y() -> float:
+	return 118.0 if _is_war_chief() else 108.0
+
+
+func _get_boss_slam_reach_x() -> float:
+	return BOSS_SLAM_REACH_X * (0.92 if _is_war_chief() else 1.14)
+
+
+func _get_boss_slam_reach_y() -> float:
+	return BOSS_SLAM_REACH_Y * (0.92 if _is_war_chief() else 1.12)
+
+
+func _get_boss_volley_reach_x() -> float:
+	return 600.0 if _is_war_chief() else 560.0
+
+
+func _get_boss_volley_reach_y() -> float:
+	return 190.0 if _is_war_chief() else 205.0
 
 
 func get_boss_phase() -> int:
@@ -1008,6 +1271,29 @@ func get_boss_attack_name() -> String:
 
 func _get_scaled_damage(base_damage: int) -> int:
 	return maxi(1, int(round(float(base_damage) * _difficulty_damage_multiplier)))
+
+
+func _begin_ground_turn(previous_facing: float) -> void:
+	if is_equal_approx(previous_facing, _facing):
+		return
+	_turn_from_facing = previous_facing
+	_turn_remaining = TURN_BLEND_DURATION
+	# Both family run sheets use frame zero as a planted contact pose.
+	_locomotion_cycle = 0.0
+	_locomotion_settle_target = 0.0
+	_locomotion_active = true
+	_locomotion_is_settling = false
+
+
+func _clear_turn_transition() -> void:
+	_turn_remaining = 0.0
+	_turn_from_facing = _facing
+
+
+func _get_display_facing() -> float:
+	if _turn_remaining > TURN_BLEND_DURATION * 0.5:
+		return _turn_from_facing
+	return _facing
 
 
 func _update_locomotion_animation(delta: float) -> void:
@@ -1042,6 +1328,12 @@ func _update_locomotion_animation(delta: float) -> void:
 		if _family == EnemyFamily.GOBLIN
 		else float(SLIME_RUN_FRAME_COUNT)
 	)
+	if _turn_remaining > 0.0:
+		_locomotion_cycle = 0.0
+		_locomotion_active = true
+		_locomotion_is_settling = false
+		_locomotion_blend = move_toward(_locomotion_blend, 0.0, delta * 12.0)
+		return
 	if can_stride:
 		var maximum_fps: float = (
 			GOBLIN_RUN_FPS
@@ -1145,8 +1437,9 @@ func _get_goblin_run_registration(frame_index: int) -> Vector2:
 	var source_head_x: float = float(head_values[resolved_frame])
 	var source_bottom: float = float(bottom_values[resolved_frame])
 	var run_scale: float = _get_goblin_run_scale()
+	var display_facing: float = _get_display_facing()
 	return Vector2(
-		(source_head_x - target_head_x) * run_scale * _facing,
+		(source_head_x - target_head_x) * run_scale * display_facing,
 		(target_bottom - source_bottom) * run_scale
 	)
 
@@ -1261,7 +1554,7 @@ func _apply_goblin_sprite_motion(
 		var run_scale: float = _get_goblin_run_scale()
 		var contact_weight: float = 0.5 + 0.5 * cos(run_phase * 2.0)
 		_enemy_sprite.position.y -= absf(sin(run_phase)) * 0.90 * stride_weight
-		_enemy_sprite.rotation = -_facing * (
+		_enemy_sprite.rotation = -_get_display_facing() * (
 			0.008 + sin(run_phase) * 0.004
 		) * stride_weight
 		_enemy_sprite.scale = Vector2(
@@ -1411,6 +1704,26 @@ func _apply_landing_sprite_motion() -> void:
 	)
 
 
+func _apply_turn_sprite_motion() -> void:
+	if _turn_remaining <= 0.0 or _attack_remaining > 0.0 or _hurt_remaining > 0.0:
+		return
+	var turn_progress: float = clampf(
+		1.0 - _turn_remaining / maxf(TURN_BLEND_DURATION, 0.001),
+		0.0,
+		1.0
+	)
+	var braking_weight: float = sin(turn_progress * PI)
+	_enemy_sprite.position += Vector2(
+		-_turn_from_facing * braking_weight * 0.85,
+		braking_weight * 0.25
+	)
+	_enemy_sprite.rotation = -_turn_from_facing * braking_weight * 0.028
+	_enemy_sprite.scale *= Vector2(
+		1.0 + braking_weight * 0.010,
+		1.0 - braking_weight * 0.009
+	)
+
+
 func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 	if not is_instance_valid(_enemy_sprite):
 		return
@@ -1479,7 +1792,7 @@ func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 		_set_goblin_run_frame(animation_column)
 	else:
 		_set_sprite_cell(animation_column, animation_row)
-	_enemy_sprite.flip_h = _facing > 0.0
+	_enemy_sprite.flip_h = _get_display_facing() > 0.0
 	var sprite_scale := (
 		_get_goblin_run_scale()
 		if using_goblin_run_sheet
@@ -1504,6 +1817,7 @@ func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 			hurt_progress,
 			death_progress
 		)
+	_apply_turn_sprite_motion()
 	if airborne_motion:
 		_apply_airborne_sprite_motion()
 	_apply_landing_sprite_motion()
@@ -1534,11 +1848,19 @@ func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 
 func _draw() -> void:
 	if is_boss():
-		var phase_color := (
-			Color("#ffcf55")
-			if _boss_phase >= 3
-			else (Color("#ff6b5f") if _boss_phase == 2 else Color("#fa3347"))
-		)
+		var phase_color: Color
+		if _is_war_chief():
+			phase_color = (
+				Color("#ffd36a")
+				if _boss_phase >= 3
+				else (Color("#ff7b45") if _boss_phase == 2 else Color("#ed3c38"))
+			)
+		else:
+			phase_color = (
+				Color("#d38dff")
+				if _boss_phase >= 3
+				else (Color("#5fc8ff") if _boss_phase == 2 else Color("#4a79ff"))
+			)
 		draw_circle(
 			Vector2(0.0, -22.0),
 			76.0 + sin(_elapsed * (3.0 + float(_boss_phase) * 0.45)) * 2.5,
@@ -1553,9 +1875,13 @@ func _draw() -> void:
 			Color(phase_color, 0.44 + float(_boss_phase - 1) * 0.08),
 			2.4 + float(_boss_phase - 1) * 0.55
 		)
+		_draw_boss_identity()
 	elif is_elite():
 		draw_circle(Vector2(0.0, -7.0), 37.0 + sin(_elapsed * 4.0), Color(0.68, 0.30, 1.0, 0.10))
 		draw_arc(Vector2(0.0, -7.0), 36.0, 0.0, TAU, 26, Color(0.76, 0.44, 1.0, 0.46), 2.0)
+
+	if not is_boss():
+		_draw_archetype_marker()
 
 	if _attack_remaining > 0.0:
 		var attack_progress: float = 1.0 - _attack_remaining / _get_attack_duration()
@@ -1563,10 +1889,15 @@ func _draw() -> void:
 			_draw_boss_attack_telegraph(attack_progress)
 		elif is_ranged_enemy():
 			var charge_radius: float = lerpf(3.0, 9.0, sin(attack_progress * PI))
+			var charge_color: Color = Color(0.38, 0.94, 1.0, 0.66)
+			if _is_caster():
+				charge_color = Color(0.82, 0.45, 1.0, 0.76)
+			elif is_flying_enemy():
+				charge_color = Color(0.40, 1.0, 0.86, 0.72)
 			draw_circle(
 				Vector2(_facing * (42.0 if is_boss() else 25.0), -10.0),
 				charge_radius,
-				Color(0.38, 0.94, 1.0, 0.66)
+				charge_color
 			)
 
 	if _current_health < _max_health and not _is_defeated:
@@ -1578,6 +1909,82 @@ func _draw() -> void:
 			Rect2(-bar_width * 0.5 + 2.0, bar_y + 2.0, (bar_width - 4.0) * health_ratio, 2.0),
 			Color(0.96, 0.20, 0.22, 0.96)
 		)
+
+
+func _draw_archetype_marker() -> void:
+	match _archetype:
+		EnemyArchetype.SHIELD_GUARD:
+			var shield_center: Vector2 = Vector2(_facing * 20.0, -7.0)
+			draw_circle(shield_center, 13.0, Color(0.96, 0.70, 0.22, 0.20))
+			draw_arc(shield_center, 15.0, 0.0, TAU, 20, Color(1.0, 0.79, 0.34, 0.78), 2.0)
+		EnemyArchetype.FLYER:
+			var halo_radius: float = 28.0 + sin(_elapsed * 4.2 + _phase) * 2.0
+			draw_arc(
+				Vector2(0.0, -8.0),
+				halo_radius,
+				0.0,
+				TAU,
+				24,
+				Color(0.34, 1.0, 0.86, 0.50),
+				1.6
+			)
+		EnemyArchetype.CASTER:
+			var cast_core: Vector2 = Vector2(0.0, -34.0)
+			var cast_pulse: float = 4.0 + sin(_elapsed * 5.0 + _phase) * 1.2
+			draw_circle(cast_core, cast_pulse, Color(0.82, 0.45, 1.0, 0.70))
+			draw_arc(cast_core, 8.0, 0.0, TAU, 14, Color(0.94, 0.76, 1.0, 0.70), 1.3)
+		EnemyArchetype.AMBUSHER:
+			var streak_start: Vector2 = Vector2(-_facing * 28.0, -7.0)
+			var streak_end: Vector2 = Vector2(-_facing * 11.0, -13.0)
+			draw_line(streak_start, streak_end, Color(1.0, 0.36, 0.28, 0.78), 2.3)
+			draw_line(
+				streak_start + Vector2(0.0, 8.0),
+				streak_end + Vector2(0.0, 8.0),
+				Color(1.0, 0.36, 0.28, 0.46),
+				1.3
+			)
+
+
+func _draw_boss_identity() -> void:
+	if _is_crystal_king():
+		var core_center: Vector2 = Vector2(0.0, -58.0)
+		var crystal_color: Color = (
+			Color(0.84, 0.58, 1.0, 0.72)
+			if _boss_phase >= 3
+			else Color(0.34, 0.82, 1.0, 0.68)
+		)
+		draw_circle(core_center, 12.0 + sin(_elapsed * 4.0) * 1.5, Color(crystal_color, 0.20))
+		for shard_index in range(3):
+			var shard_offset: float = (float(shard_index) - 1.0) * 18.0
+			var shard_center: Vector2 = core_center + Vector2(shard_offset, -5.0 - absf(shard_offset) * 0.16)
+			draw_colored_polygon(
+				PackedVector2Array([
+					shard_center + Vector2(0.0, -13.0),
+					shard_center + Vector2(7.0, 6.0),
+					shard_center + Vector2(-7.0, 6.0),
+				]),
+				crystal_color
+			)
+		return
+	var banner_x: float = -_facing * 60.0
+	var banner_top: Vector2 = Vector2(banner_x, -91.0)
+	var banner_bottom: Vector2 = Vector2(banner_x, 29.0)
+	var banner_color: Color = (
+		Color(1.0, 0.72, 0.26, 0.78)
+		if _boss_phase >= 3
+		else Color(0.92, 0.22, 0.20, 0.72)
+	)
+	draw_line(banner_bottom, banner_top, Color(0.22, 0.10, 0.08, 0.90), 5.2)
+	draw_line(banner_bottom, banner_top, banner_color, 2.2)
+	draw_colored_polygon(
+		PackedVector2Array([
+			banner_top + Vector2(0.0, 7.0),
+			banner_top + Vector2(_facing * 31.0, 15.0),
+			banner_top + Vector2(_facing * 22.0, 37.0),
+			banner_top + Vector2(0.0, 31.0),
+		]),
+		Color(banner_color, 0.72)
+	)
 
 
 func _draw_boss_attack_telegraph(attack_progress: float) -> void:
@@ -1594,7 +2001,11 @@ func _draw_boss_attack_telegraph(attack_progress: float) -> void:
 	match _boss_attack_pattern:
 		BossAttackPattern.VOLLEY:
 			var charge_center := Vector2(_facing * 42.0, -15.0)
-			var volley_color := Color(0.30, 0.90, 1.0, warning_alpha)
+			var volley_color: Color = (
+				Color(1.0, 0.52, 0.20, warning_alpha)
+				if _is_war_chief()
+				else Color(0.30, 0.90, 1.0, warning_alpha)
+			)
 			for ring_index in range(3):
 				draw_arc(
 					charge_center,
@@ -1616,16 +2027,21 @@ func _draw_boss_attack_telegraph(attack_progress: float) -> void:
 					8.0
 				)
 		BossAttackPattern.SLAM:
-			var slam_color := Color(1.0, 0.48, 0.16, warning_alpha)
+			var slam_color: Color = (
+				Color(1.0, 0.42, 0.16, warning_alpha)
+				if _is_war_chief()
+				else Color(0.30, 0.78, 1.0, warning_alpha)
+			)
+			var slam_reach_x: float = _get_boss_slam_reach_x()
 			draw_set_transform(Vector2(0.0, 26.0), 0.0, Vector2(1.0, 0.24))
 			draw_circle(
 				Vector2.ZERO,
-				BOSS_SLAM_REACH_X * (0.82 + warning_progress * 0.18),
+				slam_reach_x * (0.82 + warning_progress * 0.18),
 				Color(slam_color, warning_alpha * 0.16)
 			)
 			draw_arc(
 				Vector2.ZERO,
-				BOSS_SLAM_REACH_X * (0.82 + warning_progress * 0.18),
+				slam_reach_x * (0.82 + warning_progress * 0.18),
 				0.0,
 				TAU,
 				64,
@@ -1634,7 +2050,7 @@ func _draw_boss_attack_telegraph(attack_progress: float) -> void:
 			)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			for marker_side in [-1.0, 1.0]:
-				var marker_x: float = marker_side * BOSS_SLAM_REACH_X
+				var marker_x: float = marker_side * slam_reach_x
 				draw_line(
 					Vector2(marker_x, 15.0),
 					Vector2(marker_x, 35.0),
@@ -1642,10 +2058,15 @@ func _draw_boss_attack_telegraph(attack_progress: float) -> void:
 					4.0
 				)
 		_:
-			var lunge_color := Color(1.0, 0.22, 0.28, warning_alpha)
+			var lunge_color: Color = (
+				Color(1.0, 0.30, 0.18, warning_alpha)
+				if _is_war_chief()
+				else Color(0.48, 0.78, 1.0, warning_alpha)
+			)
+			var lunge_reach_x: float = _get_boss_lunge_reach_x()
 			var lane_start := Vector2(_facing * 42.0, 20.0)
 			var lane_end := Vector2(
-				_facing * BOSS_LUNGE_REACH_X * (0.72 + warning_progress * 0.28),
+				_facing * lunge_reach_x * (0.72 + warning_progress * 0.28),
 				20.0
 			)
 			draw_line(lane_start, lane_end, Color(lunge_color, warning_alpha * 0.30), 18.0)

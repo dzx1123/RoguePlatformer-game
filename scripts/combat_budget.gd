@@ -16,6 +16,7 @@ const BOSS := 4
 const EVENT := 5
 const CHALLENGE := 6
 const RISK_CHEST := 7
+const HOLDOUT := 8
 
 const ROLE_MELEE := 0
 const ROLE_RANGED := 1
@@ -86,6 +87,11 @@ static func create_profile(difficulty: int, room_index: int, encounter: int) -> 
 				1 if safe_difficulty == EASY
 				else (1 + (1 if safe_room >= 10 else 0) if safe_difficulty == MEDIUM else 2)
 			)
+		HOLDOUT:
+			encounter_factor = 1.12
+			minimum_enemies = 3 if safe_difficulty == EASY else (5 if safe_difficulty == MEDIUM else 6)
+			max_enemies += 1
+			elite_slots = 0 if safe_difficulty == EASY else 1
 		BOSS:
 			encounter_factor = 1.0
 			minimum_enemies = 1
@@ -105,6 +111,8 @@ static func create_profile(difficulty: int, room_index: int, encounter: int) -> 
 		candidate_reinforcements = chapter + 1
 	if encounter == CHALLENGE:
 		candidate_reinforcements += 3
+	elif encounter == HOLDOUT:
+		candidate_reinforcements += 1
 
 	var boss_escort_count: int = 0
 	if encounter == BOSS and safe_room >= 10:

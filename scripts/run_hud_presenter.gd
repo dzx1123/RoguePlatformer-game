@@ -1,7 +1,7 @@
 class_name RunHUDPresenter
 extends RefCounted
 
-const HEALTH_FILL_WIDTH := 354.0
+const HEALTH_FILL_WIDTH := 316.0
 
 var health_label: Label
 var health_fill: ColorRect
@@ -168,25 +168,25 @@ func update_weapon_slots(player: RoguePlayer, progression: ProgressionStore) -> 
 		var slot: Panel = weapon_slot_panels[weapon_index]
 		var slot_style := StyleBoxFlat.new()
 		slot_style.bg_color = (
-			Color(accent, 0.20)
+			Color(accent, 0.22)
 			if is_active
-			else Color(0.026, 0.054, 0.070, 0.98) if is_unlocked
-			else Color(0.018, 0.027, 0.036, 0.96)
+			else Color(0.024, 0.064, 0.088, 0.32) if is_unlocked
+			else Color(0.012, 0.025, 0.040, 0.30)
 		)
 		slot_style.border_color = (
-			Color(accent, 0.96)
+			Color(accent, 0.88)
 			if is_active
-			else Color(0.37, 0.55, 0.62, 0.58) if is_unlocked
-			else Color(0.22, 0.27, 0.31, 0.60)
+			else Color(0.47, 0.72, 0.80, 0.26) if is_unlocked
+			else Color(0.30, 0.38, 0.45, 0.22)
 		)
-		slot_style.set_border_width_all(2 if is_active else 1)
-		slot_style.corner_radius_top_left = 6
-		slot_style.corner_radius_top_right = 6
-		slot_style.corner_radius_bottom_left = 6
-		slot_style.corner_radius_bottom_right = 6
+		slot_style.set_border_width_all(1)
+		slot_style.corner_radius_top_left = 8
+		slot_style.corner_radius_top_right = 8
+		slot_style.corner_radius_bottom_left = 8
+		slot_style.corner_radius_bottom_right = 8
 		if is_active:
-			slot_style.shadow_color = Color(accent, 0.35)
-			slot_style.shadow_size = 5
+			slot_style.shadow_color = Color(accent, 0.26)
+			slot_style.shadow_size = 4
 		slot.add_theme_stylebox_override("panel", slot_style)
 
 		var slot_label: Label = weapon_slot_labels[weapon_index]

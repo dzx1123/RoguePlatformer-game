@@ -1,6 +1,6 @@
 extends Control
 
-## Compact bottom-HUD ability icon with hover help and a cooldown mask.
+## Compact moonlit ability icon for the center combat rail.
 
 enum IconType {
 	ATTACK,
@@ -46,28 +46,28 @@ func set_cooldown(remaining: float, duration: float) -> void:
 
 func _create_labels() -> void:
 	_title_label = Label.new()
-	_title_label.position = Vector2(2.0, 50.0)
-	_title_label.size = Vector2(74.0, 16.0)
+	_title_label.position = Vector2(2.0, 53.0)
+	_title_label.size = Vector2(78.0, 16.0)
 	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_title_label.add_theme_font_size_override("font_size", 11)
+	_title_label.add_theme_font_size_override("font_size", 10)
 	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_title_label)
 
 	_key_label = Label.new()
-	_key_label.position = Vector2(5.0, 4.0)
-	_key_label.size = Vector2(20.0, 18.0)
+	_key_label.position = Vector2(6.0, 4.0)
+	_key_label.size = Vector2(18.0, 16.0)
 	_key_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_key_label.add_theme_font_size_override("font_size", 12)
-	_key_label.add_theme_color_override("font_color", Color(0.84, 0.94, 1.0, 1.0))
+	_key_label.add_theme_font_size_override("font_size", 11)
+	_key_label.add_theme_color_override("font_color", Color(0.88, 0.97, 1.0, 1.0))
 	_key_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_key_label)
 
 	_countdown_label = Label.new()
-	_countdown_label.position = Vector2(18.0, 20.0)
-	_countdown_label.size = Vector2(42.0, 27.0)
+	_countdown_label.position = Vector2(20.0, 17.0)
+	_countdown_label.size = Vector2(42.0, 28.0)
 	_countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_countdown_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_countdown_label.add_theme_font_size_override("font_size", 18)
+	_countdown_label.add_theme_font_size_override("font_size", 17)
 	_countdown_label.add_theme_color_override("font_color", Color.WHITE)
 	_countdown_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_countdown_label)
@@ -77,7 +77,7 @@ func _refresh() -> void:
 	tooltip_text = "%s [%s]\n%s" % [_title, _hotkey, _description]
 	if is_instance_valid(_title_label):
 		_title_label.text = _title
-		_title_label.add_theme_color_override("font_color", _accent.lightened(0.15))
+		_title_label.add_theme_color_override("font_color", _accent.lightened(0.18))
 		_key_label.text = _hotkey
 		_countdown_label.text = "" if _cooldown_remaining <= 0.0 else "%.1f" % _cooldown_remaining
 	queue_redraw()
@@ -94,27 +94,35 @@ func _on_mouse_exited() -> void:
 
 
 func _draw() -> void:
-	var slot_rect := Rect2(Vector2.ZERO, size)
-	var glow_alpha: float = 0.30 if _is_hovered else 0.14
-	draw_rect(slot_rect.grow(3.0), Color(_accent, glow_alpha), false, 2.0)
-	draw_rect(slot_rect, Color(0.018, 0.046, 0.070, 0.98), true)
-	draw_rect(Rect2(3.0, 3.0, size.x - 6.0, 3.0), Color(_accent, 0.32), true)
-	draw_rect(Rect2(3.0, size.y - 23.0, size.x - 6.0, 20.0), Color(0.006, 0.018, 0.030, 0.78), true)
-	draw_rect(slot_rect, Color(_accent, 0.70), false, 2.0)
-	draw_rect(Rect2(5.0, 4.0, 20.0, 18.0), Color(0.01, 0.025, 0.04, 0.94), true)
-	draw_rect(Rect2(5.0, 4.0, 20.0, 18.0), Color(_accent, 0.54), false, 1.0)
+	var slot_rect := Rect2(1.0, 1.0, size.x - 2.0, size.y - 2.0)
+	var edge_alpha: float = 0.88 if _is_hovered else 0.38
+	draw_rect(slot_rect, Color(0.006, 0.025, 0.052, 0.42), true)
+	draw_rect(slot_rect, Color(_accent, edge_alpha), false, 1.0)
+	draw_rect(Rect2(8.0, 3.0, size.x - 16.0, 1.0), Color(_accent, 0.70), true)
+	draw_rect(Rect2(5.0, 3.0, 20.0, 18.0), Color(0.008, 0.030, 0.056, 0.66), true)
+	draw_rect(Rect2(5.0, 3.0, 20.0, 18.0), Color(_accent, 0.42), false, 1.0)
+	draw_rect(Rect2(7.0, size.y - 18.0, size.x - 14.0, 1.0), Color(_accent, 0.26), true)
 	_draw_icon()
-	var icon_height: float = size.y - 21.0
+	var icon_height: float = size.y - 19.0
 	if _cooldown_remaining > 0.0:
 		var fill_ratio: float = clampf(_cooldown_remaining / _cooldown_duration, 0.0, 1.0)
-		draw_rect(Rect2(3.0, 3.0, size.x - 6.0, icon_height * fill_ratio), Color(0.01, 0.02, 0.04, 0.74), true)
+		draw_rect(Rect2(1.0, 1.0, size.x - 2.0, icon_height * fill_ratio), Color(0.004, 0.012, 0.030, 0.72), true)
 	else:
-		draw_arc(Vector2(size.x * 0.5, icon_height * 0.5 + 3.0), 20.0, -PI * 0.5, TAU - PI * 0.5, 20, Color(_accent, 0.72), 1.5, true)
+		draw_arc(
+			Vector2(size.x * 0.5, 30.0),
+			18.0,
+			-PI * 0.5,
+			TAU - PI * 0.5,
+			20,
+			Color(_accent, 0.52 if not _is_hovered else 0.84),
+			1.25,
+			true
+		)
 
 
 func _draw_icon() -> void:
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(size.x / 100.0, 0.75))
-	var center := Vector2(50.0, 35.0)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2(size.x / 100.0, 0.68))
+	var center := Vector2(50.0, 34.0)
 	if _icon_type == IconType.ATTACK:
 		var blade := PackedVector2Array([
 			Vector2(66.0, 14.0),

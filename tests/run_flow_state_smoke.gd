@@ -13,6 +13,7 @@ func _run_test() -> void:
 		RunFlowState.Phase.ROOM_LOADING,
 		RunFlowState.Phase.COMBAT,
 		RunFlowState.Phase.CHEST,
+		RunFlowState.Phase.EXIT_PORTAL,
 		RunFlowState.Phase.RISK_AMBUSH,
 		RunFlowState.Phase.UPGRADE,
 		RunFlowState.Phase.SHOP,
@@ -37,6 +38,10 @@ func _run_test() -> void:
 	state.begin_risk_ambush()
 	if not state.risk_ambush_active or not state.run_active:
 		_fail("Risk ambush phase contract changed")
+		return
+	state.begin_exit_portal()
+	if not state.awaiting_exit or state.run_active or state.choosing_upgrade:
+		_fail("Exit portal phase contract changed")
 		return
 	print("run_flow_state_smoke: PASS")
 	quit(0)

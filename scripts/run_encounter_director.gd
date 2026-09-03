@@ -12,6 +12,7 @@ enum EncounterType {
 	EVENT,
 	CHALLENGE,
 	RISK_CHEST,
+	HOLDOUT,
 }
 
 const CHAPTER_SIZE := 5
@@ -50,7 +51,7 @@ static func _build_weighted_chapter_specials(
 	# Later chapters guarantee one newly introduced archetype. The remaining
 	# slots are weighted without replacement and retain a recovery/economy room.
 	var required_new_types: Array[int] = [
-		EncounterType.EVENT,
+		EncounterType.HOLDOUT,
 		EncounterType.CHALLENGE,
 		EncounterType.RISK_CHEST,
 	]
@@ -71,6 +72,7 @@ static func _build_weighted_chapter_specials(
 				EncounterType.EVENT,
 				EncounterType.CHALLENGE,
 				EncounterType.RISK_CHEST,
+				EncounterType.HOLDOUT,
 			],
 			selected,
 			chapter_index,
@@ -117,6 +119,8 @@ static func _get_encounter_weight(encounter: int, chapter_index: int) -> float:
 			return 0.72 + float(chapter_index) * 0.22
 		EncounterType.RISK_CHEST:
 			return 0.80 + float(chapter_index) * 0.18
+		EncounterType.HOLDOUT:
+			return 0.78 + float(chapter_index) * 0.20
 		_:
 			return 1.0
 
