@@ -15,9 +15,21 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [ROADMAP.md](ROADMAP.md) | 阶段总进度 P0–P7 |
+| [AI_COLLABORATION.md](AI_COLLABORATION.md) | Codex 与 Grok Bot 的文件所有权、审查格式和协作流程 |
+| [CODEX_HANDOFF.md](CODEX_HANDOFF.md) | Codex 当前实现状态、测试基线与交给 Grok 的审查任务 |
+| [GROK_REVIEW.md](GROK_REVIEW.md) | Grok Bot 唯一可写的审查回传文件 |
+| [ROADMAP.md](ROADMAP.md) | 阶段总进度 P0–P8 |
 | [CHARACTER_ANIMATION_SPEC.md](CHARACTER_ANIMATION_SPEC.md) | 角色帧画布、锚点、分层 |
 | [UI_POLISH_CHECKLIST.md](UI_POLISH_CHECKLIST.md) | 首屏到清房的 UI 打磨清单 |
 | [BALANCE_RECORD.md](BALANCE_RECORD.md) | 平衡审查口径与版本记录 |
 | [WINDOWS_RELEASE_CHECKLIST.md](WINDOWS_RELEASE_CHECKLIST.md) | Windows 导出与人工验收 |
 | [TEST_BUILD_NOTES.md](TEST_BUILD_NOTES.md) | 当前测试包版本与反馈模板 |
+
+## UI 视觉刷新（监工已拍板）
+
+| 文档 | 内容 |
+| --- | --- |
+| [GPT_UI_IMPLEMENT.md](GPT_UI_IMPLEMENT.md) | **GPT 先读这个**：实施入口与切片顺序 |
+| [UI_DESIGN_REFRESH.md](UI_DESIGN_REFRESH.md) | 完整设计说明、色板、文案、分屏 |
+| [UI_MOCKUPS.md](UI_MOCKUPS.md) | 视觉稿索引 |
+| [ui_mockups/](ui_mockups/) | 标题/HUD/选牌/商店/事件/胜利/确认条/难度 视觉稿 |

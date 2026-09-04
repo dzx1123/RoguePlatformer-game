@@ -15,6 +15,22 @@ func _run_test() -> void:
 	if entry_flow == null or not entry_flow.visible:
 		_fail("The start screen was not shown on game entry")
 		return
+	var player: RoguePlayer = main.get_node("Player") as RoguePlayer
+	var entry_position: Vector2 = player.global_position
+	await create_timer(1.0).timeout
+	var death_recap: Dictionary = main.call(&"get_death_recap_snapshot") as Dictionary
+	if (
+		player.is_dead()
+		or not paused
+		or main.can_process()
+		or player.can_process()
+		or bool(player.get("_input_enabled"))
+		or player.is_physics_processing()
+		or not player.global_position.is_equal_approx(entry_position)
+		or bool(death_recap.get("visible", false))
+	):
+		_fail("The title screen did not suspend background player physics")
+		return
 	var profile_summary: Panel = entry_flow.get_node("ProfileSummary") as Panel
 	var profile_value: Label = profile_summary.get_node("Value") as Label
 	if not profile_summary.visible or not profile_value.text.contains("局外") and not profile_value.text.contains("星屑"):
@@ -30,10 +46,28 @@ func _run_test() -> void:
 	if profile_summary.visible:
 		_fail("Profile summary overlaps difficulty selection")
 		return
+	var difficulty_position: Vector2 = player.global_position
+	await create_timer(1.0).timeout
+	death_recap = main.call(&"get_death_recap_snapshot") as Dictionary
+	if (
+		player.is_dead()
+		or not paused
+		or main.can_process()
+		or player.can_process()
+		or bool(player.get("_input_enabled"))
+		or player.is_physics_processing()
+		or not player.global_position.is_equal_approx(difficulty_position)
+		or bool(death_recap.get("visible", false))
+	):
+		_fail("The difficulty screen did not keep gameplay and input suspended")
+		return
 	easy_button.emit_signal("pressed")
 	await physics_frame
 	if entry_flow.visible or String(main.call(&"get_selected_difficulty_name")) != "简单":
 		_fail("Selecting easy did not start the run with the selected difficulty")
+		return
+	if paused or not main.can_process() or not player.can_process() or not player.is_physics_processing():
+		_fail("Starting a run did not resume the gameplay process tree")
 		return
 	var enemies: Array = main.get("_enemies") as Array
 	if enemies.is_empty() or (enemies[0] as RogueEnemy).get_max_health() >= 72:

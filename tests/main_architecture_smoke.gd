@@ -52,6 +52,9 @@ func _run_test() -> void:
 	if main.get_node_or_null("HUD/BottomHUD") == null:
 		_fail("HUD builder did not create the combat dock")
 		return
+	if main.get_node_or_null("HUD/RewardFeedback") == null:
+		_fail("Main did not compose the shared reward feedback layer")
+		return
 	main.queue_free()
 	print("main_architecture_smoke: PASS")
 	quit(0)

@@ -10,11 +10,13 @@ var _gold_reward: int = 24
 var _heal_reward: int = 24
 var _is_open: bool = false
 var _is_risk: bool = false
+var _reward_resolved: bool = false
 var _visual_time: float = 0.0
 var _opener_in_range: bool = false
 var _reward_bubble_remaining: float = 0.0
 var _prompt_root: Control
 var _prompt_panel: Panel
+var _prompt_pointer: Polygon2D
 var _prompt_key_label: Label
 var _prompt_text_label: Label
 var _prompt_style: StyleBoxFlat
@@ -75,20 +77,20 @@ func _create_prompt_bubble() -> void:
 	_prompt_panel.add_theme_stylebox_override("panel", _prompt_style)
 	_prompt_root.add_child(_prompt_panel)
 
-	var pointer := Polygon2D.new()
-	pointer.name = "Pointer"
-	pointer.position = Vector2(98.0, 40.0)
-	pointer.polygon = PackedVector2Array([
+	_prompt_pointer = Polygon2D.new()
+	_prompt_pointer.name = "Pointer"
+	_prompt_pointer.position = Vector2(98.0, 40.0)
+	_prompt_pointer.polygon = PackedVector2Array([
 		Vector2(-9.0, 0.0),
 		Vector2(9.0, 0.0),
 		Vector2(0.0, 10.0),
 	])
-	pointer.color = (
+	_prompt_pointer.color = (
 		Color(0.96, 0.30, 0.44, 0.92)
 		if _is_risk
 		else Color(0.96, 0.70, 0.28, 0.92)
 	)
-	_prompt_root.add_child(pointer)
+	_prompt_root.add_child(_prompt_pointer)
 
 	var key_panel := Panel.new()
 	key_panel.name = "PromptKey"
@@ -199,7 +201,7 @@ func force_open() -> bool:
 		_prompt_text_label.text = (
 			"伏兵来袭！胜利后领取奖励"
 			if _is_risk
-			else "金币 +%d  生命 +%d" % [_gold_reward, _heal_reward]
+			else "奖励结算中…"
 		)
 		_prompt_text_label.add_theme_font_size_override("font_size", 13)
 	if _prompt_style != null:
@@ -210,6 +212,36 @@ func force_open() -> bool:
 	opened.emit(_gold_reward, _heal_reward)
 	queue_redraw()
 	return true
+
+
+func set_resolved_reward(gold_reward: int, restored_health: int) -> void:
+	if not _is_open or not is_instance_valid(_prompt_text_label):
+		return
+	_reward_resolved = true
+	_reward_bubble_remaining = 1.45
+	_prompt_root.visible = true
+	_prompt_root.modulate.a = 1.0
+	_prompt_key_label.text = "+"
+	_prompt_text_label.text = "金币 +%d  生命恢复 %d" % [
+		maxi(0, gold_reward),
+		maxi(0, restored_health),
+	]
+	_prompt_text_label.add_theme_color_override("font_color", Color(0.86, 1.0, 0.82, 1.0))
+	_prompt_style.bg_color = Color(0.040, 0.120, 0.085, 0.98)
+	_prompt_style.border_color = Color(0.52, 0.96, 0.60, 1.0)
+	_prompt_key_style.border_color = Color(0.52, 0.96, 0.60, 1.0)
+	if is_instance_valid(_prompt_pointer):
+		_prompt_pointer.color = Color(0.52, 0.96, 0.60, 0.96)
+	queue_redraw()
+
+
+func get_prompt_snapshot() -> Dictionary:
+	return {
+		"visible": _prompt_root.visible if is_instance_valid(_prompt_root) else false,
+		"text": _prompt_text_label.text if is_instance_valid(_prompt_text_label) else "",
+		"resolved": _reward_resolved,
+		"remaining": _reward_bubble_remaining,
+	}
 
 
 func is_open() -> bool:

@@ -79,8 +79,14 @@ func _run_test() -> void:
 	await process_frame
 	var entry: Control = main.get_node("HUD/EntryFlow") as Control
 	var start_button: Button = entry.get_node("StartGame") as Button
-	if root.gui_get_focus_owner() != start_button:
-		return _fail("Main menu did not focus Start Game for controller input")
+	var continue_button: Button = entry.get_node("ContinueRun") as Button
+	var primary_button: Button = continue_button if continue_button.visible else start_button
+	if root.gui_get_focus_owner() != primary_button:
+		return _fail("Main menu did not focus its primary action for controller input")
+	if continue_button.visible:
+		await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
+		if root.gui_get_focus_owner() != start_button:
+			return _fail("D-pad could not navigate from Continue to Start Game")
 	await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
 	if root.gui_get_focus_owner() != entry.get_node("EntrySettings"):
 		return _fail("D-pad could not navigate from Start Game to Settings")
@@ -90,6 +96,8 @@ func _run_test() -> void:
 	await _tap_joy_button(JOY_BUTTON_B)
 	if (main.get_node("HUD/SettingsMenu") as Control).visible:
 		return _fail("B did not return from Settings to the main menu")
+	if continue_button.visible:
+		await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
 	await _tap_joy_button(JOY_BUTTON_A)
 	var difficulty_buttons: Array = main.get("_difficulty_buttons") as Array
 	if not (difficulty_buttons[0] as Button).visible:
@@ -108,6 +116,23 @@ func _run_test() -> void:
 	await _tap_joy_button(JOY_BUTTON_RIGHT_SHOULDER)
 	if bool(main.get("_flow_state").shopping):
 		return _fail("RB did not leave the shop")
+
+	main.call(&"_complete_run")
+	await process_frame
+	var victory_button: Button = main.get("_victory_restart_button") as Button
+	if (
+		victory_button == null
+		or not victory_button.visible
+		or victory_button.disabled
+		or root.gui_get_focus_owner() != victory_button
+	):
+		return _fail("Victory summary did not focus its primary controller action")
+	await _tap_joy_button(JOY_BUTTON_A)
+	if (
+		bool(main.get("_flow_state").run_complete)
+		or (main.get_node("HUD/UpgradeChoice") as Control).visible
+	):
+		return _fail("A did not start a new run from the focused victory action")
 
 	main.queue_free()
 	print("controller_interaction_smoke: PASS")

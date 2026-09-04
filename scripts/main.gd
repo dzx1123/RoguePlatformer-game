@@ -24,6 +24,7 @@ const EVENT_CATALOG_SCRIPT := preload("res://scripts/event_catalog.gd")
 const CONTINUE_STORE_SCRIPT := preload("res://scripts/run_continue_store.gd")
 const DEATH_RECAP_SCRIPT := preload("res://scripts/death_recap.gd")
 const TUTORIAL_SCRIPT := preload("res://scripts/run_tutorial.gd")
+const REWARD_FEEDBACK_SCRIPT := preload("res://scripts/reward_feedback.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
 const MENU_MOONLIT_SANCTUM_BACKGROUND := preload("res://assets/backgrounds/menu_moonlit_sanctum_v1.png")
 const BUILD_LABEL := "月蚀混战测试版 0.4.1 · 2026.09.03"
@@ -74,6 +75,13 @@ enum RoomObjective {
 	HOLDOUT,
 	ELITE_HUNT,
 	BRANCH_REWARD,
+}
+
+enum RewardLayerMode {
+	RELIC,
+	SHOP,
+	EVENT,
+	VICTORY,
 }
 
 @export var save_enabled: bool = true
@@ -129,11 +137,19 @@ var _telemetry
 var _boss_enemy: RogueEnemy
 
 var _upgrade_overlay: Control
+var _upgrade_dimmer: ColorRect
+var _upgrade_panel: Panel
+var _upgrade_rule: ColorRect
+var _upgrade_kicker: Label
 var _upgrade_title: Label
 var _upgrade_hint: Label
 var _upgrade_buttons: Array[Button] = []
 var _upgrade_choices: Array[Dictionary] = []
 var _upgrade_tween: Tween
+var _upgrade_victory_summary: Control
+var _victory_restart_button: Button
+var _reward_layer_mode: int = RewardLayerMode.RELIC
+var _reward_feedback: RewardFeedback
 var _entry_overlay: Control
 var _entry_title: Label
 var _entry_subtitle: Label
@@ -224,6 +240,7 @@ func _ready() -> void:
 	_create_build_overview()
 	_create_death_recap()
 	_create_tutorial()
+	_create_reward_feedback()
 	_using_controller_input = not Input.get_connected_joypads().is_empty()
 	_pause_input_handler.call(&"set_initial_device", _using_controller_input)
 	_refresh_input_prompts()
@@ -501,6 +518,10 @@ func _ensure_context_focus() -> void:
 			_settings_resolution_selector.grab_focus()
 		return
 	if is_instance_valid(_upgrade_overlay) and _upgrade_overlay.visible:
+		if _flow_state.run_complete and is_instance_valid(_victory_restart_button):
+			if focus_owner != _victory_restart_button:
+				_victory_restart_button.grab_focus()
+			return
 		if focus_owner != null and _upgrade_overlay.is_ancestor_of(focus_owner):
 			return
 		for button in _upgrade_buttons:
@@ -572,19 +593,19 @@ func _create_upgrade_ui() -> void:
 	_upgrade_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	hud.add_child(_upgrade_overlay)
 
-	var dimmer := ColorRect.new()
-	dimmer.name = "UpgradeDimmer"
-	dimmer.size = DISPLAY_SIZE
-	dimmer.color = Color(0.006, 0.014, 0.035, 0.82)
-	dimmer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_upgrade_overlay.add_child(dimmer)
+	_upgrade_dimmer = ColorRect.new()
+	_upgrade_dimmer.name = "UpgradeDimmer"
+	_upgrade_dimmer.size = DISPLAY_SIZE
+	_upgrade_dimmer.color = Color(0.006, 0.014, 0.035, 0.82)
+	_upgrade_dimmer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_upgrade_overlay.add_child(_upgrade_dimmer)
 
-	var panel := Panel.new()
-	panel.name = "UpgradePanel"
-	panel.position = Vector2(80.0, 110.0)
-	panel.size = Vector2(1120.0, 518.0)
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_theme_stylebox_override(
+	_upgrade_panel = Panel.new()
+	_upgrade_panel.name = "UpgradePanel"
+	_upgrade_panel.position = Vector2(80.0, 110.0)
+	_upgrade_panel.size = Vector2(1120.0, 518.0)
+	_upgrade_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_upgrade_panel.add_theme_stylebox_override(
 		"panel",
 		_create_surface_style(
 			Color(0.018, 0.055, 0.095, 0.975),
@@ -594,25 +615,26 @@ func _create_upgrade_ui() -> void:
 			18
 		)
 	)
-	_upgrade_overlay.add_child(panel)
+	_upgrade_overlay.add_child(_upgrade_panel)
 
-	var upper_rule := ColorRect.new()
-	upper_rule.position = Vector2(42.0, 22.0)
-	upper_rule.size = Vector2(1036.0, 2.0)
-	upper_rule.color = Color(0.42, 0.91, 1.0, 0.72)
-	upper_rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(upper_rule)
+	_upgrade_rule = ColorRect.new()
+	_upgrade_rule.name = "RewardRule"
+	_upgrade_rule.position = Vector2(42.0, 22.0)
+	_upgrade_rule.size = Vector2(1036.0, 2.0)
+	_upgrade_rule.color = Color(0.42, 0.91, 1.0, 0.72)
+	_upgrade_rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_upgrade_panel.add_child(_upgrade_rule)
 
-	var kicker := Label.new()
-	kicker.name = "UpgradeKicker"
-	kicker.position = Vector2(0.0, 38.0)
-	kicker.size = Vector2(1120.0, 28.0)
-	kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	kicker.text = "LUNAR RELIC  ·  CHOOSE ONE"
-	kicker.add_theme_font_size_override("font_size", 15)
-	kicker.add_theme_color_override("font_color", Color(0.42, 0.85, 1.0, 0.92))
-	kicker.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(kicker)
+	_upgrade_kicker = Label.new()
+	_upgrade_kicker.name = "UpgradeKicker"
+	_upgrade_kicker.position = Vector2(0.0, 38.0)
+	_upgrade_kicker.size = Vector2(1120.0, 28.0)
+	_upgrade_kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_upgrade_kicker.text = "LUNAR RELIC  ·  CHOOSE ONE"
+	_upgrade_kicker.add_theme_font_size_override("font_size", 15)
+	_upgrade_kicker.add_theme_color_override("font_color", Color(0.42, 0.85, 1.0, 0.92))
+	_upgrade_kicker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_upgrade_panel.add_child(_upgrade_kicker)
 
 	_upgrade_title = Label.new()
 	_upgrade_title.position = Vector2(55.0, 70.0)
@@ -621,7 +643,7 @@ func _create_upgrade_ui() -> void:
 	_upgrade_title.add_theme_font_size_override("font_size", 33)
 	_upgrade_title.add_theme_color_override("font_color", Color(0.90, 0.97, 1.0, 1.0))
 	_upgrade_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(_upgrade_title)
+	_upgrade_panel.add_child(_upgrade_title)
 
 	_upgrade_hint = Label.new()
 	_upgrade_hint.position = Vector2(70.0, 458.0)
@@ -630,7 +652,7 @@ func _create_upgrade_ui() -> void:
 	_upgrade_hint.add_theme_font_size_override("font_size", 16)
 	_upgrade_hint.add_theme_color_override("font_color", Color(0.62, 0.78, 0.86, 1.0))
 	_upgrade_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(_upgrade_hint)
+	_upgrade_panel.add_child(_upgrade_hint)
 
 	for choice_index in range(3):
 		var button := Button.new()
@@ -649,11 +671,239 @@ func _create_upgrade_ui() -> void:
 		button.focus_exited.connect(_on_upgrade_card_hovered.bind(button, false))
 		_create_upgrade_card_content(button)
 		_style_upgrade_card(button, {})
-		panel.add_child(button)
+		_upgrade_panel.add_child(button)
 		_upgrade_buttons.append(button)
 	_configure_horizontal_focus(_upgrade_buttons)
+	_create_victory_summary()
+	_configure_reward_layer(RewardLayerMode.RELIC)
 
 	_hide_upgrade_overlay()
+
+
+func _create_victory_summary() -> void:
+	_upgrade_victory_summary = Control.new()
+	_upgrade_victory_summary.name = "VictorySummary"
+	_upgrade_victory_summary.position = Vector2(50.0, 150.0)
+	_upgrade_victory_summary.size = Vector2(1020.0, 304.0)
+	_upgrade_victory_summary.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_upgrade_panel.add_child(_upgrade_victory_summary)
+
+	var headings: Array[String] = ["路线净化", "星屑结算", "最终武器"]
+	for stat_index: int in range(3):
+		var card := Panel.new()
+		card.name = "VictoryStat_%d" % stat_index
+		card.position = Vector2(10.0 + float(stat_index) * 340.0, 0.0)
+		card.size = Vector2(320.0, 190.0)
+		card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_theme_stylebox_override(
+			"panel",
+			_create_surface_style(
+				Color(0.018, 0.068, 0.086, 0.94),
+				Color(0.50, 0.92, 0.72, 0.72),
+				14,
+				2,
+				10
+			)
+		)
+		_upgrade_victory_summary.add_child(card)
+
+		var rule := ColorRect.new()
+		rule.position = Vector2(24.0, 18.0)
+		rule.size = Vector2(272.0, 3.0)
+		rule.color = Color(0.56, 0.96, 0.76, 0.88)
+		rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(rule)
+
+		var heading := Label.new()
+		heading.name = "Heading"
+		heading.position = Vector2(20.0, 34.0)
+		heading.size = Vector2(280.0, 28.0)
+		heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		heading.text = headings[stat_index]
+		heading.add_theme_font_size_override("font_size", 14)
+		heading.add_theme_color_override("font_color", Color(0.62, 0.88, 0.76, 1.0))
+		heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(heading)
+
+		var value := Label.new()
+		value.name = "Value"
+		value.position = Vector2(18.0, 70.0)
+		value.size = Vector2(284.0, 52.0)
+		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		value.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		value.add_theme_font_size_override("font_size", 28)
+		value.add_theme_color_override("font_color", Color(0.94, 1.0, 0.96, 1.0))
+		value.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(value)
+
+		var detail := Label.new()
+		detail.name = "Detail"
+		detail.position = Vector2(18.0, 132.0)
+		detail.size = Vector2(284.0, 36.0)
+		detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		detail.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		detail.add_theme_font_size_override("font_size", 13)
+		detail.add_theme_color_override("font_color", Color(0.66, 0.80, 0.76, 1.0))
+		detail.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(detail)
+
+	var result_label := Label.new()
+	result_label.name = "VictoryResult"
+	result_label.position = Vector2(20.0, 198.0)
+	result_label.size = Vector2(980.0, 40.0)
+	result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	result_label.add_theme_font_size_override("font_size", 16)
+	result_label.add_theme_color_override("font_color", Color(0.76, 0.92, 0.82, 1.0))
+	result_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_upgrade_victory_summary.add_child(result_label)
+
+	_victory_restart_button = Button.new()
+	_victory_restart_button.name = "VictoryRestart"
+	_victory_restart_button.position = Vector2(350.0, 246.0)
+	_victory_restart_button.size = Vector2(320.0, 44.0)
+	_victory_restart_button.focus_mode = Control.FOCUS_ALL
+	_victory_restart_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_victory_restart_button.add_theme_font_size_override("font_size", 18)
+	_victory_restart_button.pressed.connect(_on_victory_restart_pressed)
+	_style_victory_restart_button(_victory_restart_button)
+	_upgrade_victory_summary.add_child(_victory_restart_button)
+	_upgrade_victory_summary.visible = false
+
+
+func _style_victory_restart_button(button: Button) -> void:
+	button.add_theme_stylebox_override(
+		"normal",
+		_create_surface_style(
+			Color(0.025, 0.145, 0.125, 0.96),
+			Color(0.40, 0.92, 0.66, 0.86),
+			12,
+			2,
+			8
+		)
+	)
+	button.add_theme_stylebox_override(
+		"hover",
+		_create_surface_style(
+			Color(0.040, 0.205, 0.168, 0.98),
+			Color(0.58, 1.0, 0.76, 1.0),
+			12,
+			2,
+			10
+		)
+	)
+	button.add_theme_stylebox_override(
+		"pressed",
+		_create_surface_style(
+			Color(0.020, 0.105, 0.095, 1.0),
+			Color(0.68, 1.0, 0.82, 1.0),
+			12,
+			2,
+			4
+		)
+	)
+	button.add_theme_stylebox_override(
+		"focus",
+		_create_surface_style(
+			Color(0.035, 0.180, 0.150, 1.0),
+			Color(0.82, 1.0, 0.90, 1.0),
+			12,
+			3,
+			11
+		)
+	)
+	button.add_theme_color_override("font_color", Color(0.90, 1.0, 0.94, 1.0))
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
+	button.add_theme_color_override("font_focus_color", Color.WHITE)
+
+
+func _on_victory_restart_pressed() -> void:
+	if not _flow_state.run_complete:
+		return
+	if is_instance_valid(_soundscape):
+		_soundscape.play_ui()
+	_start_new_run()
+
+
+func _configure_victory_summary(earned_shards: int, unlock_summary: String) -> void:
+	if not is_instance_valid(_upgrade_victory_summary):
+		return
+	var route_card: Panel = _upgrade_victory_summary.get_node("VictoryStat_0") as Panel
+	var shards_card: Panel = _upgrade_victory_summary.get_node("VictoryStat_1") as Panel
+	var weapon_card: Panel = _upgrade_victory_summary.get_node("VictoryStat_2") as Panel
+	(route_card.get_node("Value") as Label).text = "%d / %d" % [ROOMS_PER_RUN, ROOMS_PER_RUN]
+	(route_card.get_node("Detail") as Label).text = "%s难度 · S%d" % [
+		get_selected_difficulty_name(),
+		_run_seed,
+	]
+	(shards_card.get_node("Value") as Label).text = "+%d" % maxi(0, earned_shards)
+	(shards_card.get_node("Detail") as Label).text = "已存入局外成长"
+	(weapon_card.get_node("Value") as Label).text = player.get_weapon_name()
+	(weapon_card.get_node("Detail") as Label).text = "本局最终战斗流派"
+	var result_label: Label = _upgrade_victory_summary.get_node("VictoryResult") as Label
+	result_label.text = (
+		"%s · 已写入局外武器库" % unlock_summary
+		if not unlock_summary.is_empty()
+		else "路线记录已封存 · 可返回标题页查看累计局外进度"
+	)
+
+
+func _configure_reward_layer(mode: int) -> void:
+	_reward_layer_mode = clampi(mode, RewardLayerMode.RELIC, RewardLayerMode.VICTORY)
+	var accent: Color = _get_reward_layer_accent()
+	var background := Color(0.018, 0.055, 0.095, 0.975)
+	var kicker_text := "LUNAR RELIC  ·  CHOOSE ONE"
+	var veil_color := Color(0.006, 0.014, 0.035, 0.82)
+	match _reward_layer_mode:
+		RewardLayerMode.SHOP:
+			background = Color(0.070, 0.046, 0.020, 0.98)
+			kicker_text = "ASTRAL MARKET  ·  PURCHASE ONE"
+			veil_color = Color(0.025, 0.014, 0.004, 0.84)
+		RewardLayerMode.EVENT:
+			background = Color(0.050, 0.025, 0.090, 0.98)
+			kicker_text = "ECLIPSE OMEN  ·  EVERY CHOICE HAS A PRICE"
+			veil_color = Color(0.018, 0.006, 0.038, 0.85)
+		RewardLayerMode.VICTORY:
+			background = Color(0.014, 0.058, 0.062, 0.985)
+			kicker_text = "ROUTE SEALED  ·  LUNAR ECLIPSE CONQUERED"
+			veil_color = Color(0.004, 0.024, 0.030, 0.88)
+	_upgrade_dimmer.color = veil_color
+	_upgrade_panel.add_theme_stylebox_override(
+		"panel",
+		_create_surface_style(background, Color(accent, 0.86), 18, 2, 18)
+	)
+	_upgrade_rule.color = Color(accent, 0.76)
+	_upgrade_kicker.text = kicker_text
+	_upgrade_kicker.add_theme_color_override("font_color", Color(accent, 0.94))
+	var is_victory: bool = _reward_layer_mode == RewardLayerMode.VICTORY
+	_upgrade_victory_summary.visible = is_victory
+	if is_instance_valid(_victory_restart_button):
+		_victory_restart_button.visible = is_victory
+		_victory_restart_button.disabled = not is_victory
+	var sigil_text := "◇"
+	if _reward_layer_mode == RewardLayerMode.SHOP:
+		sigil_text = "✦"
+	elif _reward_layer_mode == RewardLayerMode.EVENT:
+		sigil_text = "◐"
+	for button: Button in _upgrade_buttons:
+		var sigil: Label = button.get_node_or_null("CardSigil") as Label
+		if sigil != null:
+			sigil.text = sigil_text
+			sigil.add_theme_color_override("font_color", Color(accent, 0.82))
+
+
+func _get_reward_layer_accent() -> Color:
+	match _reward_layer_mode:
+		RewardLayerMode.SHOP:
+			return Color("#e9b85c")
+		RewardLayerMode.EVENT:
+			return Color("#b985ff")
+		RewardLayerMode.VICTORY:
+			return Color("#72e0a1")
+		_:
+			return Color("#55d9f2")
 
 
 func _create_surface_style(
@@ -682,7 +932,7 @@ func _style_upgrade_card(button: Button, choice: Dictionary) -> void:
 	var rarity_name: String = String(choice.get("rarity_name", "普通"))
 	if _flow_state.event_active:
 		rarity_name = "事件"
-	var accent := Color(0.44, 0.84, 0.96, 1.0)
+	var accent: Color = _get_reward_layer_accent()
 	match rarity_name:
 		"稀有":
 			accent = Color(0.53, 0.55, 1.0, 1.0)
@@ -863,6 +1113,9 @@ func _play_upgrade_overlay_intro() -> void:
 	panel.scale = Vector2.ONE * 0.96
 	_upgrade_title.modulate = Color(1.0, 1.0, 1.0, 0.0)
 	_upgrade_hint.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	if is_instance_valid(_upgrade_victory_summary) and _upgrade_victory_summary.visible:
+		_upgrade_victory_summary.position = Vector2(50.0, 168.0)
+		_upgrade_victory_summary.modulate = Color(1.0, 1.0, 1.0, 0.0)
 	for choice_index in range(_upgrade_buttons.size()):
 		var button: Button = _upgrade_buttons[choice_index]
 		if not button.visible:
@@ -877,6 +1130,13 @@ func _play_upgrade_overlay_intro() -> void:
 	_upgrade_tween.tween_property(panel, "scale", Vector2.ONE, 0.30)
 	_upgrade_tween.tween_property(_upgrade_title, "modulate:a", 1.0, 0.24).set_delay(0.06)
 	_upgrade_tween.tween_property(_upgrade_hint, "modulate:a", 1.0, 0.20).set_delay(0.16)
+	if is_instance_valid(_upgrade_victory_summary) and _upgrade_victory_summary.visible:
+		_upgrade_tween.tween_property(
+			_upgrade_victory_summary, "modulate:a", 1.0, 0.26
+		).set_delay(0.12)
+		_upgrade_tween.tween_property(
+			_upgrade_victory_summary, "position", Vector2(50.0, 150.0), 0.34
+		).set_delay(0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	for choice_index in range(_upgrade_buttons.size()):
 		var button: Button = _upgrade_buttons[choice_index]
 		if not button.visible:
@@ -1172,7 +1432,7 @@ func _play_entry_transition(showing_difficulty: bool) -> void:
 		control.modulate = Color(1.0, 1.0, 1.0, 0.0)
 		control.position += Vector2(0.0, 12.0)
 		control.scale = Vector2.ONE * 0.985
-	_entry_tween = create_tween().set_parallel(true)
+	_entry_tween = create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_parallel(true)
 	if frame != null and frame.visible:
 		_entry_tween.tween_property(frame, "modulate:a", 1.0, 0.26)
 		_entry_tween.tween_property(frame, "scale", Vector2.ONE, 0.30)
@@ -1803,6 +2063,8 @@ func _resume_game() -> void:
 func _return_to_main_menu() -> void:
 	_persist_continue_snapshot()
 	_resume_game()
+	if is_instance_valid(_reward_feedback):
+		_reward_feedback.hide_feedback()
 	_set_run_phase(RunFlowState.Phase.IDLE)
 	_hide_upgrade_overlay()
 	_clear_chest()
@@ -1998,6 +2260,8 @@ func _on_vsync_toggled(enabled: bool) -> void:
 func _on_reduced_effects_toggled(enabled: bool) -> void:
 	_settings.call(&"set_reduced_effects_enabled", enabled)
 	player.set_reduced_effects_enabled(enabled)
+	if is_instance_valid(_reward_feedback):
+		_reward_feedback.set_reduced_motion(enabled)
 	if enabled:
 		_camera_shake_remaining = 0.0
 		var camera: Camera2D = player.get_node_or_null("Camera2D") as Camera2D
@@ -2017,6 +2281,9 @@ func _quit_game() -> void:
 
 func _show_start_screen() -> void:
 	_entry_flow_active = true
+	_set_entry_gameplay_suspended(true)
+	if is_instance_valid(_reward_feedback):
+		_reward_feedback.hide_feedback()
 	player.set_input_enabled(false)
 	_entry_overlay.visible = true
 	(_entry_overlay.get_node("EntryFrame") as Panel).visible = true
@@ -2046,6 +2313,7 @@ func _show_start_screen() -> void:
 
 
 func _show_difficulty_selection() -> void:
+	_set_entry_gameplay_suspended(true)
 	_entry_overlay.visible = true
 	_reset_entry_layout()
 	(_entry_overlay.get_node("EntryFrame") as Panel).visible = false
@@ -2151,6 +2419,8 @@ func _start_new_run() -> void:
 		_death_recap.hide_recap()
 	if is_instance_valid(_tutorial):
 		_tutorial.hide_lesson()
+	if is_instance_valid(_reward_feedback):
+		_reward_feedback.hide_feedback()
 	_run_generation += 1
 	_run_number += 1
 	if _next_run_seed >= 0:
@@ -2171,6 +2441,7 @@ func _start_new_run() -> void:
 	_clear_projectiles()
 	_clear_enemies()
 	_clear_platform_colliders()
+	_set_entry_gameplay_suspended(false)
 	player.set_input_enabled(false)
 	player.configure_weapon(_progression.get_selected_weapon())
 	player.reset_run_progression()
@@ -2884,6 +3155,15 @@ func _on_room_cleared() -> void:
 	if _current_encounter == EncounterType.RISK_CHEST and resolved_risk_ambush:
 		_gold += _pending_risk_gold
 		var restored_health: int = player.heal(_pending_risk_heal)
+		if is_instance_valid(_chest):
+			_chest.set_resolved_reward(_pending_risk_gold, restored_health)
+		_present_reward_feedback(
+			&"risk_reward",
+			"RISK CONTRACT  ·  CLAIM SECURED",
+			"伏兵已肃清",
+			"金币 +%d  ·  生命恢复 %d" % [_pending_risk_gold, restored_health],
+			Color("#ff7188")
+		)
 		_set_status("风险挑战完成：金币 +%d，生命恢复 %d" % [
 			_pending_risk_gold,
 			restored_health,
@@ -2970,6 +3250,7 @@ func _show_upgrade_choice() -> void:
 	if _telemetry != null:
 		_telemetry.record_upgrade_offers(_upgrade_choices, player.get_weapon_id())
 	_set_run_phase(RunFlowState.Phase.UPGRADE)
+	_configure_reward_layer(RewardLayerMode.RELIC)
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "房间已清理——选择一项强化"
 	_refresh_choice_overlay_prompts()
@@ -2988,6 +3269,7 @@ func _show_shop() -> void:
 	)
 	if _telemetry != null:
 		_telemetry.record_upgrade_offers(_upgrade_choices, player.get_weapon_id())
+	_configure_reward_layer(RewardLayerMode.SHOP)
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "星尘旅商——购买一项强化"
 	_refresh_choice_overlay_prompts()
@@ -3001,6 +3283,7 @@ func _show_shop() -> void:
 func _show_event_choice() -> void:
 	_set_run_phase(RunFlowState.Phase.EVENT)
 	_upgrade_choices = EVENT_CATALOG_SCRIPT.create_choices()
+	_configure_reward_layer(RewardLayerMode.EVENT)
 	_upgrade_overlay.visible = true
 	_upgrade_title.text = "月蚀奇遇——每项回应都有代价"
 	_refresh_choice_overlay_prompts()
@@ -3019,10 +3302,17 @@ func _refresh_choice_overlay_prompts() -> void:
 	):
 		return
 	if _flow_state.run_complete:
-		_upgrade_hint.text = "已通过 %d 个房间。按 %s 开启随机新一局" % [
-			ROOMS_PER_RUN,
-			_get_action_prompt(&"restart"),
-		]
+		if is_instance_valid(_victory_restart_button):
+			_victory_restart_button.text = (
+				"再启一轮  [A]" if _using_controller_input else "再启一轮  [Enter]"
+			)
+		_upgrade_hint.text = (
+			"已通过 %d 个房间。按 A 确认，或按 %s 快速开启随机新一局"
+			% [ROOMS_PER_RUN, _get_action_prompt(&"restart")]
+			if _using_controller_input
+			else "已通过 %d 个房间。点击按钮或按 %s 开启随机新一局"
+			% [ROOMS_PER_RUN, _get_action_prompt(&"restart")]
+		)
 		return
 	if not _flow_state.choosing_upgrade or _upgrade_choices.size() < _upgrade_buttons.size():
 		return
@@ -3106,7 +3396,8 @@ func choose_upgrade(choice_index: int) -> bool:
 	if _flow_state.event_active:
 		return _resolve_event_choice(choice_index)
 	var choice: Dictionary = _upgrade_choices[choice_index]
-	if _flow_state.shopping:
+	var was_shopping: bool = _flow_state.shopping
+	if was_shopping:
 		var cost: int = int(choice.get("cost", 0))
 		if _gold < cost:
 			_set_status("金币不足：需要 %d，当前 %d" % [cost, _gold])
@@ -3119,6 +3410,13 @@ func choose_upgrade(choice_index: int) -> bool:
 	if _telemetry != null:
 		_telemetry.record_upgrade_choice(upgrade_id, player.get_weapon_id())
 	_last_upgrade_name = String(choice.get("name", "强化"))
+	_present_reward_feedback(
+		&"shop" if was_shopping else &"relic",
+		"ASTRAL MARKET  ·  TRANSACTION COMPLETE" if was_shopping else "LUNAR RELIC  ·  RESONANCE LOCKED",
+		"已购入「%s」" % _last_upgrade_name if was_shopping else "已获得「%s」" % _last_upgrade_name,
+		String(choice.get("description", "强化已写入本局构筑")),
+		Color("#e9b85c") if was_shopping else _get_reward_layer_accent()
+	)
 	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_upgrade_choices.clear()
 	_hide_upgrade_overlay()
@@ -3133,20 +3431,49 @@ func _resolve_event_choice(choice_index: int) -> bool:
 	var choice: Dictionary = _upgrade_choices[choice_index]
 	var amount: int = int(choice.get("amount", 0))
 	var effect: StringName = choice.get("effect", &"")
+	var gold_before: int = _gold
+	var shards_before: int = _run_shards
+	var health_before: int = player.get_current_health()
+	var max_health_before: int = player.get_max_health()
+	var requested_heal: int = 0
+	var requested_damage: int = 0
+	var requested_gold_delta: int = 0
 	match effect:
 		&"rest", &"heal":
-			player.heal(int(choice.get("heal", amount)))
-			_gold = maxi(0, _gold + int(choice.get("gold", 0)))
+			requested_heal = int(choice.get("heal", amount))
+			requested_gold_delta = int(choice.get("gold", 0))
+			player.heal(requested_heal)
+			_gold = maxi(0, _gold + requested_gold_delta)
 		&"gold":
+			requested_gold_delta = amount
+			requested_damage = int(choice.get("damage", 0))
 			_gold += amount
-			player.apply_event_cost(int(choice.get("damage", 0)))
+			player.apply_event_cost(requested_damage)
 		&"shards":
+			requested_heal = int(choice.get("heal", 12))
 			_run_shards += amount
-			player.heal(int(choice.get("heal", 12)))
+			player.heal(requested_heal)
 			player.apply_max_health_delta(int(choice.get("max_health", 0)))
 		_:
 			return false
+	var resolution_detail: String = _format_event_resolution_detail(
+		effect,
+		_gold - gold_before,
+		_run_shards - shards_before,
+		player.get_current_health() - health_before,
+		player.get_max_health() - max_health_before,
+		requested_heal,
+		requested_damage,
+		requested_gold_delta
+	)
 	_last_upgrade_name = String(choice.get("name", "奇遇"))
+	_present_reward_feedback(
+		&"event",
+		"ECLIPSE OMEN  ·  CHOICE INSCRIBED",
+		"已回应「%s」" % _last_upgrade_name,
+		resolution_detail,
+		Color("#b985ff")
+	)
 	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_upgrade_choices.clear()
 	_hide_upgrade_overlay()
@@ -3155,14 +3482,95 @@ func _resolve_event_choice(choice_index: int) -> bool:
 	return true
 
 
+func _format_event_resolution_detail(
+	effect: StringName,
+	gold_delta: int,
+	shard_delta: int,
+	health_delta: int,
+	max_health_delta: int,
+	requested_heal: int,
+	requested_damage: int,
+	requested_gold_delta: int
+) -> String:
+	var details := PackedStringArray()
+	match effect:
+		&"rest", &"heal":
+			if health_delta > 0:
+				details.append("生命恢复 %d" % health_delta)
+			elif requested_heal > 0:
+				details.append("生命已满")
+		&"gold":
+			if health_delta < 0:
+				details.append("生命 -%d" % absi(health_delta))
+			elif requested_damage > 0:
+				details.append("生命未扣除（最低保留 1）")
+		&"shards":
+			var shard_text: String = _format_signed_event_delta("星屑", shard_delta)
+			if not shard_text.is_empty():
+				details.append(shard_text)
+			if health_delta > 0:
+				details.append("当前生命 +%d" % health_delta)
+			elif health_delta < 0:
+				details.append("当前生命 -%d" % absi(health_delta))
+			elif requested_heal > 0:
+				details.append("当前生命不变")
+	var gold_text: String = _format_signed_event_delta("金币", gold_delta)
+	if not gold_text.is_empty():
+		details.append(gold_text)
+	elif requested_gold_delta < 0:
+		details.append("金币未扣除（余额为 0）")
+	var max_health_text: String = _format_signed_event_delta("最大生命", max_health_delta)
+	if not max_health_text.is_empty():
+		details.append(max_health_text)
+	if details.is_empty():
+		return "结果已结算，当前数值未发生变化"
+	return " · ".join(details)
+
+
+func _format_signed_event_delta(label_text: String, delta: int) -> String:
+	if delta > 0:
+		return "%s +%d" % [label_text, delta]
+	if delta < 0:
+		return "%s -%d" % [label_text, absi(delta)]
+	return ""
+
+
 func _leave_shop() -> void:
 	if not _flow_state.shopping:
 		return
 	_last_upgrade_name = "未购物"
+	_present_reward_feedback(
+		&"shop_exit",
+		"ASTRAL MARKET  ·  DEPARTURE",
+		"暂别星尘旅商",
+		"未进行交易，金币已保留",
+		Color("#8ba6b4"),
+		0.46
+	)
 	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	_upgrade_choices.clear()
 	_hide_upgrade_overlay()
 	_advance_to_next_room()
+
+
+func _present_reward_feedback(
+	kind: StringName,
+	kicker_text: String,
+	title_text: String,
+	detail_text: String,
+	accent_color: Color,
+	hold_seconds: float = 0.72
+) -> void:
+	if not is_instance_valid(_reward_feedback):
+		return
+	_reward_feedback.present(
+		kind,
+		kicker_text,
+		title_text,
+		detail_text,
+		accent_color,
+		hold_seconds
+	)
 
 
 func _complete_run() -> void:
@@ -3173,15 +3581,24 @@ func _complete_run() -> void:
 		_telemetry.finish_run(true, player.get_weapon_id(), &"victory")
 	_clear_projectiles()
 	player.set_input_enabled(false)
+	if is_instance_valid(_reward_feedback):
+		_reward_feedback.hide_feedback()
+	var earned_shards: int = _run_shards + 8
+	var unlock_summary: String = _bank_run_progress(true)
+	_configure_reward_layer(RewardLayerMode.VICTORY)
 	_upgrade_overlay.visible = true
-	_upgrade_title.text = "本局完成"
+	_upgrade_title.text = "月蚀路线已封印"
 	_refresh_choice_overlay_prompts()
 	for button in _upgrade_buttons:
 		button.visible = false
+	_configure_victory_summary(earned_shards, unlock_summary)
 	_play_upgrade_overlay_intro()
-	var unlocked_names: String = _bank_run_progress(true)
+	_ensure_context_focus()
 	_clear_continue_snapshot()
-	_set_status("胜利——首领已击败，本局星屑已结算%s" % unlocked_names)
+	_set_status(
+		"胜利——首领已击败，本局星屑已结算%s"
+		% _format_unlock_suffix(unlock_summary)
+	)
 	_update_economy_hud()
 	_update_controls()
 	_update_room_label()
@@ -3194,6 +3611,9 @@ func _hide_upgrade_overlay() -> void:
 		_upgrade_overlay.visible = false
 	for button in _upgrade_buttons:
 		button.disabled = true
+	if is_instance_valid(_victory_restart_button):
+		_victory_restart_button.disabled = true
+		_victory_restart_button.visible = false
 
 
 func _spawn_reward_chest() -> void:
@@ -3270,6 +3690,8 @@ func _on_chest_opened(gold_reward: int, heal_reward: int) -> void:
 	if _current_encounter == EncounterType.RISK_CHEST:
 		_pending_risk_gold = gold_reward
 		_pending_risk_heal = heal_reward
+		if is_instance_valid(_reward_feedback):
+			_reward_feedback.hide_feedback()
 		_set_run_phase(RunFlowState.Phase.RISK_AMBUSH)
 		player.set_input_enabled(true)
 		_spawn_risk_ambush()
@@ -3279,6 +3701,15 @@ func _on_chest_opened(gold_reward: int, heal_reward: int) -> void:
 	_gold += gold_reward
 	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	var restored_health: int = player.heal(heal_reward)
+	if is_instance_valid(_chest):
+		_chest.set_resolved_reward(gold_reward, restored_health)
+	_present_reward_feedback(
+		&"chest",
+		"MOONLIT CACHE  ·  REWARD ACQUIRED",
+		"宝箱已开启",
+		"金币 +%d  ·  生命恢复 %d" % [gold_reward, restored_health],
+		Color("#f0bd62")
+	)
 	player.set_input_enabled(false)
 	_set_status("宝箱：金币 +%d，生命恢复 %d" % [gold_reward, restored_health])
 	_update_economy_hud()
@@ -3411,8 +3842,14 @@ func _on_boss_phase_changed(phase: int) -> void:
 
 
 func _on_player_died() -> void:
+	# Entry screens have no gameplay floor. Keep an accidental physics update from
+	# turning the title or difficulty screen into a real run death.
+	if _entry_flow_active or _flow_state.phase == RunFlowState.Phase.IDLE:
+		return
 	if _flow_state.death_restart_pending:
 		return
+	if is_instance_valid(_reward_feedback):
+		_reward_feedback.hide_feedback()
 	if _telemetry != null:
 		var death_reason: StringName = player.get_last_death_reason()
 		_telemetry.record_death(death_reason)
@@ -3426,9 +3863,9 @@ func _on_player_died() -> void:
 	_hide_upgrade_overlay()
 	if is_instance_valid(_tutorial):
 		_tutorial.hide_lesson()
-	var unlocked_names: String = _bank_run_progress(false)
+	var unlock_summary: String = _bank_run_progress(false)
 	_clear_continue_snapshot()
-	_present_death_recap(unlocked_names)
+	_present_death_recap(unlock_summary)
 	_update_economy_hud()
 	_update_controls()
 	_update_lives_hud()
@@ -3556,7 +3993,11 @@ func _bank_run_progress(victory: bool) -> String:
 	var unlocked_names: Array[String] = []
 	for weapon_id in newly_unlocked:
 		unlocked_names.append(WeaponCatalog.get_weapon_name(weapon_id))
-	return "；解锁「%s」" % "、".join(unlocked_names)
+	return "解锁「%s」" % "、".join(unlocked_names)
+
+
+func _format_unlock_suffix(unlock_summary: String) -> String:
+	return "" if unlock_summary.is_empty() else "；%s" % unlock_summary
 
 
 func _get_encounter_for_room(room_index: int) -> int:
@@ -3865,12 +4306,20 @@ func _create_death_recap() -> void:
 	hud.add_child(_death_recap)
 
 
+func _create_reward_feedback() -> void:
+	_reward_feedback = REWARD_FEEDBACK_SCRIPT.new() as RewardFeedback
+	hud.add_child(_reward_feedback)
+	_reward_feedback.set_reduced_motion(
+		bool(_settings.call(&"get_reduced_effects_enabled"))
+	)
+
+
 func _create_tutorial() -> void:
 	_tutorial = TUTORIAL_SCRIPT.new()
 	hud.add_child(_tutorial)
 
 
-func _present_death_recap(unlocked_names: String) -> void:
+func _present_death_recap(unlock_summary: String) -> void:
 	if not is_instance_valid(_death_recap):
 		return
 	var telemetry_snapshot: Dictionary = (
@@ -3889,11 +4338,12 @@ func _present_death_recap(unlocked_names: String) -> void:
 	var reason: String = String(player.get_last_death_reason())
 	if reason.is_empty():
 		reason = String(current_room.get("death_reason", "unknown"))
+	var unlock_suffix: String = _format_unlock_suffix(unlock_summary)
 	var hint: String = (
 		"命数耗尽后将返回难度选择%s"
-		% unlocked_names
+		% unlock_suffix
 		if _lives_remaining <= 0
-		else "即将用剩余 %d 条命重开一条路线%s" % [_lives_remaining, unlocked_names]
+		else "即将用剩余 %d 条命重开一条路线%s" % [_lives_remaining, unlock_suffix]
 	)
 	_death_recap.present({
 		"reason": reason,
@@ -4117,6 +4567,7 @@ func _continue_saved_run() -> bool:
 		_encounter_sequence.append(int(encounter_value))
 	if _room_sequence.is_empty():
 		return false
+	_set_entry_gameplay_suspended(false)
 	_current_room_index = clampi(
 		int(snapshot.get("room_index", 0)),
 		0,
@@ -4170,6 +4621,7 @@ func _continue_saved_run() -> bool:
 	if resume_phase == RunFlowState.Phase.UPGRADE and _upgrade_choices.size() >= 3:
 		player.set_input_enabled(false)
 		_set_run_phase(RunFlowState.Phase.UPGRADE)
+		_configure_reward_layer(RewardLayerMode.RELIC)
 		_upgrade_overlay.visible = true
 		_upgrade_title.text = "房间已清理——选择一项强化"
 		_refresh_choice_overlay_prompts()
@@ -4181,6 +4633,7 @@ func _continue_saved_run() -> bool:
 			_show_shop()
 		else:
 			_set_run_phase(RunFlowState.Phase.SHOP)
+			_configure_reward_layer(RewardLayerMode.SHOP)
 			_upgrade_overlay.visible = true
 			_upgrade_title.text = "星尘旅商——购买一项强化"
 			_refresh_choice_overlay_prompts()
@@ -4192,6 +4645,7 @@ func _continue_saved_run() -> bool:
 			_show_event_choice()
 		else:
 			_set_run_phase(RunFlowState.Phase.EVENT)
+			_configure_reward_layer(RewardLayerMode.EVENT)
 			_upgrade_overlay.visible = true
 			_upgrade_title.text = "月蚀奇遇——每项回应都有代价"
 			_refresh_choice_overlay_prompts()
@@ -4214,6 +4668,16 @@ func _continue_saved_run() -> bool:
 	_refresh_build_overview()
 	_update_music_state()
 	return true
+
+
+func _set_entry_gameplay_suspended(suspended: bool) -> void:
+	# Entry controls live under the always-processing HUD. Pausing the tree freezes
+	# every gameplay actor and Main's input polling while menu tweens keep running.
+	get_tree().paused = suspended
+	player.set_physics_process(not suspended)
+	if suspended:
+		player.velocity = Vector2.ZERO
+		player.set_input_enabled(false)
 
 
 func _draw_gothic_platform(rect: Rect2, room_accent: Color) -> void:

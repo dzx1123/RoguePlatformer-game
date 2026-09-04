@@ -25,7 +25,7 @@ func _capture_preview() -> void:
 
 	var main_scene: PackedScene = load("res://scenes/Main.tscn")
 	var main: Node2D = main_scene.instantiate() as Node2D
-	if mode in ["portal", "upgrade"]:
+	if mode in ["portal", "upgrade", "shop", "event", "chest", "victory"]:
 		main.set("save_enabled", false)
 	root.add_child(main)
 	await physics_frame
@@ -42,10 +42,23 @@ func _capture_preview() -> void:
 				(main.get_node("Player") as Node2D).global_position = (main.get_node("RoomExitPortal") as Node2D).global_position
 				main.call(&"_activate_room_exit")
 				await create_timer(0.30).timeout
+		"shop":
+			main.set("_gold", 999)
+			main.call(&"_show_shop")
+		"event":
+			main.call(&"_show_event_choice")
+		"chest":
+			main.call(&"_clear_enemies")
+			main.call(&"_spawn_reward_chest")
+			await process_frame
+			main.call(&"open_current_chest_for_test")
+		"victory":
+			main.call(&"_complete_run")
 		_:
 			pass
 
-	await create_timer(0.72).timeout
+	var settle_seconds: float = 0.42 if mode == "chest" else 0.72
+	await create_timer(settle_seconds).timeout
 	var viewport_texture: Texture2D = root.get_texture()
 	if viewport_texture == null:
 		push_error("P7 UI preview could not read the rendered viewport")

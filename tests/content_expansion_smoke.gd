@@ -84,7 +84,7 @@ func _run_test() -> void:
 	if not bool(main.call(&"open_current_chest_for_test")):
 		_fail("Reward chest could not be opened")
 		return
-	if not prompt_text.text.contains("金币 +24") or not prompt_text.text.contains("生命 +24"):
+	if not prompt_text.text.contains("金币 +24") or not prompt_text.text.contains("生命恢复"):
 		_fail("Opening the chest did not transform the prompt into a reward bubble")
 		return
 	await _wait_physics_frames(5)
@@ -177,6 +177,7 @@ func _run_test() -> void:
 			return
 
 	for room_number in range(6, 21):
+		var risk_chest_under_test: RewardChest
 		if bool(main.call(&"is_event_active")):
 			if not bool(main.call(&"choose_upgrade", 0)):
 				_fail("Event room %d could not resolve its choice" % room_number)
@@ -186,6 +187,7 @@ func _run_test() -> void:
 		if bool(main.call(&"is_awaiting_chest")):
 			var entry_chest: RewardChest = main.get("_chest") as RewardChest
 			if entry_chest != null and entry_chest.is_risk_chest():
+				risk_chest_under_test = entry_chest
 				if not bool(main.call(&"open_current_chest_for_test")):
 					_fail("Risk chest in room %d could not be opened" % room_number)
 					return
@@ -242,6 +244,14 @@ func _run_test() -> void:
 				return
 		_defeat_current_room(main)
 		await _wait_physics_frames(36)
+		if is_instance_valid(risk_chest_under_test):
+			var resolved_prompt: Dictionary = risk_chest_under_test.get_prompt_snapshot()
+			if (
+				not bool(resolved_prompt.get("resolved", false))
+				or not String(resolved_prompt.get("text", "")).contains("生命恢复")
+			):
+				_fail("Risk chest in room %d did not show its resolved reward" % room_number)
+				return
 		if bool(main.call(&"is_awaiting_chest")):
 			main.call(&"open_current_chest_for_test")
 			await _wait_physics_frames(5)
