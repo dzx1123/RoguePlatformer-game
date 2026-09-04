@@ -66,10 +66,14 @@ func _run_test() -> void:
 	if not bool(main.get("_flow_state").awaiting_exit):
 		return _fail("RB did not open the reward chest and reveal the room-exit portal")
 	await _tap_joy_button(JOY_BUTTON_A)
+	if not bool(main.get("_flow_state").awaiting_exit):
+		return _fail("A unexpectedly entered the portal instead of the interaction key")
+	player.global_position = (main.get_node("RoomExitPortal") as Node2D).global_position
+	await _tap_joy_button(JOY_BUTTON_RIGHT_SHOULDER)
 	for _frame_index: int in range(20):
 		await physics_frame
 	if not bool(main.get("_flow_state").choosing_upgrade):
-		return _fail("A did not enter the room-exit portal and advance to card choice")
+		return _fail("RB near the portal did not advance to card choice")
 
 	main.call(&"_return_to_main_menu")
 	await process_frame

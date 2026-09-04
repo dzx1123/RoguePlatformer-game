@@ -39,6 +39,7 @@ func _capture_preview() -> void:
 			main.call(&"_on_room_cleared")
 			await process_frame
 			if mode == "upgrade":
+				(main.get_node("Player") as Node2D).global_position = (main.get_node("RoomExitPortal") as Node2D).global_position
 				main.call(&"_activate_room_exit")
 				await create_timer(0.30).timeout
 		_:

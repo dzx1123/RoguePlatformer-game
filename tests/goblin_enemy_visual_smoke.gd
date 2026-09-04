@@ -50,6 +50,11 @@ func _run_test() -> void:
 	root.add_child(elite)
 	root.add_child(archer)
 	await physics_frame
+	for goblin: RogueEnemy in [club, elite, archer]:
+		var visual := goblin.get_node("EnemySprite") as Sprite2D
+		if visual.material != RogueEnemy.GOBLIN_EDGE_MATERIAL:
+			_fail("Goblin animation is missing the alpha-edge cleanup material")
+			return
 
 	var club_sprite := club.get_node("EnemySprite") as Sprite2D
 	var elite_sprite := elite.get_node("EnemySprite") as Sprite2D

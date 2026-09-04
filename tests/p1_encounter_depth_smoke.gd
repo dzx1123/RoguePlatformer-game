@@ -119,6 +119,7 @@ func _defeat_current_room(main: Node2D) -> void:
 
 
 func _enter_room_exit(main: Node2D) -> bool:
+	(main.get_node("Player") as Node2D).global_position = (main.get_node("RoomExitPortal") as Node2D).global_position
 	if not bool(main.call(&"_activate_room_exit")):
 		_fail("Cleared room exit portal could not be activated")
 		return false

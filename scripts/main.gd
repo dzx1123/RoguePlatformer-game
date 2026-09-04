@@ -160,6 +160,7 @@ var _settings_vsync_toggle: CheckButton
 var _settings_reduced_effects_toggle: CheckButton
 var _settings_damage_numbers_toggle: CheckButton
 var _settings_guide_label: RichTextLabel
+var _settings_combat_guide_label: RichTextLabel
 var _settings_controller_status_label: Label
 var _settings_display_status_label: Label
 var _settings_from_pause: bool = false
@@ -174,6 +175,7 @@ var _soundscape: RogueSoundscape
 
 func _set_run_phase(next_phase: int) -> void:
 	_flow_state.transition_to(next_phase)
+	queue_redraw()
 
 
 func _ready() -> void:
@@ -258,7 +260,9 @@ func _process(_delta: float) -> void:
 		_start_new_run()
 		return
 	if Input.is_action_just_pressed(&"interact"):
-		if _flow_state.awaiting_chest:
+		if _flow_state.awaiting_exit:
+			_activate_room_exit()
+		elif _flow_state.awaiting_chest:
 			_open_current_chest()
 		elif _flow_state.shopping:
 			_leave_shop()
@@ -266,6 +270,8 @@ func _process(_delta: float) -> void:
 		_cycle_weapon()
 	if is_instance_valid(_chest):
 		_chest.set_opener_position(player.global_position)
+	if is_instance_valid(_room_exit_portal):
+		_room_exit_portal.set_opener_position(player.global_position)
 	_update_equipment_hud()
 	_update_ability_hud()
 	_update_lives_hud()
@@ -360,7 +366,7 @@ func _on_always_key_pressed(event: InputEventKey) -> void:
 			_refresh_settings_key_buttons()
 		get_viewport().set_input_as_handled()
 		return
-	if _flow_state.awaiting_exit and not event.is_action_pressed(&"pause"):
+	if _flow_state.awaiting_exit and event.is_action_pressed(&"interact") and not _is_game_paused:
 		_activate_room_exit()
 		get_viewport().set_input_as_handled()
 		return
@@ -419,8 +425,8 @@ func _on_controller_overview_pressed() -> void:
 	get_viewport().set_input_as_handled()
 
 
-func _on_always_controller_button_pressed(_event: InputEventJoypadButton) -> void:
-	if not _flow_state.awaiting_exit:
+func _on_always_controller_button_pressed(event: InputEventJoypadButton) -> void:
+	if not _flow_state.awaiting_exit or not event.is_action_pressed(&"interact") or _is_game_paused:
 		return
 	_activate_room_exit()
 	get_viewport().set_input_as_handled()
@@ -449,7 +455,7 @@ func _refresh_input_prompts() -> void:
 		_chest.set_interaction_prompt(_get_action_prompt(&"interact"))
 	if is_instance_valid(_room_exit_portal):
 		_room_exit_portal.set_prompt_text(
-			"按任意键 / A 进入" if _using_controller_input else "按任意键进入"
+			"%s 进入下一房" % _get_action_prompt(&"interact")
 		)
 	if is_instance_valid(_settings_controller_status_label):
 		var connected_count: int = Input.get_connected_joypads().size()
@@ -1429,15 +1435,36 @@ func _create_settings_ui() -> void:
 	guide_panel.visible = false
 	_settings_guide_label = RichTextLabel.new()
 	_settings_guide_label.name = "OperationGuide"
-	_settings_guide_label.position = Vector2(720.0, 380.0)
-	_settings_guide_label.size = Vector2(466.0, 260.0)
+	_settings_guide_label.position = Vector2(710.0, 388.0)
+	_settings_guide_label.size = Vector2(240.0, 264.0)
 	_settings_guide_label.bbcode_enabled = true
 	_settings_guide_label.fit_content = false
 	_settings_guide_label.scroll_active = false
 	_settings_guide_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_settings_guide_label.add_theme_font_size_override("normal_font_size", 13)
-	_settings_guide_label.add_theme_color_override("default_color", Color(0.74, 0.86, 0.91, 1.0))
 	_settings_overlay.add_child(_settings_guide_label)
+	_settings_combat_guide_label = RichTextLabel.new()
+	_settings_combat_guide_label.name = "OperationGuideCombat"
+	_settings_combat_guide_label.position = Vector2(974.0, 388.0)
+	_settings_combat_guide_label.size = Vector2(222.0, 264.0)
+	_settings_combat_guide_label.bbcode_enabled = true
+	_settings_combat_guide_label.scroll_active = false
+	_settings_combat_guide_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_settings_overlay.add_child(_settings_combat_guide_label)
+	var guide_font := SystemFont.new()
+	guide_font.font_names = PackedStringArray(["Microsoft YaHei", "Noto Sans CJK SC", "sans-serif"])
+	for column: RichTextLabel in [_settings_guide_label, _settings_combat_guide_label]:
+		column.add_theme_font_override("normal_font", guide_font)
+		column.add_theme_font_override("bold_font", guide_font)
+		column.add_theme_font_size_override("normal_font_size", 16)
+		column.add_theme_font_size_override("bold_font_size", 16)
+		column.add_theme_constant_override("line_separation", 1)
+		column.add_theme_color_override("default_color", Color("#edf7fc"))
+	var guide_divider := ColorRect.new()
+	guide_divider.position = Vector2(958.0, 394.0)
+	guide_divider.size = Vector2(1.0, 248.0)
+	guide_divider.color = Color(0.32, 0.65, 0.76, 0.45)
+	guide_divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_settings_overlay.add_child(guide_divider)
 
 	var actions := [
 		[&"build_overview", "构筑总览"],
@@ -1514,6 +1541,7 @@ func _create_settings_glass_card(
 
 func _create_settings_card_heading(card: Panel, heading_text: String, accent: Color) -> void:
 	var heading := Label.new()
+	heading.name = "Heading"
 	heading.position = Vector2(20.0, 18.0)
 	heading.size = Vector2(card.size.x - 40.0, 20.0)
 	heading.text = heading_text
@@ -1796,6 +1824,9 @@ func _refresh_settings_key_buttons() -> void:
 func _refresh_settings_operation_guide() -> void:
 	if not is_instance_valid(_settings_guide_label) or _settings == null:
 		return
+	var heading := _settings_overlay.get_node("SettingsGuideCard/Heading") as Label
+	heading.text = "操作说明 · %s" % ("Xbox 手柄" if _using_controller_input else "键盘与鼠标")
+	heading.add_theme_font_size_override("font_size", 16)
 	var left_key: String = _get_action_prompt(&"move_left")
 	var right_key: String = _get_action_prompt(&"move_right")
 	var jump_key: String = _get_action_prompt(&"jump")
@@ -1808,28 +1839,32 @@ func _refresh_settings_operation_guide() -> void:
 	var weapon_key: String = _get_action_prompt(&"cycle_weapon")
 	var restart_key: String = _get_action_prompt(&"restart")
 	var pause_key: String = _get_action_prompt(&"pause")
-	var scheme_name := "Xbox 手柄" if _using_controller_input else "键盘"
 	_settings_guide_label.text = (
-		"[color=#8fb6c9]当前提示：%s[/color]\n" % scheme_name
-		+ "[color=#68d8e8]移动与探索[/color]\n"
-		+ "[color=#ffffff]%s / %s[/color]  左右移动\n" % [left_key, right_key]
-		+ "[color=#ffffff]%s[/color]  跳跃；空中可再次跳跃\n" % jump_key
-		+ "[color=#ffffff]%s[/color]  开宝箱、互动、离开商店\n\n" % interact_key
-		+ "[color=#68d8e8]战斗动作[/color]\n"
-		+ "[color=#ffffff]%s[/color]  普通攻击\n" % attack_key
-		+ "[color=#ffffff]%s + %s[/color]  上劈    [color=#ffffff]%s + %s[/color]  下劈\n"
-		% [up_key, attack_key, down_key, attack_key]
-		+ "[color=#ffffff]%s[/color]  闪避冲刺（短暂无敌）\n" % dash_key
-		+ "[color=#ffffff]%s[/color]  主动技能    [color=#ffffff]%s[/color]  切换武器\n\n"
-		% [skill_key, weapon_key]
-		+ "[color=#68d8e8]系统[/color]\n"
+		"[color=#72e4f4]移动与探索[/color]\n"
+		+ ("LS / 十字键  左右移动\n" if _using_controller_input else "%s / %s  左右移动\n" % [left_key, right_key])
+		+ "%s  跳跃 / 二段跳\n" % jump_key
+		+ "%s + %s  下平台\n" % [down_key, jump_key]
+		+ "%s  开宝箱 / 进入光柱\n\n" % interact_key
+		+ "[color=#72e4f4]菜单与选择[/color]\n"
+		+ "%s  暂停与设置\n" % pause_key
+		+ "%s  构筑总览\n" % _get_action_prompt(&"build_overview")
 		+ (
-			"[color=#ffffff]X / Y / B[/color]  直接选牌；[color=#ffffff]LS / D-Pad + A[/color]  导航确认\n"
+			"X / Y / B  直接选牌\nLS / 十字键导航 · A 确认"
 			if _using_controller_input
-			else "[color=#ffffff]1 / 2 / 3[/color]  选择强化或购买商品\n"
+			else "1 / 2 / 3  选牌 / 购买"
 		)
-		+ "[color=#ffffff]%s[/color]  暂停与设置    [color=#ffffff]%s[/color]  重新开局"
-		% [pause_key, restart_key]
+	)
+	_settings_combat_guide_label.text = (
+		"[color=#72e4f4]战斗动作[/color]\n"
+		+ "%s  普通攻击\n" % attack_key
+		+ "%s + %s  上劈\n" % [up_key, attack_key]
+		+ "%s + %s  下劈\n" % [down_key, attack_key]
+		+ "%s  冲刺（短暂无敌）\n" % dash_key
+		+ "%s  主动技能\n" % skill_key
+		+ "%s  切换武器\n\n" % weapon_key
+		+ "[color=#72e4f4]其他操作[/color]\n"
+		+ "%s  离开商店\n" % interact_key
+		+ "%s  重新开局" % restart_key
 	)
 
 
@@ -2278,7 +2313,7 @@ func _update_room_objective(delta: float) -> void:
 		_objective_timer_remaining = maxf(0.0, _objective_timer_remaining - delta)
 		if _objective_timer_remaining <= 0.0:
 			_objective_failed = true
-			_set_status("TIME TRIAL EXPIRED | clear the remaining enemies without the bonus")
+			_set_status("限时奖励已失效——仍可清理敌人并继续前进")
 			queue_redraw()
 		else:
 			_set_status(_get_objective_status_text())
@@ -2291,7 +2326,7 @@ func _update_room_objective(delta: float) -> void:
 		if _objective_hold_progress >= _objective_hold_duration:
 			_objective_resolved = true
 			_grant_objective_reward()
-			_set_status("BEACON SECURED | clear any remaining enemies")
+			_set_status("守点完成——清理剩余敌人即可过关")
 			if _enemies.is_empty():
 				call_deferred(&"_on_room_cleared")
 		else:
@@ -2356,8 +2391,8 @@ func _get_objective_status_text() -> String:
 	match _current_objective:
 		RoomObjective.TIME_TRIAL:
 			if _objective_failed:
-				return "TIME TRIAL EXPIRED | clear remaining %d" % _enemies.size()
-			return "TIME TRIAL  %04.1fs | clear remaining %d" % [
+				return "限时奖励失效 · 剩余敌人 %d" % _enemies.size()
+			return "限时挑战 %04.1f 秒 · 剩余敌人 %d · 避开地面陷阱" % [
 				_objective_timer_remaining,
 				_enemies.size(),
 			]
@@ -2367,15 +2402,15 @@ func _get_objective_status_text() -> String:
 				if _objective_hold_duration <= 0.0
 				else _objective_hold_progress / _objective_hold_duration
 			)
-			return "HOLD THE BEACON  %d%% | enemies %d" % [
+			return "守点：站在青色符文范围内 %d%% · 剩余敌人 %d" % [
 				roundi(hold_ratio * 100.0),
 				_enemies.size(),
 			]
 		RoomObjective.ELITE_HUNT:
-			return "ELITE HUNT | eliminate the marked captain"
+			return "精英追猎——优先击败金色标记的队长"
 		RoomObjective.BRANCH_REWARD:
-			return "BRANCH REWARD | choose whether to open the risk chest"
-	return "CLEAR THE ROOM | enemies %d" % _enemies.size()
+			return "风险宝箱——开启后击败伏兵，获得额外奖励"
+	return "清理房间 · 剩余敌人 %d" % _enemies.size()
 
 
 func _create_platform_colliders() -> void:
@@ -2826,16 +2861,21 @@ func _begin_room_exit() -> void:
 	_room_exit_portal.name = "RoomExitPortal"
 	_room_exit_portal.position = Vector2(exit_x, exit_surface.position.y - 24.0)
 	_room_exit_portal.z_index = 3
-	_room_exit_portal.setup("按任意键 / A 进入" if _using_controller_input else "按任意键进入")
+	_room_exit_portal.setup("%s 进入下一房" % _get_action_prompt(&"interact"))
 	add_child(_room_exit_portal)
+	_room_exit_portal.set_opener_position(player.global_position)
 	_set_run_phase(RunFlowState.Phase.EXIT_PORTAL)
-	player.set_input_enabled(false)
-	_set_status("战斗结束——月蚀之门已开启，按任意键进入下一房")
+	player.set_input_enabled(true)
+	_set_status("清房完成——走近光柱，按 %s 进入下一房" % _get_action_prompt(&"interact"))
 	_update_controls()
 
 
 func _activate_room_exit() -> bool:
-	if not _flow_state.awaiting_exit:
+	if (
+		not _flow_state.awaiting_exit or _is_game_paused
+		or _settings_overlay.visible or not is_instance_valid(_room_exit_portal)
+		or not _room_exit_portal.is_in_range(player.global_position)
+	):
 		return false
 	_set_run_phase(RunFlowState.Phase.ROOM_LOADING)
 	player.set_input_enabled(false)
@@ -3799,20 +3839,22 @@ func _draw_room_objective_overlay() -> void:
 		return
 	if _current_objective in [RoomObjective.TIME_TRIAL, RoomObjective.HOLDOUT]:
 		for trap_zone: Rect2 in _objective_trap_zones:
-			var trap_color: Color = (
-				Color(1.0, 0.30, 0.18, 0.46)
-				if _objective_trap_flash_remaining > 0.0
-				else Color(0.70, 0.16, 0.76, 0.20)
-			)
-			draw_rect(trap_zone, Color(trap_color, 0.12), true)
-			draw_rect(trap_zone, trap_color, false, 1.5)
-			var trap_center: Vector2 = trap_zone.get_center()
-			draw_line(
-				trap_center + Vector2(-22.0, 5.0),
-				trap_center + Vector2(22.0, 5.0),
-				trap_color,
-				2.0
-			)
+			if _objective_resolved or _objective_failed:
+				continue
+			var firing: bool = _objective_trap_flash_remaining > 0.0
+			var warning: bool = _objective_trap_pulse_remaining < 0.55
+			var trap_color := Color("#ff8054") if firing or warning else Color("#b6795c")
+			var floor_y: float = trap_zone.position.y + 44.0
+			draw_rect(Rect2(trap_zone.position.x, floor_y - 4.0, trap_zone.size.x, 4.0), trap_color)
+			for rune_index in range(4):
+				var rune_x: float = trap_zone.position.x + 8.0 + rune_index * 17.0
+				var height: float = 40.0 if firing else (14.0 if warning else 7.0)
+				draw_colored_polygon(PackedVector2Array([
+					Vector2(rune_x - 5.0, floor_y), Vector2(rune_x, floor_y - height),
+					Vector2(rune_x + 5.0, floor_y),
+				]), Color(trap_color, 0.85 if firing else 0.60))
+			draw_string(ThemeDB.fallback_font, Vector2(trap_zone.position.x - 8.0, floor_y + 20.0),
+				"周期陷阱", HORIZONTAL_ALIGNMENT_CENTER, trap_zone.size.x + 16.0, 13, Color("#ffc6a4"))
 	if _current_objective == RoomObjective.HOLDOUT and _objective_radius > 0.0:
 		var hold_ratio: float = (
 			0.0
@@ -3820,21 +3862,20 @@ func _draw_room_objective_overlay() -> void:
 			else _objective_hold_progress / _objective_hold_duration
 		)
 		var beacon_color: Color = Color(0.34, 0.92, 1.0, 0.72)
-		draw_circle(
-			_objective_anchor,
-			_objective_radius,
-			Color(beacon_color, 0.07 + hold_ratio * 0.08)
-		)
-		draw_arc(
-			_objective_anchor,
-			_objective_radius,
-			-PI * 0.5,
-			-PI * 0.5 + TAU * hold_ratio,
-			36,
-			beacon_color,
-			3.0
-		)
-		draw_circle(_objective_anchor, 9.0 + sin(Time.get_ticks_msec() * 0.008) * 1.5, beacon_color)
+		var ground_y: float = _objective_anchor.y + 17.0
+		var start_x: float = _objective_anchor.x - _objective_radius
+		draw_rect(Rect2(start_x, ground_y - 7.0, _objective_radius * 2.0, 7.0), Color(beacon_color, 0.18))
+		draw_rect(Rect2(start_x, ground_y - 4.0, _objective_radius * 2.0 * hold_ratio, 4.0), beacon_color)
+		for edge_x: float in [start_x, start_x + _objective_radius * 2.0]:
+			draw_line(Vector2(edge_x, ground_y), Vector2(edge_x, ground_y - 12.0), beacon_color, 2.0)
+		var caption_rect := Rect2(_objective_anchor + Vector2(-136.0, -112.0), Vector2(272.0, 52.0))
+		draw_rect(caption_rect, Color("#071b29"))
+		draw_rect(caption_rect, Color("#34758a"), false, 1.0)
+		var caption: String = "守点完成 · 清理剩余敌人" if _objective_resolved else "守点符文  %d%%" % roundi(hold_ratio * 100.0)
+		draw_string(ThemeDB.fallback_font, caption_rect.position + Vector2(8.0, 20.0), caption,
+			HORIZONTAL_ALIGNMENT_CENTER, 256.0, 16, Color("#dbf8ff"))
+		draw_string(ThemeDB.fallback_font, caption_rect.position + Vector2(8.0, 41.0),
+			"站在青色区域占领 · 离开后暂停", HORIZONTAL_ALIGNMENT_CENTER, 256.0, 14, Color("#a7dfeb"))
 	if _current_objective == RoomObjective.ELITE_HUNT and is_instance_valid(_hunt_target):
 		var target_marker: Vector2 = to_local(_hunt_target.global_position) + Vector2(0.0, -74.0)
 		var marker_color: Color = Color(1.0, 0.74, 0.28, 0.88)

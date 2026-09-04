@@ -36,9 +36,17 @@ func _run_test() -> void:
 		_fail("Settings menu did not expose bindings, options, and the operation guide")
 		return
 	var guide_text: String = operation_guide.get_parsed_text()
-	if not guide_text.contains("移动与探索") or not guide_text.contains("开宝箱") or not guide_text.contains("空中可再次跳跃"):
+	if not guide_text.contains("移动与探索") or not guide_text.contains("开宝箱") or not guide_text.contains("二段跳"):
 		_fail("Settings operation guide did not contain the moved gameplay instructions")
 		return
+	for use_controller: bool in [false, true]:
+		menu_main.call(&"_on_input_device_changed", use_controller)
+		await process_frame
+		for column_name: String in ["OperationGuide", "OperationGuideCombat"]:
+			var column := settings_menu.get_node(column_name) as RichTextLabel
+			if column.get_content_height() > column.size.y or column.get_theme_font_size("normal_font_size") < 16:
+				_fail("Operation guide is clipped or too small: %s controller=%s height=%d" % [column_name, use_controller, column.get_content_height()])
+				return
 	var bindings_card: Control = settings_menu.get_node("SettingsBindingsCard") as Control
 	var guide_card: Control = settings_menu.get_node("SettingsGuideCard") as Control
 	for child: Node in settings_menu.get_children():
@@ -63,6 +71,7 @@ func _run_test() -> void:
 		return
 	(settings_menu.get_node("CloseSettings") as Button).emit_signal("pressed")
 	menu_main.queue_free()
+	await process_frame
 
 	var game_main: Node2D = main_scene.instantiate() as Node2D
 	game_main.set("save_enabled", false)
@@ -127,6 +136,7 @@ func _run_test() -> void:
 		_fail("Pause or vertical attack input was not registered")
 		return
 	game_main.queue_free()
+	await process_frame
 	print("menu_settings_smoke: PASS")
 	quit(0)
 

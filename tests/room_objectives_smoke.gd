@@ -68,6 +68,7 @@ func _run_test() -> void:
 				return
 			await _wait_physics_frames(6)
 		if bool(main.call(&"is_awaiting_exit")):
+			player.global_position = (main.get_node("RoomExitPortal") as Node2D).global_position
 			if not bool(main.call(&"_activate_room_exit")):
 				_fail("Room objective exit portal could not be activated")
 				return

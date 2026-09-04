@@ -11,9 +11,10 @@ var _visual_time: float = 0.0
 var _activating: bool = false
 var _prompt_root: Control
 var _prompt_label: Label
+var _opener_near: bool = false
 
 
-func setup(prompt_text: String = "按任意键进入") -> void:
+func setup(prompt_text: String = "E 进入下一房") -> void:
 	set_prompt_text(prompt_text)
 
 
@@ -24,7 +25,22 @@ func _ready() -> void:
 func set_prompt_text(prompt_text: String) -> void:
 	set_meta(&"prompt_text", prompt_text)
 	if is_instance_valid(_prompt_label):
-		_prompt_label.text = prompt_text
+		_refresh_prompt()
+
+
+func is_in_range(opener_position: Vector2) -> bool:
+	var offset: Vector2 = opener_position - global_position
+	return absf(offset.x) <= 88.0 and absf(offset.y) <= 72.0
+
+
+func set_opener_position(opener_position: Vector2) -> void:
+	_opener_near = is_in_range(opener_position)
+	_refresh_prompt()
+
+
+func _refresh_prompt() -> void:
+	if is_instance_valid(_prompt_label):
+		_prompt_label.text = String(get_meta(&"prompt_text", "E 进入下一房")) if _opener_near else "走近光柱后互动"
 
 
 func play_activation() -> void:
@@ -89,7 +105,7 @@ func _create_prompt_bubble() -> void:
 	_prompt_label.size = Vector2(204.0, 34.0)
 	_prompt_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_prompt_label.text = String(get_meta(&"prompt_text", "按任意键进入"))
+	_prompt_label.text = "走近光柱后互动"
 	_prompt_label.add_theme_font_size_override("font_size", 17)
 	_prompt_label.add_theme_color_override("font_color", Color(0.88, 0.97, 1.0, 1.0))
 	_prompt_label.mouse_filter = Control.MOUSE_FILTER_IGNORE

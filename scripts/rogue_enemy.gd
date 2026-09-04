@@ -25,6 +25,7 @@ const GOBLIN_ELITE_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_el
 const GOBLIN_ARCHER_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_run_sheet_v2.png")
 const MOON_WHEEL_GEOMETRY := preload("res://scripts/moon_wheel_geometry.gd")
 const WEAPON_SKILL_GEOMETRY := preload("res://scripts/weapon_skill_geometry.gd")
+const GOBLIN_EDGE_MATERIAL := preload("res://assets/shaders/goblin_edge_cleanup.tres")
 
 enum EnemyRole {
 	MELEE,
@@ -1727,6 +1728,7 @@ func _apply_turn_sprite_motion() -> void:
 func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 	if not is_instance_valid(_enemy_sprite):
 		return
+	_enemy_sprite.material = GOBLIN_EDGE_MATERIAL if _family == EnemyFamily.GOBLIN else null
 
 	var previous_position: Vector2 = _enemy_sprite.position
 	var previous_scale: Vector2 = _enemy_sprite.scale

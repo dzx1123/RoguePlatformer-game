@@ -344,6 +344,7 @@ func _enter_room_exit(main: Node2D) -> bool:
 	if not bool(main.call(&"is_awaiting_exit")):
 		_fail("Cleared room did not open the exit portal")
 		return false
+	(main.get_node("Player") as Node2D).global_position = (main.get_node("RoomExitPortal") as Node2D).global_position
 	if not bool(main.call(&"_activate_room_exit")):
 		_fail("Exit portal could not be activated")
 		return false
