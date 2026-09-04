@@ -58,8 +58,8 @@ Xbox 手柄默认使用：左摇杆/十字键移动与菜单导航，A 跳跃/�
 - `assets/`：项目内角色视觉资源
 - `tests/`：动画、攻击连按、战斗、一局结构与内容扩展的自动测试
 - `tools/`：角色帧构建工具
-- `docs/`：开发路线
+- `docs/`：开发路线、改进计划、手感/音频/体验说明与验收清单
 
-详细进度见 `docs/ROADMAP.md`。
+详细进度见 `docs/ROADMAP.md`。计划文档从 `docs/README.md` 进入。
 
-局外进度默认保存在 Godot 用户数据目录下的 `rogue_progress.json`，平衡统计保存在同目录的 `run_telemetry.json`。
+局外进度默认保存在 Godot 用户数据目录下的 `rogue_progress.json`，平衡统计保存在同目录的 `run_telemetry.json`，未完成路线保存在同目录的 `run_continue.json`。

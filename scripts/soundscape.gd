@@ -10,9 +10,21 @@ enum VoiceType {
 	DASH,
 	SKILL,
 	JUMP,
+	LAND,
+	FOOTSTEP,
+	UI,
+	CHEST,
+	PORTAL,
 	ENEMY_BITE,
 	ENEMY_SPIT,
 	ENEMY_DEFEAT,
+}
+
+enum MusicState {
+	MENU,
+	EXPLORE,
+	COMBAT,
+	BOSS,
 }
 
 const MIX_RATE := 22050.0
@@ -75,6 +87,7 @@ var _playback: AudioStreamGeneratorPlayback
 var _voices: Array[Dictionary] = []
 var _music_time: float = 0.0
 var _vocal_duck_remaining: float = 0.0
+var _music_state: int = MusicState.MENU
 
 
 func _ready() -> void:
@@ -106,13 +119,13 @@ func _ready() -> void:
 
 
 func play_sword_swing() -> void:
-	# A short real foley swish. Confirmed-hit impacts stay several decibels louder.
-	_play_combat_sample(SWORD_SWING_SFX, -7.5, 1.04)
+	# Empty swings stay quieter so a confirmed hit reads as the loudest layer.
+	_play_combat_sample(SWORD_SWING_SFX, -11.0, 1.04)
 
 
 func play_impact() -> void:
-	_add_voice(VoiceType.IMPACT, 0.13, 0.52)
-	_play_combat_sample(HIT_SFX, -1.0, 0.98)
+	_add_voice(VoiceType.IMPACT, 0.16, 0.66)
+	_play_combat_sample(HIT_SFX, 0.5, 0.94)
 
 
 func play_dash() -> void:
@@ -126,6 +139,34 @@ func play_skill() -> void:
 
 func play_jump() -> void:
 	_add_voice(VoiceType.JUMP, 0.10, 0.22)
+
+
+func play_land() -> void:
+	_add_voice(VoiceType.LAND, 0.12, 0.28)
+
+
+func play_footstep() -> void:
+	_add_voice(VoiceType.FOOTSTEP, 0.07, 0.14)
+
+
+func play_ui() -> void:
+	_add_voice(VoiceType.UI, 0.08, 0.18)
+
+
+func play_chest() -> void:
+	_add_voice(VoiceType.CHEST, 0.22, 0.34)
+
+
+func play_portal() -> void:
+	_add_voice(VoiceType.PORTAL, 0.30, 0.32)
+
+
+func set_music_state(next_state: int) -> void:
+	_music_state = clampi(next_state, MusicState.MENU, MusicState.BOSS)
+
+
+func get_music_state() -> int:
+	return _music_state
 
 
 func play_player_attack_voice() -> void:
@@ -321,6 +362,22 @@ func _sample_voice(voice: Dictionary, age: float) -> float:
 		VoiceType.JUMP:
 			var jump_frequency: float = lerpf(260.0, 520.0, progress)
 			return (sin(TAU * jump_frequency * age) * 0.72 + noise * 0.15) * envelope * volume
+		VoiceType.LAND:
+			var land_frequency: float = lerpf(140.0, 70.0, progress)
+			return (sin(TAU * land_frequency * age) * 0.70 + noise * 0.30) * envelope * volume
+		VoiceType.FOOTSTEP:
+			var step_frequency: float = lerpf(190.0, 90.0, progress)
+			return (sin(TAU * step_frequency * age) * 0.40 + noise * 0.55) * envelope * volume
+		VoiceType.UI:
+			var ui_frequency: float = lerpf(880.0, 1320.0, progress)
+			return sin(TAU * ui_frequency * age) * envelope * volume
+		VoiceType.CHEST:
+			var chest_frequency: float = lerpf(240.0, 420.0, progress)
+			return (sin(TAU * chest_frequency * age) * 0.55 + sin(TAU * 720.0 * age) * 0.22 + noise * 0.18) * envelope * volume
+		VoiceType.PORTAL:
+			var portal_root: float = sin(TAU * 196.0 * age)
+			var portal_air: float = sin(TAU * 523.25 * age + progress * 3.0)
+			return (portal_root * 0.42 + portal_air * 0.28 + noise * 0.16) * envelope * volume
 		VoiceType.ENEMY_BITE:
 			var bite_frequency: float = lerpf(118.0, 54.0, progress)
 			return (sin(TAU * bite_frequency * age) * 0.64 + noise * 0.54) * envelope * volume
@@ -334,17 +391,39 @@ func _sample_voice(voice: Dictionary, age: float) -> float:
 
 
 func _mix_music(time: float) -> float:
-	# A restrained 4-bar moonlit ambience: low organ pad, distant bell, no intrusive beat.
-	var bar: int = int(floor(time / 3.2))
+	# A restrained 4-bar moonlit ambience. Intensity follows menu / explore / combat / boss.
+	var bar_length: float = 3.6 if _music_state == MusicState.MENU else 3.2
+	var bar: int = int(floor(time / bar_length))
 	var roots := [73.42, 87.31, 65.41, 82.41]
+	if _music_state == MusicState.BOSS:
+		roots = [55.00, 61.74, 49.00, 65.41]
 	var root: float = float(roots[posmod(bar, roots.size())])
-	var pad: float = sin(TAU * root * time) * 0.055
-	pad += sin(TAU * root * 1.5 * time) * 0.030
-	pad += sin(TAU * root * 2.0 * time) * 0.016
-	var pulse_time: float = fposmod(time, 1.60)
+	var pad_gain: float = 0.042
+	var bell_gain: float = 0.022
+	var air_gain: float = 0.007
+	match _music_state:
+		MusicState.MENU:
+			pad_gain = 0.036
+			bell_gain = 0.018
+			air_gain = 0.006
+		MusicState.COMBAT:
+			pad_gain = 0.062
+			bell_gain = 0.028
+			air_gain = 0.010
+		MusicState.BOSS:
+			pad_gain = 0.074
+			bell_gain = 0.038
+			air_gain = 0.012
+	var pad: float = sin(TAU * root * time) * pad_gain
+	pad += sin(TAU * root * 1.5 * time) * pad_gain * 0.55
+	pad += sin(TAU * root * 2.0 * time) * pad_gain * 0.28
+	var pulse_time: float = fposmod(time, 1.60 if _music_state != MusicState.BOSS else 1.20)
 	var bell_envelope: float = exp(-pulse_time * 3.8) if pulse_time < 0.56 else 0.0
-	var bell: float = sin(TAU * root * 4.0 * time) * bell_envelope * 0.030
-	var air: float = _noise(time, 4.2) * 0.008
+	var bell: float = sin(TAU * root * 4.0 * time) * bell_envelope * bell_gain
+	if _music_state == MusicState.COMBAT or _music_state == MusicState.BOSS:
+		var pulse: float = sin(TAU * time * (2.0 if _music_state == MusicState.BOSS else 1.5))
+		pad += pulse * 0.008
+	var air: float = _noise(time, 4.2) * air_gain
 	return pad + bell + air
 
 

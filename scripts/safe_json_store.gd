@@ -107,6 +107,18 @@ static func get_backup_path(save_path: String) -> String:
 	return save_path + BACKUP_SUFFIX
 
 
+static func remove_dictionary(save_path: String) -> Error:
+	var primary_path: String = _absolute_path(save_path)
+	var first_error: Error = _remove_if_exists(primary_path)
+	var temporary_error: Error = _remove_if_exists(primary_path + TEMPORARY_SUFFIX)
+	var backup_error: Error = _remove_if_exists(primary_path + BACKUP_SUFFIX)
+	if first_error != OK:
+		return first_error
+	if temporary_error != OK:
+		return temporary_error
+	return backup_error
+
+
 static func _read_valid_dictionary(
 	path: String,
 	validator: Callable = Callable()

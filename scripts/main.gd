@@ -20,9 +20,13 @@ const RUN_FLOW_STATE_SCRIPT := preload("res://scripts/run_flow_state.gd")
 const RUN_HUD_BUILDER_SCRIPT := preload("res://scripts/run_hud_builder.gd")
 const RUN_HUD_PRESENTER_SCRIPT := preload("res://scripts/run_hud_presenter.gd")
 const RUN_BUILD_OVERVIEW_SCRIPT := preload("res://scripts/run_build_overview.gd")
+const EVENT_CATALOG_SCRIPT := preload("res://scripts/event_catalog.gd")
+const CONTINUE_STORE_SCRIPT := preload("res://scripts/run_continue_store.gd")
+const DEATH_RECAP_SCRIPT := preload("res://scripts/death_recap.gd")
+const TUTORIAL_SCRIPT := preload("res://scripts/run_tutorial.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
 const MENU_MOONLIT_SANCTUM_BACKGROUND := preload("res://assets/backgrounds/menu_moonlit_sanctum_v1.png")
-const BUILD_LABEL := "月蚀混战测试版 0.4.0 · 2026.09.03"
+const BUILD_LABEL := "月蚀混战测试版 0.4.1 · 2026.09.03"
 const ROOMS_PER_RUN := 20
 const GOBLIN_CHAPTER_START := 5
 const MIXED_CHAPTER_START := 10
@@ -135,7 +139,11 @@ var _entry_title: Label
 var _entry_subtitle: Label
 var _entry_progress_panel: Panel
 var _start_button: Button
+var _continue_button: Button
 var _difficulty_buttons: Array[Button] = []
+var _death_recap
+var _tutorial
+var _continue_store
 var _entry_flow_active: bool = false
 var _entry_tween: Tween
 var _selected_difficulty: int = Difficulty.MEDIUM
@@ -214,6 +222,8 @@ func _ready() -> void:
 	_create_pause_ui()
 	_create_settings_ui()
 	_create_build_overview()
+	_create_death_recap()
+	_create_tutorial()
 	_using_controller_input = not Input.get_connected_joypads().is_empty()
 	_pause_input_handler.call(&"set_initial_device", _using_controller_input)
 	_refresh_input_prompts()
@@ -226,12 +236,17 @@ func _ready() -> void:
 	player.damage_received.connect(_on_player_damage_received)
 	player.died.connect(_on_player_died)
 	_progression = ProgressionStore.new()
+	_continue_store = CONTINUE_STORE_SCRIPT.new(
+		CONTINUE_STORE_SCRIPT.DEFAULT_SAVE_PATH,
+		save_enabled
+	)
 	_telemetry = RUN_TELEMETRY_SCRIPT.new(
 		RUN_TELEMETRY_SCRIPT.DEFAULT_SAVE_PATH,
 		save_enabled
 	)
 	if save_enabled:
 		_progression.load_progress()
+		_continue_store.load_snapshot()
 		if _telemetry.load_data() and _telemetry.is_run_active():
 			var interrupted_run: Dictionary = _telemetry.get_current_run_snapshot()
 			var interrupted_weapon := StringName(String(
@@ -275,6 +290,7 @@ func _process(_delta: float) -> void:
 	_update_equipment_hud()
 	_update_ability_hud()
 	_update_lives_hud()
+	_update_music_state()
 
 
 func _process_choice_shortcuts() -> bool:
@@ -286,6 +302,8 @@ func _process_choice_shortcuts() -> bool:
 
 
 func _on_player_action_started(action: StringName) -> void:
+	if is_instance_valid(_tutorial):
+		_tutorial.notify_action(action)
 	if not is_instance_valid(_soundscape):
 		return
 	match action:
@@ -299,6 +317,10 @@ func _on_player_action_started(action: StringName) -> void:
 			_soundscape.play_player_skill_voice()
 		&"jump":
 			_soundscape.play_jump()
+		&"land":
+			_soundscape.play_land()
+		&"footstep":
+			_soundscape.play_footstep()
 
 
 func _on_player_vocal_requested(cue: StringName) -> void:
@@ -492,7 +514,9 @@ func _ensure_context_focus() -> void:
 	if is_instance_valid(_entry_overlay) and _entry_overlay.visible:
 		if focus_owner != null and _entry_overlay.is_ancestor_of(focus_owner) and focus_owner.visible:
 			return
-		if _start_button.visible:
+		if is_instance_valid(_continue_button) and _continue_button.visible:
+			_continue_button.grab_focus()
+		elif _start_button.visible:
 			_start_button.grab_focus()
 		else:
 			for button in _difficulty_buttons:
@@ -949,6 +973,18 @@ func _create_entry_ui() -> void:
 	_start_button.pressed.connect(_show_difficulty_selection)
 	_entry_overlay.add_child(_start_button)
 
+	_continue_button = Button.new()
+	_continue_button.name = "ContinueRun"
+	_continue_button.position = Vector2(442.0, 382.0)
+	_continue_button.size = Vector2(396.0, 58.0)
+	_continue_button.pivot_offset = _continue_button.size * 0.5
+	_continue_button.add_theme_font_size_override("font_size", 22)
+	_continue_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_style_entry_button(_continue_button, Color(0.86, 0.74, 0.38, 1.0), true)
+	_continue_button.pressed.connect(_continue_saved_run)
+	_continue_button.visible = false
+	_entry_overlay.add_child(_continue_button)
+
 	var entry_settings := Button.new()
 	entry_settings.name = "EntrySettings"
 	entry_settings.position = Vector2(442.0, 452.0)
@@ -1044,7 +1080,7 @@ func _create_entry_ui() -> void:
 		_entry_overlay.add_child(button)
 		_difficulty_buttons.append(button)
 	_configure_horizontal_focus(_difficulty_buttons)
-	_configure_vertical_focus([_start_button, entry_settings, entry_quit])
+	_configure_vertical_focus([_continue_button, _start_button, entry_settings, entry_quit])
 
 	_entry_overlay.visible = false
 
@@ -1084,17 +1120,24 @@ func _style_entry_button(button: Button, accent: Color, prominent: bool) -> void
 func _reset_entry_layout() -> void:
 	_entry_title.position = Vector2(250.0, 198.0)
 	_entry_subtitle.position = Vector2(270.0, 274.0)
-	_start_button.position = Vector2(442.0, 382.0)
+	var has_continue: bool = (
+		is_instance_valid(_continue_button)
+		and _continue_button.visible
+	)
+	_start_button.position = Vector2(442.0, 448.0 if has_continue else 382.0)
+	_start_button.size = Vector2(396.0, 48.0 if has_continue else 58.0)
+	if is_instance_valid(_continue_button):
+		_continue_button.position = Vector2(442.0, 382.0)
 	var entry_settings: Button = _entry_overlay.get_node("EntrySettings") as Button
 	var entry_quit: Button = _entry_overlay.get_node("EntryQuit") as Button
-	entry_settings.position = Vector2(442.0, 452.0)
-	entry_quit.position = Vector2(442.0, 506.0)
+	entry_settings.position = Vector2(442.0, 508.0 if has_continue else 452.0)
+	entry_quit.position = Vector2(442.0, 558.0 if has_continue else 506.0)
 	var frame: Panel = _entry_overlay.get_node("EntryFrame") as Panel
 	if frame != null:
 		frame.position = Vector2(418.0, 364.0)
 		frame.size = Vector2(444.0, 210.0)
 	if is_instance_valid(_entry_progress_panel):
-		_entry_progress_panel.position = Vector2(350.0, 640.0)
+		_entry_progress_panel.position = Vector2(350.0, 668.0 if has_continue else 640.0)
 	for difficulty_index in range(_difficulty_buttons.size()):
 		_difficulty_buttons[difficulty_index].position = Vector2(
 			170.0 + float(difficulty_index) * 314.0,
@@ -1113,6 +1156,8 @@ func _play_entry_transition(showing_difficulty: bool) -> void:
 		for button in _difficulty_buttons:
 			controls.append(button)
 	else:
+		if is_instance_valid(_continue_button) and _continue_button.visible:
+			controls.append(_continue_button)
 		controls.append(_start_button)
 		controls.append(_entry_overlay.get_node("EntrySettings") as Button)
 		controls.append(_entry_overlay.get_node("EntryQuit") as Button)
@@ -1756,6 +1801,7 @@ func _resume_game() -> void:
 
 
 func _return_to_main_menu() -> void:
+	_persist_continue_snapshot()
 	_resume_game()
 	_set_run_phase(RunFlowState.Phase.IDLE)
 	_hide_upgrade_overlay()
@@ -1973,14 +2019,19 @@ func _show_start_screen() -> void:
 	_entry_flow_active = true
 	player.set_input_enabled(false)
 	_entry_overlay.visible = true
-	_reset_entry_layout()
 	(_entry_overlay.get_node("EntryFrame") as Panel).visible = true
 	_entry_title.text = "月蚀回廊"
 	_entry_subtitle.text = "LUNAR ECLIPSE CORRIDOR  ·  %s" % BUILD_LABEL
 	(_entry_overlay.get_node("EntryKicker") as Label).text = "LUNAR ECLIPSE  //  ROGUELITE PROTOCOL"
-	(_entry_overlay.get_node("EntryFooter") as Label).text = "选择难度后开始新的月蚀路线 · 操作说明与无障碍选项位于设置"
+	(_entry_overlay.get_node("EntryFooter") as Label).text = (
+		"可继续未完成的路线，或开始新的月蚀路线"
+		if _has_continue_snapshot()
+		else "选择难度后开始新的月蚀路线 · 操作说明与无障碍选项位于设置"
+	)
 	_start_button.text = "开始冒险"
 	_start_button.visible = true
+	_refresh_continue_button()
+	_reset_entry_layout()
 	var entry_settings: Button = _entry_overlay.get_node("EntrySettings") as Button
 	var entry_quit: Button = _entry_overlay.get_node("EntryQuit") as Button
 	entry_settings.visible = true
@@ -1991,6 +2042,7 @@ func _show_start_screen() -> void:
 		button.visible = false
 	_play_entry_transition(false)
 	_ensure_context_focus()
+	_update_music_state()
 
 
 func _show_difficulty_selection() -> void:
@@ -2002,6 +2054,8 @@ func _show_difficulty_selection() -> void:
 	(_entry_overlay.get_node("EntryKicker") as Label).text = "SELECT YOUR ROUTE  //  RISK DEFINES THE RUN"
 	(_entry_overlay.get_node("EntryFooter") as Label).text = "选择一项难度开始冒险 · 后续可在设置中查看完整操作说明"
 	_start_button.visible = false
+	if is_instance_valid(_continue_button):
+		_continue_button.visible = false
 	(_entry_overlay.get_node("EntrySettings") as Button).visible = false
 	(_entry_overlay.get_node("EntryQuit") as Button).visible = false
 	_entry_progress_panel.visible = false
@@ -2051,6 +2105,7 @@ func _start_game_with_difficulty(difficulty: int) -> void:
 	if _entry_tween != null and _entry_tween.is_valid():
 		_entry_tween.kill()
 	_entry_overlay.visible = false
+	_clear_continue_snapshot()
 	_start_new_run()
 
 
@@ -2091,6 +2146,11 @@ func get_selected_difficulty_name() -> String:
 func _start_new_run() -> void:
 	if _telemetry != null and _telemetry.is_run_active():
 		_telemetry.finish_run(false, player.get_weapon_id(), &"manual_restart")
+	_clear_continue_snapshot()
+	if is_instance_valid(_death_recap):
+		_death_recap.hide_recap()
+	if is_instance_valid(_tutorial):
+		_tutorial.hide_lesson()
 	_run_generation += 1
 	_run_number += 1
 	if _next_run_seed >= 0:
@@ -2212,7 +2272,10 @@ func _load_room(pool_index: int) -> void:
 			else:
 				_set_status("已获得「%s」；进入 %s" % [_last_upgrade_name, room_title])
 				_last_upgrade_name = ""
+	_maybe_begin_tutorial()
 	_update_controls()
+	_update_music_state()
+	_persist_continue_snapshot()
 	_update_room_label()
 	queue_redraw()
 
@@ -2681,6 +2744,7 @@ func _on_player_attack_hit(origin: Vector2, facing: float) -> void:
 			player.get_attack_type()
 		):
 			player.confirm_attack_connected()
+			_apply_hitstop(enemy, false)
 			_spawn_hit_vfx(enemy.global_position, facing, enemy, 1.0, damage_amount)
 
 
@@ -2708,6 +2772,7 @@ func _on_player_skill_hit(
 			var impact_facing := signf(enemy.global_position.x - origin.x)
 			if is_zero_approx(impact_facing):
 				impact_facing = facing
+			_apply_hitstop(enemy, true)
 			_spawn_hit_vfx(
 				enemy.global_position,
 				impact_facing,
@@ -2868,6 +2933,7 @@ func _begin_room_exit() -> void:
 	player.set_input_enabled(true)
 	_set_status("清房完成——走近光柱，按 %s 进入下一房" % _get_action_prompt(&"interact"))
 	_update_controls()
+	_persist_continue_snapshot()
 
 
 func _activate_room_exit() -> bool:
@@ -2881,6 +2947,8 @@ func _activate_room_exit() -> bool:
 	player.set_input_enabled(false)
 	if is_instance_valid(_room_exit_portal):
 		_room_exit_portal.play_activation()
+	if is_instance_valid(_soundscape):
+		_soundscape.play_portal()
 	_set_status("穿过月蚀之门——准备选择强化")
 	var expected_generation: int = _run_generation
 	get_tree().create_timer(0.22).timeout.connect(_finish_room_exit.bind(expected_generation))
@@ -2908,6 +2976,7 @@ func _show_upgrade_choice() -> void:
 	_play_upgrade_overlay_intro()
 	_ensure_context_focus()
 	_update_controls()
+	_persist_continue_snapshot()
 
 
 func _show_shop() -> void:
@@ -2926,40 +2995,20 @@ func _show_shop() -> void:
 	_ensure_context_focus()
 	_set_status("旅商已抵达——当前拥有 %d 金币" % _gold)
 	_update_controls()
+	_persist_continue_snapshot()
 
 
 func _show_event_choice() -> void:
 	_set_run_phase(RunFlowState.Phase.EVENT)
-	_upgrade_choices = [
-		{
-			"id": &"event_rest",
-			"name": "月泉休整",
-			"description": "恢复 40 点生命",
-			"effect": &"heal",
-			"amount": 40,
-		},
-		{
-			"id": &"event_gold",
-			"name": "搜寻遗物",
-			"description": "获得 28 金币",
-			"effect": &"gold",
-			"amount": 28,
-		},
-		{
-			"id": &"event_shards",
-			"name": "聆听星语",
-			"description": "获得 3 星屑并恢复 12 点生命",
-			"effect": &"shards",
-			"amount": 3,
-		},
-	]
+	_upgrade_choices = EVENT_CATALOG_SCRIPT.create_choices()
 	_upgrade_overlay.visible = true
-	_upgrade_title.text = "月蚀奇遇——选择回应"
+	_upgrade_title.text = "月蚀奇遇——每项回应都有代价"
 	_refresh_choice_overlay_prompts()
 	_play_upgrade_overlay_intro()
 	_ensure_context_focus()
-	_set_status("发现月蚀遗迹——选择一种回应")
+	_set_status("发现月蚀遗迹——选择一种回应，每项都有代价")
 	_update_controls()
+	_persist_continue_snapshot()
 
 
 func _refresh_choice_overlay_prompts() -> void:
@@ -3052,6 +3101,8 @@ func choose_upgrade(choice_index: int) -> bool:
 		or choice_index >= _upgrade_choices.size()
 	):
 		return false
+	if is_instance_valid(_soundscape):
+		_soundscape.play_ui()
 	if _flow_state.event_active:
 		return _resolve_event_choice(choice_index)
 	var choice: Dictionary = _upgrade_choices[choice_index]
@@ -3083,13 +3134,16 @@ func _resolve_event_choice(choice_index: int) -> bool:
 	var amount: int = int(choice.get("amount", 0))
 	var effect: StringName = choice.get("effect", &"")
 	match effect:
-		&"heal":
-			player.heal(amount)
+		&"rest", &"heal":
+			player.heal(int(choice.get("heal", amount)))
+			_gold = maxi(0, _gold + int(choice.get("gold", 0)))
 		&"gold":
 			_gold += amount
+			player.apply_event_cost(int(choice.get("damage", 0)))
 		&"shards":
 			_run_shards += amount
-			player.heal(12)
+			player.heal(int(choice.get("heal", 12)))
+			player.apply_max_health_delta(int(choice.get("max_health", 0)))
 		_:
 			return false
 	_last_upgrade_name = String(choice.get("name", "奇遇"))
@@ -3126,6 +3180,7 @@ func _complete_run() -> void:
 		button.visible = false
 	_play_upgrade_overlay_intro()
 	var unlocked_names: String = _bank_run_progress(true)
+	_clear_continue_snapshot()
 	_set_status("胜利——首领已击败，本局星屑已结算%s" % unlocked_names)
 	_update_economy_hud()
 	_update_controls()
@@ -3210,6 +3265,8 @@ func open_current_chest_for_test() -> bool:
 func _on_chest_opened(gold_reward: int, heal_reward: int) -> void:
 	if not _flow_state.awaiting_chest:
 		return
+	if is_instance_valid(_soundscape):
+		_soundscape.play_chest()
 	if _current_encounter == EncounterType.RISK_CHEST:
 		_pending_risk_gold = gold_reward
 		_pending_risk_heal = heal_reward
@@ -3367,12 +3424,16 @@ func _on_player_died() -> void:
 	_clear_room_exit_portal()
 	_clear_projectiles()
 	_hide_upgrade_overlay()
+	if is_instance_valid(_tutorial):
+		_tutorial.hide_lesson()
 	var unlocked_names: String = _bank_run_progress(false)
-	_set_status("战败——本局星屑已结算%s，即将重新生成路线" % unlocked_names)
+	_clear_continue_snapshot()
+	_present_death_recap(unlocked_names)
 	_update_economy_hud()
 	_update_controls()
 	_update_lives_hud()
 	_set_status("战败 — 剩余命数 %d / %d" % [_lives_remaining, MAX_RUN_LIVES])
+	_update_music_state()
 	var expected_generation: int = _run_generation
 	get_tree().create_timer(DEATH_RESTART_DELAY).timeout.connect(
 		_finish_death_sequence.bind(expected_generation)
@@ -3388,6 +3449,8 @@ func _restart_run_after_death(expected_generation: int) -> void:
 func _finish_death_sequence(expected_generation: int) -> void:
 	if not _flow_state.death_restart_pending or expected_generation != _run_generation:
 		return
+	if is_instance_valid(_death_recap):
+		_death_recap.hide_recap()
 	if _lives_remaining > 0:
 		_start_new_run()
 		return
@@ -3764,6 +3827,393 @@ func get_run_telemetry_snapshot() -> Dictionary:
 
 func get_run_telemetry_summary() -> Dictionary:
 	return _telemetry.get_summary() if _telemetry != null else {}
+
+
+func get_death_recap_snapshot() -> Dictionary:
+	if not is_instance_valid(_death_recap):
+		return {}
+	return _death_recap.get_snapshot()
+
+
+func get_tutorial_snapshot() -> Dictionary:
+	if not is_instance_valid(_tutorial):
+		return {}
+	return _tutorial.get_snapshot()
+
+
+func get_music_state() -> int:
+	if not is_instance_valid(_soundscape):
+		return RogueSoundscape.MusicState.MENU
+	return _soundscape.get_music_state()
+
+
+func has_continue_snapshot() -> bool:
+	return _has_continue_snapshot()
+
+
+func persist_continue_snapshot_for_test() -> bool:
+	_persist_continue_snapshot()
+	return _has_continue_snapshot()
+
+
+func continue_saved_run_for_test() -> bool:
+	return _continue_saved_run()
+
+
+func _create_death_recap() -> void:
+	_death_recap = DEATH_RECAP_SCRIPT.new()
+	hud.add_child(_death_recap)
+
+
+func _create_tutorial() -> void:
+	_tutorial = TUTORIAL_SCRIPT.new()
+	hud.add_child(_tutorial)
+
+
+func _present_death_recap(unlocked_names: String) -> void:
+	if not is_instance_valid(_death_recap):
+		return
+	var telemetry_snapshot: Dictionary = (
+		_telemetry.get_current_run_snapshot() if _telemetry != null else {}
+	)
+	# finish_run already cleared current telemetry; use the last history entry.
+	if telemetry_snapshot.is_empty() and _telemetry != null:
+		var history: Array = _telemetry.get_history()
+		if not history.is_empty() and history.back() is Dictionary:
+			telemetry_snapshot = history.back() as Dictionary
+	var current_room: Dictionary = telemetry_snapshot.get("current_room", {}) as Dictionary
+	if current_room.is_empty():
+		var rooms: Array = telemetry_snapshot.get("rooms", []) as Array
+		if not rooms.is_empty() and rooms.back() is Dictionary:
+			current_room = rooms.back() as Dictionary
+	var reason: String = String(player.get_last_death_reason())
+	if reason.is_empty():
+		reason = String(current_room.get("death_reason", "unknown"))
+	var hint: String = (
+		"命数耗尽后将返回难度选择%s"
+		% unlocked_names
+		if _lives_remaining <= 0
+		else "即将用剩余 %d 条命重开一条路线%s" % [_lives_remaining, unlocked_names]
+	)
+	_death_recap.present({
+		"reason": reason,
+		"room_title": String(current_room.get("room_title", _current_room_data.get("title", "未知房间"))),
+		"encounter": String(current_room.get("encounter", _get_encounter_name(_current_encounter))),
+		"room_number": int(current_room.get("room_number", _current_room_index + 1)),
+		"lives_remaining": _lives_remaining,
+		"room_damage": int(current_room.get("damage_taken", 0)),
+		"run_damage": int(telemetry_snapshot.get("damage_taken", 0)),
+		"elapsed_seconds": float(telemetry_snapshot.get("elapsed_seconds", 0.0)),
+		"damage_sources": current_room.get("damage_sources", {}) as Dictionary,
+	}, hint)
+
+
+func _apply_hitstop(enemy: RogueEnemy, is_skill_hit: bool) -> void:
+	if not is_instance_valid(player) or not is_instance_valid(enemy):
+		return
+	var duration: float = (
+		RoguePlayer.HITSTOP_SKILL if is_skill_hit else RoguePlayer.HITSTOP_ATTACK
+	)
+	player.apply_hitstop(duration, enemy.is_boss())
+	var enemy_duration: float = duration
+	if enemy.is_boss():
+		enemy_duration += RoguePlayer.HITSTOP_BOSS_BONUS
+	if player.get_reduced_effects_enabled():
+		enemy_duration *= 0.35
+	enemy.apply_hitstop(enemy_duration)
+	for other_enemy: RogueEnemy in _enemies:
+		if other_enemy == enemy or not is_instance_valid(other_enemy):
+			continue
+		other_enemy.apply_hitstop(enemy_duration * 0.62)
+
+
+func _update_music_state() -> void:
+	if not is_instance_valid(_soundscape):
+		return
+	if _entry_flow_active or _flow_state.phase in [
+		RunFlowState.Phase.IDLE,
+		RunFlowState.Phase.COMPLETE,
+		RunFlowState.Phase.DEATH_RESTART,
+	]:
+		_soundscape.set_music_state(RogueSoundscape.MusicState.MENU)
+		return
+	if _current_encounter == EncounterType.BOSS and _flow_state.run_active:
+		_soundscape.set_music_state(RogueSoundscape.MusicState.BOSS)
+		return
+	if _flow_state.run_active:
+		_soundscape.set_music_state(RogueSoundscape.MusicState.COMBAT)
+		return
+	_soundscape.set_music_state(RogueSoundscape.MusicState.EXPLORE)
+
+
+func _maybe_begin_tutorial() -> void:
+	if (
+		not save_enabled
+		or not is_instance_valid(_tutorial)
+		or _progression == null
+		or _progression.get_runs_completed() > 0
+		or _current_room_index != 0
+		or not _flow_state.run_active
+	):
+		if is_instance_valid(_tutorial):
+			_tutorial.hide_lesson()
+		return
+	_tutorial.begin_lesson(
+		_get_action_prompt(&"move_left") + " / " + _get_action_prompt(&"move_right"),
+		_get_action_prompt(&"jump"),
+		_get_action_prompt(&"attack")
+	)
+
+
+func _refresh_continue_button() -> void:
+	if not is_instance_valid(_continue_button):
+		return
+	var snapshot: Dictionary = (
+		_continue_store.get_snapshot() if _continue_store != null else {}
+	)
+	var has_continue: bool = _has_continue_snapshot()
+	_continue_button.visible = has_continue and _entry_flow_active and _start_button.visible
+	if has_continue:
+		_continue_button.text = "继续第 %d 房 · %s" % [
+			int(snapshot.get("room_index", 0)) + 1,
+			WeaponCatalog.get_weapon_name(StringName(String(snapshot.get("weapon_id", "")))),
+		]
+
+
+func _has_continue_snapshot() -> bool:
+	return _continue_store != null and _continue_store.has_snapshot()
+
+
+func _clear_continue_snapshot() -> void:
+	if _continue_store != null:
+		_continue_store.clear_snapshot()
+	_refresh_continue_button()
+
+
+func _persist_continue_snapshot() -> void:
+	if _continue_store == null:
+		return
+	if (
+		_entry_flow_active
+		or _flow_state.run_complete
+		or _flow_state.death_restart_pending
+		or _current_room_index < 0
+		or _room_sequence.is_empty()
+	):
+		return
+	var serialized_choices: Array = []
+	for choice: Dictionary in _upgrade_choices:
+		serialized_choices.append(choice.duplicate(true))
+	var snapshot := {
+		"version": 1,
+		"seed": _run_seed,
+		"rng_state": str(_rng.state),
+		"difficulty": _selected_difficulty,
+		"lives": _lives_remaining,
+		"gold": _gold,
+		"run_shards": _run_shards,
+		"weapon_id": String(player.get_weapon_id()),
+		"health": player.get_current_health(),
+		"max_health": player.get_max_health(),
+		"upgrade_counts": _stringify_upgrade_counts(player.get_run_upgrade_counts()),
+		"room_index": _current_room_index,
+		"room_sequence": _room_sequence.duplicate(),
+		"encounter_sequence": _encounter_sequence.duplicate(),
+		"room_data": _serialize_room_data(_current_room_data),
+		"resume_phase": _flow_state.phase,
+		"last_upgrade_name": _last_upgrade_name,
+		"upgrade_choices": serialized_choices,
+	}
+	_continue_store.save_snapshot(snapshot)
+
+
+func _stringify_upgrade_counts(counts: Dictionary) -> Dictionary:
+	var packed: Dictionary = {}
+	for key_value: Variant in counts.keys():
+		packed[String(key_value)] = int(counts.get(key_value, 0))
+	return packed
+
+
+func _serialize_room_data(room_data: Dictionary) -> Dictionary:
+	var platforms: Array = []
+	for platform_value: Variant in room_data.get("platforms", []) as Array:
+		var platform: Rect2 = platform_value
+		platforms.append({
+			"x": platform.position.x,
+			"y": platform.position.y,
+			"w": platform.size.x,
+			"h": platform.size.y,
+		})
+	var enemies: Array = []
+	for enemy_value: Variant in room_data.get("enemies", []) as Array:
+		if enemy_value is Dictionary:
+			enemies.append((enemy_value as Dictionary).duplicate(true))
+	var accent: Color = room_data.get("accent", Color("#78bdc3"))
+	return {
+		"id": String(room_data.get("id", "unknown_room")),
+		"title": String(room_data.get("title", "未知房间")),
+		"accent": accent.to_html(false),
+		"platforms": platforms,
+		"enemies": enemies,
+		"mirrored": bool(room_data.get("mirrored", false)),
+	}
+
+
+func _deserialize_room_data(serialized: Dictionary) -> Dictionary:
+	var platforms: Array[Rect2] = []
+	for platform_value: Variant in serialized.get("platforms", []) as Array:
+		if not platform_value is Dictionary:
+			continue
+		var platform: Dictionary = platform_value as Dictionary
+		platforms.append(Rect2(
+			float(platform.get("x", 0.0)),
+			float(platform.get("y", 0.0)),
+			float(platform.get("w", 160.0)),
+			float(platform.get("h", 28.0))
+		))
+	var enemies: Array[Dictionary] = []
+	for enemy_value: Variant in serialized.get("enemies", []) as Array:
+		if enemy_value is Dictionary:
+			enemies.append((enemy_value as Dictionary).duplicate(true))
+	return {
+		"id": StringName(String(serialized.get("id", "unknown_room"))),
+		"title": String(serialized.get("title", "未知房间")),
+		"accent": Color("#%s" % String(serialized.get("accent", "78bdc3"))),
+		"platforms": platforms,
+		"enemies": enemies,
+		"mirrored": bool(serialized.get("mirrored", false)),
+	}
+
+
+func _continue_saved_run() -> bool:
+	if not _has_continue_snapshot():
+		return false
+	var snapshot: Dictionary = _continue_store.get_snapshot()
+	_entry_flow_active = false
+	if _entry_tween != null and _entry_tween.is_valid():
+		_entry_tween.kill()
+	_entry_overlay.visible = false
+	if is_instance_valid(_death_recap):
+		_death_recap.hide_recap()
+	if is_instance_valid(_tutorial):
+		_tutorial.hide_lesson()
+	_run_generation += 1
+	_run_number += 1
+	_run_seed = int(snapshot.get("seed", 1))
+	_rng.seed = _run_seed
+	var rng_state_text := String(snapshot.get("rng_state", ""))
+	if not rng_state_text.is_empty():
+		_rng.state = rng_state_text.to_int()
+	_selected_difficulty = clampi(int(snapshot.get("difficulty", Difficulty.MEDIUM)), Difficulty.EASY, Difficulty.HARD)
+	_lives_remaining = clampi(int(snapshot.get("lives", MAX_RUN_LIVES)), 1, MAX_RUN_LIVES)
+	_gold = maxi(0, int(snapshot.get("gold", 10)))
+	_run_shards = maxi(0, int(snapshot.get("run_shards", 0)))
+	_last_upgrade_name = String(snapshot.get("last_upgrade_name", ""))
+	_room_sequence.clear()
+	for room_index_value: Variant in snapshot.get("room_sequence", []) as Array:
+		_room_sequence.append(int(room_index_value))
+	_encounter_sequence.clear()
+	for encounter_value: Variant in snapshot.get("encounter_sequence", []) as Array:
+		_encounter_sequence.append(int(encounter_value))
+	if _room_sequence.is_empty():
+		return false
+	_current_room_index = clampi(
+		int(snapshot.get("room_index", 0)),
+		0,
+		_room_sequence.size() - 1
+	)
+	_hide_upgrade_overlay()
+	_clear_chest()
+	_clear_room_exit_portal()
+	_clear_projectiles()
+	_clear_enemies()
+	_clear_platform_colliders()
+	var weapon_id := StringName(String(snapshot.get("weapon_id", WeaponCatalog.SWORD)))
+	player.set_input_enabled(false)
+	player.configure_weapon(weapon_id)
+	var restored_counts: Dictionary = {}
+	var packed_counts: Dictionary = snapshot.get("upgrade_counts", {}) as Dictionary
+	for key_value: Variant in packed_counts.keys():
+		restored_counts[StringName(String(key_value))] = int(packed_counts.get(key_value, 0))
+	player.restore_run_progression(restored_counts, int(snapshot.get("health", player.get_max_health())))
+	var saved_max_health: int = int(snapshot.get("max_health", player.get_max_health()))
+	player.apply_max_health_delta(saved_max_health - player.get_max_health())
+	_hud_presenter.set_boss_visible(false)
+	_current_room_data = _deserialize_room_data(snapshot.get("room_data", {}) as Dictionary)
+	_current_encounter = _get_encounter_for_room(_current_room_index)
+	_current_objective = _get_room_objective(_current_encounter)
+	_current_combat_profile = _get_combat_profile()
+	if _telemetry != null:
+		_telemetry.begin_run(_run_seed, get_selected_difficulty_name(), player.get_weapon_id())
+		_telemetry.begin_room(
+			_current_room_index + 1,
+			StringName(String(_current_room_data.get("id", "unknown_room"))),
+			String(_current_room_data.get("title", "未知房间")),
+			_get_encounter_name(_current_encounter)
+		)
+	platform_rects.clear()
+	var room_platforms: Array = _current_room_data.get("platforms", []) as Array
+	for platform_value in room_platforms:
+		platform_rects.append(platform_value as Rect2)
+	_create_platform_colliders()
+	if not platform_rects.is_empty():
+		player.set_base_ground_surface_y(platform_rects[0].position.y)
+	player.enter_room(ROOM_PLAYER_SPAWN, 0)
+	player.set_current_health(int(snapshot.get("health", player.get_current_health())))
+	_configure_room_objective()
+	var resume_phase: int = int(snapshot.get("resume_phase", RunFlowState.Phase.COMBAT))
+	var saved_choices: Array = snapshot.get("upgrade_choices", []) as Array
+	_upgrade_choices.clear()
+	for choice_value: Variant in saved_choices:
+		if choice_value is Dictionary:
+			_upgrade_choices.append((choice_value as Dictionary).duplicate(true))
+	if resume_phase == RunFlowState.Phase.UPGRADE and _upgrade_choices.size() >= 3:
+		player.set_input_enabled(false)
+		_set_run_phase(RunFlowState.Phase.UPGRADE)
+		_upgrade_overlay.visible = true
+		_upgrade_title.text = "房间已清理——选择一项强化"
+		_refresh_choice_overlay_prompts()
+		_play_upgrade_overlay_intro()
+		_ensure_context_focus()
+	elif resume_phase == RunFlowState.Phase.SHOP:
+		player.set_input_enabled(false)
+		if _upgrade_choices.is_empty():
+			_show_shop()
+		else:
+			_set_run_phase(RunFlowState.Phase.SHOP)
+			_upgrade_overlay.visible = true
+			_upgrade_title.text = "星尘旅商——购买一项强化"
+			_refresh_choice_overlay_prompts()
+			_play_upgrade_overlay_intro()
+			_ensure_context_focus()
+	elif resume_phase == RunFlowState.Phase.EVENT:
+		player.set_input_enabled(false)
+		if _upgrade_choices.is_empty():
+			_show_event_choice()
+		else:
+			_set_run_phase(RunFlowState.Phase.EVENT)
+			_upgrade_overlay.visible = true
+			_upgrade_title.text = "月蚀奇遇——每项回应都有代价"
+			_refresh_choice_overlay_prompts()
+			_play_upgrade_overlay_intro()
+			_ensure_context_focus()
+	elif resume_phase == RunFlowState.Phase.EXIT_PORTAL:
+		_begin_room_exit()
+	else:
+		_spawn_room_enemies()
+		player.set_input_enabled(true)
+		if _current_encounter == EncounterType.RISK_CHEST:
+			_set_run_phase(RunFlowState.Phase.CHEST)
+		else:
+			_set_run_phase(RunFlowState.Phase.COMBAT)
+		_set_status("已继续本局路线——第 %d 房" % (_current_room_index + 1))
+	_update_economy_hud()
+	_update_controls()
+	_update_room_label()
+	_update_lives_hud()
+	_refresh_build_overview()
+	_update_music_state()
+	return true
 
 
 func _draw_gothic_platform(rect: Rect2, room_accent: Color) -> void:

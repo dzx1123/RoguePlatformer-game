@@ -80,6 +80,9 @@ const RESPAWN_INVULNERABILITY := 1.0
 const DASH_COOLDOWN := 2.0
 const DASH_EXIT_BLEND_DURATION := 0.065
 const DROP_THROUGH_DURATION := 0.20
+const HITSTOP_ATTACK := 0.050
+const HITSTOP_SKILL := 0.072
+const HITSTOP_BOSS_BONUS := 0.028
 
 @export_category("Movement")
 @export var run_speed := 320.0
@@ -145,6 +148,8 @@ var _airborne_time: float = 0.0
 var _hurt_remaining: float = 0.0
 var _hurt_invulnerability_remaining: float = 0.0
 var _drop_through_remaining: float = 0.0
+var _hitstop_remaining: float = 0.0
+var _last_footstep_cycle: int = -1
 var _base_ground_surface_y: float = INF
 var _current_health: int = 100
 var _is_dead: bool = false
@@ -201,6 +206,11 @@ func _physics_process(delta: float) -> void:
 	if _is_dead:
 		_process_death(delta)
 		return
+	if _hitstop_remaining > 0.0:
+		_hitstop_remaining = maxf(0.0, _hitstop_remaining - delta)
+		_update_hero_visuals(delta)
+		queue_redraw()
+		return
 
 	var was_on_floor: bool = is_on_floor()
 	_update_timers(delta)
@@ -216,6 +226,7 @@ func _physics_process(delta: float) -> void:
 	var requested_facing: float = 0.0
 	if not is_zero_approx(input_direction):
 		requested_facing = signf(input_direction)
+		action_started.emit(&"move")
 		# During a ground reversal the body keeps facing its actual travel direction
 		# until it has nearly stopped. This removes the brief moonwalk before turning.
 		if (
@@ -250,10 +261,7 @@ func _physics_process(delta: float) -> void:
 	if (
 		_input_enabled
 		and Input.is_action_just_pressed(&"dash")
-		and _dash_cooldown_remaining <= 0.0
-		and _attack_remaining <= 0.0
-		and _skill_remaining <= 0.0
-		and _hurt_remaining <= 0.0
+		and can_cancel_into_dash()
 	):
 		if not is_zero_approx(requested_facing):
 			_facing = requested_facing
@@ -301,9 +309,12 @@ func _physics_process(delta: float) -> void:
 	if now_on_floor:
 		if not was_on_floor:
 			_landing_squash_remaining = LANDING_SQUASH_DURATION
+			if _airborne_time > 0.08:
+				action_started.emit(&"land")
 		_airborne_time = 0.0
 	else:
 		_airborne_time += delta
+		_last_footstep_cycle = -1
 
 	if global_position.y > 820.0:
 		var fall_damage: int = _current_health
@@ -335,12 +346,14 @@ func _physics_process(delta: float) -> void:
 		and _attack_exit_blend_remaining <= 0.0
 		and _dash_exit_blend_remaining <= 0.0
 	):
+		var previous_cycle: float = _run_cycle
 		_run_cycle = fposmod(
 			_run_cycle + delta * absf(velocity.x) / RUN_PIXELS_PER_FRAME,
 			RUN_FRAME_COUNT
 		)
 		_run_is_settling = false
 		_run_has_settled = false
+		_emit_run_footstep(previous_cycle)
 	elif now_on_floor and _movement_blend > 0.03:
 		_settle_run_cycle(delta)
 
@@ -389,6 +402,8 @@ func respawn() -> void:
 	_hurt_remaining = 0.0
 	_hurt_invulnerability_remaining = RESPAWN_INVULNERABILITY
 	_drop_through_remaining = 0.0
+	_hitstop_remaining = 0.0
+	_last_footstep_cycle = -1
 	_visual_state = VisualState.IDLE
 	_visual_state_elapsed = 0.0
 	_sprite_pose_initialized = false
@@ -405,8 +420,77 @@ func reset_run_progression() -> void:
 	_run_damage_bonus = 0
 	_run_attack_cooldown_multiplier = 1.0
 	_run_upgrade_counts.clear()
+	_hitstop_remaining = 0.0
 	configure_weapon(_weapon_id)
 	respawn()
+
+
+func restore_run_progression(upgrade_counts: Dictionary, current_health: int) -> void:
+	reset_run_progression()
+	for upgrade: Dictionary in UPGRADE_CATALOG.all_upgrades():
+		var upgrade_id: StringName = upgrade.get("id", &"")
+		var stacks: int = int(upgrade_counts.get(upgrade_id, 0))
+		if stacks <= 0:
+			continue
+		if upgrade_id == &"second_wind":
+			_run_upgrade_counts[upgrade_id] = stacks
+			continue
+		for _stack_index in range(stacks):
+			apply_run_upgrade(upgrade_id)
+	set_current_health(current_health)
+
+
+func set_current_health(value: int) -> void:
+	_current_health = clampi(value, 0 if _is_dead else 1, maxi(1, max_health))
+	health_changed.emit(_current_health, maxi(1, max_health))
+
+
+func apply_max_health_delta(amount: int) -> void:
+	max_health = maxi(1, max_health + amount)
+	_current_health = clampi(_current_health, 1, max_health)
+	health_changed.emit(_current_health, max_health)
+
+
+func apply_event_cost(damage: int) -> int:
+	if _is_dead or damage <= 0:
+		return 0
+	var applied: int = mini(damage, maxi(0, _current_health - 1))
+	if applied <= 0:
+		return 0
+	_current_health -= applied
+	health_changed.emit(_current_health, maxi(1, max_health))
+	damage_received.emit(applied, &"event_cost")
+	return applied
+
+
+func apply_hitstop(duration: float, is_boss_hit: bool = false) -> void:
+	if _is_dead or duration <= 0.0:
+		return
+	var resolved: float = duration
+	if is_boss_hit:
+		resolved += HITSTOP_BOSS_BONUS
+	if _reduced_effects_enabled:
+		resolved *= 0.35
+	_hitstop_remaining = maxf(_hitstop_remaining, resolved)
+
+
+func get_hitstop_remaining() -> float:
+	return _hitstop_remaining
+
+
+func can_cancel_into_dash() -> bool:
+	if _is_dead or _hurt_remaining > 0.0:
+		return false
+	if _dash_remaining > 0.0 or _dash_cooldown_remaining > 0.0:
+		return false
+	if _attack_remaining > 0.0:
+		return _attack_hit_emitted
+	if _skill_remaining > 0.0:
+		return (
+			_skill_hit_emitted
+			and _skill_hit_index >= _skill_hit_progresses.size()
+		)
+	return true
 
 
 func enter_room(spawn_position: Vector2, recovery: int = 10) -> void:
@@ -748,6 +832,10 @@ func _start_drop_through() -> void:
 func _start_dash() -> void:
 	if _is_dead:
 		return
+	if _attack_remaining > 0.0:
+		_finish_attack()
+	if _skill_remaining > 0.0:
+		_finish_skill()
 	_dash_remaining = dash_duration
 	_dash_cooldown_remaining = maxf(0.01, dash_cooldown_duration)
 	_dash_echo_remaining = 0.0
@@ -1153,6 +1241,17 @@ func _update_dash_echoes(delta: float) -> void:
 	echo.global_position = hero_sprite.global_position
 	echo.z_index = hero_sprite.z_index - 1
 	echo.call(&"setup", hero_sprite.texture, _facing, hero_sprite.global_scale)
+
+
+func _emit_run_footstep(previous_cycle: float) -> void:
+	var planted_frame: int = int(floor(_run_cycle))
+	if planted_frame == _last_footstep_cycle:
+		return
+	if posmod(planted_frame, 4) != 0:
+		return
+	if previous_cycle < _run_cycle or planted_frame == 0:
+		_last_footstep_cycle = planted_frame
+		action_started.emit(&"footstep")
 
 
 func _settle_run_cycle(delta: float) -> void:

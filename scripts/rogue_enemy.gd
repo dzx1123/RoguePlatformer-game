@@ -184,6 +184,7 @@ var _turn_from_facing: float = 1.0
 var _landing_motion_remaining: float = 0.0
 var _sprite_pose_initialized: bool = false
 var _enemy_sprite: Sprite2D
+var _hitstop_remaining: float = 0.0
 
 
 func _ready() -> void:
@@ -661,6 +662,16 @@ func defeat() -> void:
 	queue_redraw()
 
 
+func apply_hitstop(duration: float) -> void:
+	if _is_defeated or duration <= 0.0:
+		return
+	_hitstop_remaining = maxf(_hitstop_remaining, duration)
+
+
+func get_hitstop_remaining() -> float:
+	return _hitstop_remaining
+
+
 func _physics_process(delta: float) -> void:
 	if _is_defeated:
 		_elapsed += delta
@@ -670,6 +681,11 @@ func _physics_process(delta: float) -> void:
 		if _death_remaining <= 0.0:
 			defeated.emit()
 			queue_free()
+		return
+	if _hitstop_remaining > 0.0:
+		_hitstop_remaining = maxf(0.0, _hitstop_remaining - delta)
+		_update_sprite_animation(delta)
+		queue_redraw()
 		return
 
 	var was_on_floor: bool = is_on_floor()

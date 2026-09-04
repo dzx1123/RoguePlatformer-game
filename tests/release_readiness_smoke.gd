@@ -45,6 +45,10 @@ func _run_test() -> void:
 		"res://scripts/run_flow_state.gd",
 		"res://scripts/run_hud_builder.gd",
 		"res://scripts/run_hud_presenter.gd",
+		"res://scripts/event_catalog.gd",
+		"res://scripts/run_continue_store.gd",
+		"res://scripts/death_recap.gd",
+		"res://scripts/run_tutorial.gd",
 	]:
 		if not ResourceLoader.exists(script_path):
 			_fail("Release module is missing: %s" % script_path)
