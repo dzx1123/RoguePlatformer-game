@@ -26,6 +26,10 @@ func _run_test() -> void:
 		or (settings_menu.get_node("FullscreenToggle") as CheckButton) == null
 		or (settings_menu.get_node("VsyncToggle") as CheckButton) == null
 		or (settings_menu.get_node("ReducedEffectsToggle") as CheckButton) == null
+		or (settings_menu.get_node("LargeTextToggle") as CheckButton) == null
+		or (settings_menu.get_node("HighContrastToggle") as CheckButton) == null
+		or (settings_menu.get_node("ColorBlindToggle") as CheckButton) == null
+		or (settings_menu.get_node("HUDScaleSelector") as OptionButton) == null
 		or (settings_menu.get_node("MusicVolume") as HSlider) == null
 		or (settings_menu.get_node("EffectsVolume") as HSlider) == null
 		or (settings_menu.get_node("VoiceVolume") as HSlider) == null
@@ -49,6 +53,12 @@ func _run_test() -> void:
 				return
 	var bindings_card: Control = settings_menu.get_node("SettingsBindingsCard") as Control
 	var guide_card: Control = settings_menu.get_node("SettingsGuideCard") as Control
+	var system_card: Control = settings_menu.get_node("SettingsSystemCard") as Control
+	for control_name: String in ["ColorBlindToggle", "HUDScaleLabel", "HUDScaleSelector", "ControllerStatus"]:
+		var system_control := settings_menu.get_node(control_name) as Control
+		if not system_card.get_global_rect().encloses(system_control.get_global_rect()):
+			_fail("System setting escaped its card: %s" % control_name)
+			return
 	for child: Node in settings_menu.get_children():
 		if child is Button and child.name.begins_with("Bind_"):
 			var binding_button := child as Button

@@ -20,6 +20,10 @@ func _run_test() -> void:
 	store.set_fullscreen_enabled(true)
 	store.set_vsync_enabled(false)
 	store.set_reduced_effects_enabled(true)
+	store.set_large_text_enabled(true)
+	store.set_high_contrast_enabled(true)
+	store.set_color_blind_enabled(true)
+	store.set_hud_scale_index(2)
 
 	var loaded = SETTINGS_STORE.new(SAVE_PATH)
 	if not loaded.load_settings():
@@ -34,6 +38,11 @@ func _run_test() -> void:
 		or not bool(loaded.get_fullscreen_enabled())
 		or bool(loaded.get_vsync_enabled())
 		or not bool(loaded.get_reduced_effects_enabled())
+		or not bool(loaded.get_large_text_enabled())
+		or not bool(loaded.get_high_contrast_enabled())
+		or not bool(loaded.get_color_blind_enabled())
+		or int(loaded.get_hud_scale_index()) != 2
+		or absf(float(loaded.get_hud_scale_factor()) - 1.10) > 0.001
 	):
 		return _fail("Expanded settings did not survive an atomic save round-trip")
 	for bus_name: StringName in [&"Music", &"SFX", &"Voice"]:

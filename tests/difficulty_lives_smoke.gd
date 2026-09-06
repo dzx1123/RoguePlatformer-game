@@ -24,20 +24,20 @@ func _run_test() -> void:
 	var weapon_panel: Panel = main.get_node("HUD/WeaponPanel") as Panel
 	var viewport_size: Vector2 = main.get_viewport_rect().size
 	if (
-		viewport_size != Vector2(1280.0, 840.0)
-		or bottom_hud.position.y < 720.0
+		viewport_size != Vector2(1280.0, 720.0)
+		or bottom_hud.position != Vector2(0.0, 640.0)
 		or bottom_hud.position.y + bottom_hud.size.y > viewport_size.y
-		or lives_label.position.y < 720.0
+		or lives_label.position.y < 640.0
 		or lives_label.position.y + lives_label.size.y > viewport_size.y
-		or ability_bar.position.y < 720.0
-		or room_card.position.x < 980.0
-		or status_label.position.x > 100.0
-		or status_label.position.y < 790.0
-		or status_card.size.x > 380.0
+		or ability_bar.position.y < 640.0
+		or room_card.position != Vector2(40, 40)
+		or status_label.position.x != 452.0
+		or status_card.size.x != 400.0
+		or bottom_hud.size.y != 80.0
 		or vitals_panel.position.x >= ability_panel.position.x
 		or ability_panel.position.x >= weapon_panel.position.x
 	):
-		_fail("Dedicated 1280x840 combat dock or its three-column layout was not aligned")
+		_fail("Dedicated 1280x720 combat dock or its three-column layout was not aligned")
 		return
 
 	main.set("_selected_difficulty", 0)
@@ -152,6 +152,12 @@ func _run_test() -> void:
 	for life_index in range(3):
 		main.call(&"_on_player_died")
 		await create_timer(1.15).timeout
+		var recap: Control = main.get_node("HUD/DeathRecap") as Control
+		if not recap.visible or not paused:
+			_fail("Death recap must wait for explicit confirmation with gameplay frozen")
+			return
+		(main.get_node("HUD/DeathRecap/Sheet/Retry") as Button).pressed.emit()
+		await process_frame
 		if life_index < 2 and int(main.get("_lives_remaining")) != 2 - life_index:
 			_fail("A death did not consume exactly one life")
 			return

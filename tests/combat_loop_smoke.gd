@@ -111,6 +111,11 @@ func _run_test() -> void:
 	if not player.is_dead() or player.get_current_health() != 0:
 		_fail("Lethal damage did not enter the player death state")
 		return
+	await process_frame
+	if not (main.get_node("HUD/DeathRecap") as Control).visible or not paused:
+		_fail("Lethal damage did not pause on the death confirmation screen")
+		return
+	(main.get_node("HUD/DeathRecap/Sheet/Retry") as Button).pressed.emit()
 	for _restart_frame in range(80):
 		await physics_frame
 	if player.is_dead() or player.get_current_health() != player.get_max_health():

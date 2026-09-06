@@ -23,10 +23,27 @@ cinevid, all licensed CC0 1.0 on Freesound. Sources:
 - https://freesound.org/people/_stubb/sounds/406582/
 - https://freesound.org/people/cinevid/sounds/144159/
 
-## Player vocalizations
+## Designed combat palette
 
-The files in `player_voice/` are selected from **RPG Male Vocal** by
+Files in `designed/` are original synthesized clips for this project:
+boy-hero wordless shouts (hya / hup), quiet blade whooshes, steel hits,
+skill chimes, enemy bite and spit. They are not Nintendo recordings and
+are not reused Kenney / OpenGameArt / konakuma samples.
+
+Regenerate with:
+
+`Godot --headless --path D:\Godot\RoguePlatformer-game --script res://tools/render_designed_audio.gd`
+
+## Original music beds
+
+Files in `music/` (`cover.wav`, `explore.wav`, `boss.wav`) are original
+synthesized loops for this project. Regenerate with:
+
+`Godot --headless --path D:\Godot\RoguePlatformer-game --script res://tools/render_bgm.gd`
+
+## Archived vocalizations
+
+The older files in `player_voice/` are selected from **RPG Male Vocal** by
 konakuma. The author permits free use and modification, and asks to be
-included in the credits. All attack, skill, hurt, and defeat clips are
-matching takes from this single 162-clip protagonist voice pack.
+included in the credits. They are no longer wired into gameplay.
 Source: https://konakuma.itch.io/rpg-male-vocal

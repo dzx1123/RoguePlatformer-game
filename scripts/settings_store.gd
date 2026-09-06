@@ -5,13 +5,14 @@ class_name RogueSettingsStore
 
 const SAFE_JSON_STORE_SCRIPT := preload("res://scripts/safe_json_store.gd")
 const SAVE_PATH := "user://rogue_settings.json"
-const SAVE_VERSION := 5
+const SAVE_VERSION := 7
 const RESOLUTION_OPTIONS: Array[Vector2i] = [
-	Vector2i(1280, 840),
+	Vector2i(1280, 720),
 	Vector2i(1600, 900),
 	Vector2i(1920, 1080),
 	Vector2i(2560, 1440),
 ]
+const HUD_SCALE_FACTORS: Array[float] = [0.90, 1.00, 1.10]
 const DEFAULT_BINDINGS := {
 	"move_left": [KEY_A, KEY_LEFT],
 	"move_right": [KEY_D, KEY_RIGHT],
@@ -59,6 +60,10 @@ var _resolution_index: int = 0
 var _fullscreen_enabled: bool = false
 var _vsync_enabled: bool = true
 var _reduced_effects_enabled: bool = false
+var _large_text_enabled: bool = false
+var _high_contrast_enabled: bool = false
+var _color_blind_enabled: bool = false
+var _hud_scale_index: int = 1
 
 
 func _init(save_path: String = SAVE_PATH) -> void:
@@ -86,6 +91,14 @@ func load_settings() -> bool:
 	_fullscreen_enabled = bool(data.get("fullscreen_enabled", false))
 	_vsync_enabled = bool(data.get("vsync_enabled", true))
 	_reduced_effects_enabled = bool(data.get("reduced_effects_enabled", false))
+	_large_text_enabled = bool(data.get("large_text_enabled", false))
+	_high_contrast_enabled = bool(data.get("high_contrast_enabled", false))
+	_color_blind_enabled = bool(data.get("color_blind_enabled", false))
+	_hud_scale_index = clampi(
+		int(data.get("hud_scale_index", 1)),
+		0,
+		HUD_SCALE_FACTORS.size() - 1
+	)
 	var loaded_bindings: Dictionary = data.get("bindings", {}) as Dictionary
 	for action_value in DEFAULT_BINDINGS:
 		var action_name: String = String(action_value)
@@ -120,6 +133,10 @@ func save_settings() -> Error:
 		"fullscreen_enabled": _fullscreen_enabled,
 		"vsync_enabled": _vsync_enabled,
 		"reduced_effects_enabled": _reduced_effects_enabled,
+		"large_text_enabled": _large_text_enabled,
+		"high_contrast_enabled": _high_contrast_enabled,
+		"color_blind_enabled": _color_blind_enabled,
+		"hud_scale_index": _hud_scale_index,
 		"bindings": binding_data,
 	})
 
@@ -371,6 +388,46 @@ func get_reduced_effects_enabled() -> bool:
 	return _reduced_effects_enabled
 
 
+func set_large_text_enabled(enabled: bool) -> void:
+	_large_text_enabled = enabled
+	save_settings()
+
+
+func get_large_text_enabled() -> bool:
+	return _large_text_enabled
+
+
+func set_high_contrast_enabled(enabled: bool) -> void:
+	_high_contrast_enabled = enabled
+	save_settings()
+
+
+func get_high_contrast_enabled() -> bool:
+	return _high_contrast_enabled
+
+
+func set_color_blind_enabled(enabled: bool) -> void:
+	_color_blind_enabled = enabled
+	save_settings()
+
+
+func get_color_blind_enabled() -> bool:
+	return _color_blind_enabled
+
+
+func set_hud_scale_index(value: int) -> void:
+	_hud_scale_index = clampi(value, 0, HUD_SCALE_FACTORS.size() - 1)
+	save_settings()
+
+
+func get_hud_scale_index() -> int:
+	return _hud_scale_index
+
+
+func get_hud_scale_factor() -> float:
+	return HUD_SCALE_FACTORS[_hud_scale_index]
+
+
 func get_save_path() -> String:
 	return _save_path
 
@@ -389,6 +446,10 @@ func _reset_defaults() -> void:
 	_fullscreen_enabled = false
 	_vsync_enabled = true
 	_reduced_effects_enabled = false
+	_large_text_enabled = false
+	_high_contrast_enabled = false
+	_color_blind_enabled = false
+	_hud_scale_index = 1
 
 
 func _copy_default_codes(action_name: String) -> Array[int]:
@@ -429,6 +490,11 @@ func get_requested_resolution() -> Vector2i:
 func _apply_display() -> bool:
 	if not can_apply_display():
 		return false
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree != null:
+		tree.root.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+		tree.root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
+		tree.root.content_scale_size = Vector2i(1280, 720)
 	DisplayServer.window_set_vsync_mode(
 		DisplayServer.VSYNC_ENABLED if _vsync_enabled else DisplayServer.VSYNC_DISABLED
 	)

@@ -1,5 +1,7 @@
 extends SceneTree
 
+const ENEMY_SOURCE_PATH := "res://scripts/rogue_enemy.gd"
+
 var _caster_projectile_count: int = 0
 
 
@@ -8,6 +10,13 @@ func _initialize() -> void:
 
 
 func _run_test() -> void:
+	var enemy_source := FileAccess.get_file_as_string(ENEMY_SOURCE_PATH)
+	if enemy_source.contains("draw_arc(shield_center, 15.0, 0.0, TAU"):
+		_fail("Shield guard still draws the body-wrapping full-circle marker")
+		return
+	if not enemy_source.contains("draw_colored_polygon(shield_points"):
+		_fail("Shield guard no longer exposes the compact directional shield badge")
+		return
 	var target: Node2D = Node2D.new()
 	target.position = Vector2(760.0, 520.0)
 	root.add_child(target)

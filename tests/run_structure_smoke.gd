@@ -67,6 +67,10 @@ func _run_test() -> void:
 	if not player.is_dead():
 		_fail("Lethal damage did not begin the run-death flow")
 		return
+	if not (main.get_node("HUD/DeathRecap") as Control).visible:
+		_fail("Death did not expose an explicit retry action")
+		return
+	(main.get_node("HUD/DeathRecap/Sheet/Retry") as Button).pressed.emit()
 	await _wait_physics_frames(82)
 	if int(main.get("_run_generation")) <= generation_before_death:
 		_fail("Death did not generate a fresh run")

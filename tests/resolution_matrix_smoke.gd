@@ -1,8 +1,8 @@
 extends SceneTree
 
-const DESIGN_SIZE := Vector2(1280.0, 840.0)
+const DESIGN_SIZE := Vector2(1280.0, 720.0)
 const TEST_SIZES: Array[Vector2i] = [
-	Vector2i(1280, 840),
+	Vector2i(1280, 720),
 	Vector2i(1600, 900),
 	Vector2i(1920, 1080),
 	Vector2i(2560, 1440),
@@ -45,8 +45,8 @@ func _run_test() -> void:
 			_fail("HUD control leaves the design viewport: %s %s" % [path, control.get_global_rect()])
 			return
 	var bottom_hud: Control = hud.get_node("BottomHUD") as Control
-	if bottom_hud.position != Vector2(0.0, 720.0) or bottom_hud.size != Vector2(1280.0, 120.0):
-		_fail("Bottom HUD no longer owns the reserved 120-pixel dock")
+	if bottom_hud.position != Vector2(0.0, 640.0) or bottom_hud.size.y != 80.0:
+		_fail("Bottom HUD no longer owns the compact ground-level dock")
 		return
 	var vitals: Control = hud.get_node("VitalsPanel") as Control
 	var abilities: Control = hud.get_node("AbilityPanel") as Control
@@ -75,6 +75,7 @@ func _verify_scale_contract() -> bool:
 	if (
 		int(ProjectSettings.get_setting("display/window/size/viewport_width", 0)) != int(DESIGN_SIZE.x)
 		or int(ProjectSettings.get_setting("display/window/size/viewport_height", 0)) != int(DESIGN_SIZE.y)
+		or String(ProjectSettings.get_setting("display/window/stretch/mode", "")) != "canvas_items"
 		or String(ProjectSettings.get_setting("display/window/stretch/aspect", "")) != "keep"
 	):
 		_fail("Project stretch contract changed")
@@ -85,12 +86,8 @@ func _verify_scale_contract() -> bool:
 			float(window_size.y) / DESIGN_SIZE.y
 		)
 		var content_size: Vector2 = DESIGN_SIZE * scale
-		var letterbox: Vector2 = (Vector2(window_size) - content_size) * 0.5
-		if scale <= 0.0 or letterbox.x < -0.1 or letterbox.y < -0.1:
+		if scale <= 0.0 or content_size.x > float(window_size.x) + 0.1 or content_size.y > float(window_size.y) + 0.1:
 			_fail("Invalid keep-aspect projection for %s" % window_size)
-			return false
-		if content_size.x > float(window_size.x) + 0.1 or content_size.y > float(window_size.y) + 0.1:
-			_fail("Projected content exceeds window size %s" % window_size)
 			return false
 	return true
 

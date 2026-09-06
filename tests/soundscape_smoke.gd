@@ -17,19 +17,31 @@ func _run_test() -> void:
 	soundscape.play_player_skill_voice()
 	soundscape.play_player_hurt_voice()
 	soundscape.play_player_defeat_voice()
-	if soundscape.get_current_player_voice_path() != "res://assets/audio/player_voice/defeat.wav":
-		_fail("Player vocal cue did not select the rendered defeat sample")
+	if soundscape.get_current_player_voice_path() != "res://assets/audio/designed/down_1.wav":
+		_fail("Player vocal cue did not select the designed defeat sample")
 		return
 	if soundscape.get_player_voice_sample_count() != 10:
 		_fail("The complete young protagonist combat voice set was not loaded")
 		return
-	if soundscape.get_loaded_combat_sample_count() != 12:
-		_fail("CC0 combat samples were not loaded")
+	if soundscape.get_loaded_combat_sample_count() != 42:
+		_fail("Designed combat samples were not loaded")
+		return
+	soundscape.play_land()
+	soundscape.play_ui()
+	soundscape.play_skill(WeaponCatalog.TWIN_BLADES)
+	soundscape.play_skill(WeaponCatalog.GREATSWORD)
+	if soundscape.get_loaded_music_count() != 3:
+		_fail("Cover, room, and boss music beds were not loaded")
+		return
+	soundscape.set_music_state(RogueSoundscape.MusicState.EXPLORE)
+	soundscape.set_music_state(RogueSoundscape.MusicState.BOSS)
+	if soundscape.get_music_state() != RogueSoundscape.MusicState.BOSS:
+		_fail("Boss music state did not apply")
 		return
 	soundscape.play_enemy_bite(true)
 	soundscape.play_enemy_spit(true)
 	soundscape.play_enemy_defeat(true)
-	if soundscape.get_active_voice_count() != 5:
+	if soundscape.get_active_voice_count() != 10:
 		_fail("Soundscape did not register every combat sound cue")
 		return
 	for _frame in range(42):

@@ -12,6 +12,7 @@ var _activating: bool = false
 var _prompt_root: Control
 var _prompt_label: Label
 var _opener_near: bool = false
+var _beam_texture: ImageTexture
 
 
 func setup(prompt_text: String = "E 进入下一房") -> void:
@@ -19,7 +20,30 @@ func setup(prompt_text: String = "E 进入下一房") -> void:
 
 
 func _ready() -> void:
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_beam_texture = _create_beam_texture()
 	_create_prompt_bubble()
+
+
+func _create_beam_texture() -> ImageTexture:
+	var image := Image.create(128, 256, false, Image.FORMAT_RGBA8)
+	for y in range(image.get_height()):
+		var vertical: float = float(y) / float(image.get_height() - 1)
+		# Almost invisible at the top, increasingly luminous toward the floor.
+		var height_fade: float = smoothstep(0.0, 1.0, vertical)
+		for x in range(image.get_width()):
+			var normalized_x: float = absf(float(x) / 127.0 * 2.0 - 1.0)
+			var edge_fade: float = 1.0 - smoothstep(0.38, 1.0, normalized_x)
+			var core: float = 1.0 - smoothstep(0.0, 0.30, normalized_x)
+			var alpha: float = height_fade * edge_fade * (0.24 + core * 0.52)
+			var color := Color(
+				lerpf(0.25, 0.40, height_fade),
+				lerpf(0.78, 0.94, height_fade),
+				1.0,
+				alpha
+			)
+			image.set_pixel(x, y, color)
+	return ImageTexture.create_from_image(image)
 
 
 func set_prompt_text(prompt_text: String) -> void:
@@ -93,7 +117,7 @@ func _create_prompt_bubble() -> void:
 	badge.size = Vector2(54.0, 30.0)
 	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	badge.text = "NEXT"
+	badge.text = "下一房"
 	badge.add_theme_font_size_override("font_size", 12)
 	badge.add_theme_color_override("font_color", Color(0.76, 0.96, 1.0, 1.0))
 	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -137,61 +161,39 @@ func _process(delta: float) -> void:
 func _draw() -> void:
 	var pulse: float = 0.5 + 0.5 * sin(_visual_time * 3.2)
 	var activation: float = 1.0 if _activating else 0.0
-	var beam_height: float = 158.0 + pulse * 13.0 + activation * 44.0
-	var base_width: float = 44.0 + pulse * 6.0
-	var top_width: float = 18.0 + pulse * 3.0
-	var beam_alpha: float = 0.20 + pulse * 0.11 + activation * 0.16
+	var beam_height: float = 170.0 + pulse * 6.0 + activation * 42.0
+	var beam_width: float = 86.0 + pulse * 3.0 + activation * 9.0
 
-	draw_set_transform(Vector2(0.0, 23.0), 0.0, Vector2(1.0, 0.26))
-	draw_circle(Vector2.ZERO, 76.0 + pulse * 11.0, Color(0.10, 0.78, 1.0, 0.16))
-	draw_circle(Vector2.ZERO, 51.0 + pulse * 6.0, Color(0.36, 0.94, 1.0, 0.20))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-	draw_colored_polygon(
-		PackedVector2Array([
-			Vector2(-base_width, 22.0),
-			Vector2(-top_width, 22.0 - beam_height),
-			Vector2(top_width, 22.0 - beam_height),
-			Vector2(base_width, 22.0),
-		]),
-		Color(0.25, 0.86, 1.0, beam_alpha)
-	)
-	draw_line(
-		Vector2(-base_width * 0.56, 20.0),
-		Vector2(-top_width * 0.52, 22.0 - beam_height),
-		Color(0.66, 0.97, 1.0, 0.72),
-		2.0
-	)
-	draw_line(
-		Vector2(base_width * 0.56, 20.0),
-		Vector2(top_width * 0.52, 22.0 - beam_height),
-		Color(0.66, 0.97, 1.0, 0.72),
-		2.0
-	)
-
-	for ring_index in range(4):
-		var ring_ratio: float = float(ring_index) / 3.0
-		var ring_y: float = 16.0 - ring_ratio * (beam_height - 18.0)
-		var ring_radius: float = 28.0 - ring_ratio * 11.0 + pulse * 1.4
-		draw_arc(
-			Vector2(0.0, ring_y),
-			ring_radius,
-			-PI + sin(_visual_time * 1.8 + ring_index) * 0.15,
-			sin(_visual_time * 1.8 + ring_index) * 0.15,
-			18,
-			Color(0.72, 0.98, 1.0, 0.58 - ring_ratio * 0.22),
-			1.6
+	# Two soft layers create a continuous bottom-to-top fade without hard side rails.
+	if is_instance_valid(_beam_texture):
+		draw_texture_rect(
+			_beam_texture,
+			Rect2(-beam_width * 0.72, 20.0 - beam_height, beam_width * 1.44, beam_height),
+			false,
+			Color(0.45, 0.92, 1.0, 0.30 + activation * 0.14)
+		)
+		draw_texture_rect(
+			_beam_texture,
+			Rect2(-beam_width * 0.46, 20.0 - beam_height, beam_width * 0.92, beam_height),
+			false,
+			Color(0.76, 0.98, 1.0, 0.76 + pulse * 0.08 + activation * 0.12)
 		)
 
-	for mote_index in range(8):
+	draw_set_transform(Vector2(0.0, 23.0), 0.0, Vector2(1.0, 0.26))
+	draw_circle(Vector2.ZERO, 72.0 + pulse * 6.0, Color(0.10, 0.70, 1.0, 0.10))
+	draw_circle(Vector2.ZERO, 48.0 + pulse * 3.0, Color(0.40, 0.94, 1.0, 0.18))
+	draw_arc(Vector2.ZERO, 58.0 + pulse * 2.0, 0.0, TAU, 48, Color(0.48, 0.93, 1.0, 0.34), 1.4)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	for mote_index in range(5):
 		var mote_phase: float = _visual_time * (1.1 + float(mote_index % 3) * 0.18) + float(mote_index) * 1.73
-		var mote_x: float = sin(mote_phase) * (12.0 + float(mote_index % 4) * 7.0)
+		var mote_x: float = sin(mote_phase) * (9.0 + float(mote_index % 3) * 6.0)
 		var mote_y: float = 18.0 - fposmod(mote_phase * 34.0, beam_height - 16.0)
 		draw_circle(
 			Vector2(mote_x, mote_y),
-			1.6 + float(mote_index % 2) * 0.8,
-			Color(0.76, 0.98, 1.0, 0.52 + pulse * 0.30)
+			1.2 + float(mote_index % 2) * 0.5,
+			Color(0.76, 0.98, 1.0, 0.34 + pulse * 0.22)
 		)
 
-	draw_circle(Vector2(0.0, 18.0), 12.0 + pulse * 3.0, Color(0.78, 0.98, 1.0, 0.76))
-	draw_circle(Vector2(0.0, 18.0), 5.0 + pulse * 1.4, Color(0.18, 0.76, 1.0, 0.96))
+	draw_circle(Vector2(0.0, 18.0), 10.0 + pulse * 2.0, Color(0.68, 0.96, 1.0, 0.64))
+	draw_circle(Vector2(0.0, 18.0), 4.0 + pulse, Color(0.20, 0.80, 1.0, 0.94))

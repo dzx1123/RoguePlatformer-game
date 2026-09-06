@@ -3,7 +3,7 @@ extends Control
 ## First-room, non-blocking prompts. Dismissed as the player performs each action.
 class_name RunTutorial
 
-const DISPLAY_SIZE := Vector2(1280.0, 840.0)
+const DISPLAY_SIZE := Vector2(1280.0, 720.0)
 
 var _banner: Panel
 var _label: Label

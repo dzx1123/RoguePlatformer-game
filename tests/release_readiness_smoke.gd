@@ -16,7 +16,7 @@ func _run_test() -> void:
 		return
 	if (
 		int(ProjectSettings.get_setting("display/window/size/viewport_width", 0)) != 1280
-		or int(ProjectSettings.get_setting("display/window/size/viewport_height", 0)) != 840
+		or int(ProjectSettings.get_setting("display/window/size/viewport_height", 0)) != 720
 		or String(ProjectSettings.get_setting("display/window/stretch/mode", "")) != "canvas_items"
 		or String(ProjectSettings.get_setting("display/window/stretch/aspect", "")) != "keep"
 	):

@@ -7,14 +7,14 @@ func _initialize() -> void:
 
 func _capture() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUTPUT))
-	root.content_scale_size = Vector2i(1280, 840)
-	root.size = Vector2i(1280, 840)
+	root.content_scale_size = Vector2i(1280, 720)
+	root.size = Vector2i(1280, 720)
 	var main := (load("res://scenes/Main.tscn") as PackedScene).instantiate() as Node2D
 	main.set("save_enabled", false)
 	root.add_child(main)
 	await process_frame
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-	root.size = Vector2i(1280, 840)
+	root.size = Vector2i(1280, 720)
 	main.call(&"_pause_game")
 	main.call(&"_open_settings", true)
 	for controller: bool in [false, true]:
@@ -50,7 +50,7 @@ func _capture() -> void:
 	var canvas := Node2D.new()
 	root.add_child(canvas)
 	var background := ColorRect.new()
-	background.size = Vector2(1280, 840)
+	background.size = Vector2(1280, 720)
 	background.color = Color("#142c40")
 	canvas.add_child(background)
 	var paths := [

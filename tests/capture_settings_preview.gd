@@ -1,6 +1,6 @@
 extends SceneTree
 
-const PREVIEW_SIZE := Vector2i(1280, 840)
+const PREVIEW_SIZE := Vector2i(1280, 720)
 
 
 func _initialize() -> void:

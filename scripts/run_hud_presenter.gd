@@ -2,6 +2,30 @@ class_name RunHUDPresenter
 extends RefCounted
 
 const HEALTH_FILL_WIDTH := 316.0
+const UI := preload("res://scripts/ui_theme.gd")
+const HUD_SCALE_ANCHORS := {
+	"VitalsPanel": Vector2(32.0, 716.0),
+	"HealthBackground": Vector2(32.0, 716.0),
+	"Lives": Vector2(32.0, 716.0),
+	"Currency": Vector2(32.0, 716.0),
+	"AbilityPanel": Vector2(640.0, 716.0),
+	"AbilityBar": Vector2(640.0, 716.0),
+	"WeaponPanel": Vector2(1248.0, 716.0),
+	"Equipment": Vector2(1248.0, 716.0),
+	"RoomCard": Vector2(40.0, 28.0),
+	"RoomProgress": Vector2(40.0, 28.0),
+	"StatusToast": Vector2(640.0, 620.0),
+	"CombatStatus": Vector2(640.0, 620.0),
+	"BossHealth": Vector2(640.0, 44.0),
+}
+var _hud: CanvasLayer
+var _status_tween: Tween
+var _health_tween: Tween
+var _last_health: int = -1
+var _status_panel: Panel
+var _obscured: bool = false
+var _reward_visible: bool = false
+var _color_blind_enabled: bool = false
 
 var health_label: Label
 var health_fill: ColorRect
@@ -23,6 +47,8 @@ var _weapon_state_key: String = ""
 
 
 func bind(hud: CanvasLayer) -> bool:
+	_hud = hud
+	_status_panel = hud.get_node("StatusToast") as Panel
 	health_label = hud.get_node_or_null("HealthBackground/HealthLabel") as Label
 	health_fill = hud.get_node_or_null("HealthBackground/HealthFill") as ColorRect
 	lives_label = hud.get_node_or_null("Lives") as Label
@@ -51,6 +77,92 @@ func bind(hud: CanvasLayer) -> bool:
 	return is_bound()
 
 
+func apply_accessibility(
+	large_text: bool,
+	high_contrast: bool,
+	color_blind_enabled: bool = false,
+	hud_scale: float = 1.0
+) -> void:
+	## Absolute sizes from flags — never compound on repeated calls.
+	_color_blind_enabled = color_blind_enabled
+	_apply_hud_scale(clampf(hud_scale, 0.90, 1.10))
+	var caption_size: int = UI.CAPTION + (2 if large_text else 0)
+	var body_size: int = UI.BODY + (2 if large_text else 0)
+	var micro_size: int = 12 + (2 if large_text else 0)
+	if room_label != null:
+		room_label.add_theme_font_size_override("font_size", caption_size)
+		room_label.add_theme_color_override(
+			"font_color",
+			UI.TEXT_PRIMARY if high_contrast else UI.TEXT_SECONDARY
+		)
+	if status_label != null:
+		status_label.add_theme_font_size_override("font_size", caption_size)
+		var status_outline: int = 1 + (1 if high_contrast else 0)
+		status_label.add_theme_constant_override("outline_size", mini(status_outline, 3))
+	if health_label != null:
+		health_label.add_theme_font_size_override("font_size", body_size)
+		var health_outline: int = 2 + (1 if high_contrast else 0)
+		health_label.add_theme_constant_override("outline_size", mini(health_outline, 3))
+	if lives_label != null:
+		lives_label.add_theme_font_size_override("font_size", micro_size)
+		lives_label.add_theme_color_override(
+			"font_color",
+			Color("#a8e8ff") if color_blind_enabled else Color(0.94, 0.78, 0.49, 1.0)
+		)
+	if currency_label != null:
+		currency_label.add_theme_font_size_override("font_size", micro_size)
+		currency_label.add_theme_color_override(
+			"font_color",
+			Color("#ffd166") if color_blind_enabled else Color(1.0, 0.83, 0.47, 1.0)
+		)
+	if equipment_label != null:
+		equipment_label.add_theme_font_size_override("font_size", micro_size)
+	if health_fill != null:
+		health_fill.color = _health_color(health_fill.size.x / HEALTH_FILL_WIDTH)
+	if boss_health_fill != null:
+		boss_health_fill.color = (
+			Color("#ff9f43") if color_blind_enabled else Color(0.88, 0.18, 0.22, 0.96)
+		)
+	if _hud != null and _hud.has_node("BottomHUD"):
+		var bottom_hud := _hud.get_node("BottomHUD") as Panel
+		if bottom_hud != null:
+			var bottom_style := StyleBoxFlat.new()
+			bottom_style.bg_color = Color(UI.BG_PANEL, 0.92)
+			bottom_style.border_color = (
+				UI.TEXT_PRIMARY
+				if high_contrast
+				else Color("#4cc9ff") if color_blind_enabled else UI.ACCENT_MOON
+			)
+			bottom_style.border_width_top = 2
+			bottom_style.shadow_color = Color(0.0, 0.0, 0.0, 0.66)
+			bottom_style.shadow_size = 14
+			bottom_style.shadow_offset = Vector2(0.0, -4.0)
+			bottom_hud.add_theme_stylebox_override("panel", bottom_style)
+
+
+func _apply_hud_scale(scale_factor: float) -> void:
+	if _hud == null:
+		return
+	for path_value: Variant in HUD_SCALE_ANCHORS:
+		var path := String(path_value)
+		var control := _hud.get_node_or_null(path) as Control
+		if control == null:
+			continue
+		if not control.has_meta(&"hud_scale_base_position"):
+			control.set_meta(&"hud_scale_base_position", control.position)
+			control.set_meta(&"hud_scale_base_scale", control.scale)
+		var base_position: Vector2 = control.get_meta(&"hud_scale_base_position")
+		var base_scale: Vector2 = control.get_meta(&"hud_scale_base_scale")
+		var anchor: Vector2 = HUD_SCALE_ANCHORS[path]
+		control.position = anchor + (base_position - anchor) * scale_factor
+		control.scale = base_scale * scale_factor
+
+
+func _health_color(health_ratio: float) -> Color:
+	if health_ratio <= 0.30:
+		return Color("#ff9f43") if _color_blind_enabled else UI.ACCENT_RISK
+	return Color("#4cc9ff") if _color_blind_enabled else UI.ACCENT_MOON
+
 func is_bound() -> bool:
 	return (
 		health_label != null
@@ -69,7 +181,7 @@ func is_bound() -> bool:
 	)
 
 
-func update_health(current_health: int, maximum_health: int) -> void:
+func update_health(current_health: int, maximum_health: int, reduced: bool = false) -> void:
 	if health_label == null or health_fill == null:
 		return
 	var health_ratio: float = clampf(
@@ -78,12 +190,17 @@ func update_health(current_health: int, maximum_health: int) -> void:
 		1.0
 	)
 	health_fill.size.x = HEALTH_FILL_WIDTH * health_ratio
-	health_fill.color = (
-		Color(0.90, 0.24, 0.22, 0.96)
-		if health_ratio <= 0.30
-		else Color(0.18, 0.82, 0.50, 0.96)
-	)
-	health_label.text = "生命  %d / %d" % [current_health, maximum_health]
+	health_fill.color = _health_color(health_ratio)
+	health_label.text = "%d / %d" % [current_health, maximum_health]
+	if _health_tween != null and _health_tween.is_valid():
+		_health_tween.kill()
+	if _last_health >= 0 and current_health < _last_health:
+		var resting_color: Color = health_fill.color
+		health_fill.color = UI.ACCENT_RISK
+		_health_tween = health_fill.create_tween()
+		_health_tween.tween_interval(0.016 if reduced else 0.12)
+		_health_tween.tween_property(health_fill, "color", resting_color, 0.0)
+	_last_health = current_health
 
 
 func update_lives(lives_remaining: int, maximum_lives: int, difficulty_name: String) -> void:
@@ -108,28 +225,19 @@ func update_room(
 ) -> void:
 	if room_label == null:
 		return
+	room_label.tooltip_text = "%s · %s · %s" % [chapter_name, encounter_name, room_title]
 	if not has_room:
 		room_label.text = ""
 	elif run_complete:
-		room_label.text = "轮次完成 · RUN %02d · S%06d\n月蚀回廊已净化" % [
-			run_number,
-			run_seed,
-		]
+		room_label.text = "第 %d 轮完成 · S%d" % [run_number, run_seed]
 	else:
-		room_label.text = "房间 %02d/%02d · %s · S%06d\n%s · %s" % [
-			room_number,
-			room_total,
-			encounter_name,
-			run_seed,
-			chapter_name,
-			room_title,
-		]
+		room_label.text = "第 %d/%d 房 · S%d" % [room_number, room_total, run_seed]
 
 
 func update_economy(gold: int, meta_shards: int, run_shards: int) -> void:
 	if currency_label == null:
 		return
-	currency_label.text = "金币 %d    局外星屑 %d（本局待结算 %d）" % [
+	currency_label.text = "金币 %d   星屑 %d   本局 +%d" % [
 		gold,
 		meta_shards,
 		run_shards,
@@ -139,7 +247,7 @@ func update_economy(gold: int, meta_shards: int, run_shards: int) -> void:
 func update_equipment(player: RoguePlayer, progression: ProgressionStore) -> void:
 	if equipment_label == null or progression == null:
 		return
-	equipment_label.text = "武器库  ·  当前：%s" % player.get_weapon_name()
+	equipment_label.text = "%s" % player.get_weapon_name()
 	update_weapon_slots(player, progression)
 
 
@@ -241,7 +349,7 @@ func update_abilities(player: RoguePlayer, prompts: Dictionary = {}) -> void:
 		1,
 		"闪避冲刺",
 		dash_prompt,
-		"向当前朝向高速闪避。冷却：2.0 秒。",
+		"向当前朝向高速闪避，期间免疫敌人攻击。冷却：2.0 秒。",
 		Color("#65dcff")
 	)
 	dash_slot.call(
@@ -249,12 +357,18 @@ func update_abilities(player: RoguePlayer, prompts: Dictionary = {}) -> void:
 		player.get_dash_cooldown_remaining(),
 		player.get_dash_cooldown_duration()
 	)
+	var skill_description := "向上挥出完整月轮，在满月斩击时造成范围伤害。"
+	match player.get_weapon_id():
+		WeaponCatalog.TWIN_BLADES:
+			skill_description = "向前突进，连续发动三段快速斩击。"
+		WeaponCatalog.GREATSWORD:
+			skill_description = "蓄势重砸地面，造成大范围裂地伤害。"
 	skill_slot.call(
 		&"configure",
 		2,
 		player.get_skill_name(),
 		skill_prompt,
-		"向前突进并释放多重月弧，造成高额范围伤害。",
+		skill_description,
 		weapon_accent.lightened(0.12)
 	)
 	skill_slot.call(
@@ -292,5 +406,48 @@ func set_boss_visible(visible: bool) -> void:
 
 
 func set_status(message: String) -> void:
-	if status_label != null:
-		status_label.text = message
+	if status_label == null:
+		return
+	status_label.tooltip_text = message
+	status_label.text = message if message.length() <= 28 else message.left(27) + "…"
+	if _status_tween != null and _status_tween.is_valid():
+		_status_tween.kill()
+	status_label.modulate.a = 1.0
+	_status_panel.modulate.a = 1.0
+	_status_tween = status_label.create_tween().set_parallel(true)
+	_status_tween.tween_property(status_label, "modulate:a", 0.0, 0.35).set_delay(2.65)
+	_status_tween.tween_property(_status_panel, "modulate:a", 0.0, 0.35).set_delay(2.65)
+	_refresh_status_visibility()
+
+
+func set_obscured(obscured: bool, reward_visible: bool = false) -> void:
+	_obscured = obscured
+	_reward_visible = reward_visible
+	var chrome_paths := [
+		"BottomHUD", "VitalsPanel", "AbilityPanel", "WeaponPanel", "HealthBackground",
+		"Lives", "Currency", "Equipment", "AbilityBar", "RoomCard", "RoomProgress",
+	]
+	var dim_paths := [
+		"BottomHUD", "VitalsPanel", "AbilityPanel", "WeaponPanel", "HealthBackground",
+		"Lives", "Currency", "Equipment", "AbilityBar",
+	]
+	for path in chrome_paths:
+		var item := _hud.get_node(path) as CanvasItem
+		item.visible = not obscured
+	# Soft deprioritize under reward toast without hiding room caption.
+	var dim_alpha: float = 0.38 if (reward_visible and not obscured) else 1.0
+	for path in dim_paths:
+		(_hud.get_node(path) as CanvasItem).modulate.a = dim_alpha
+	# Boss visibility remains owned by combat; opacity only suppresses the overlay.
+	boss_health_background.modulate.a = 0.0 if obscured else 1.0
+	_refresh_status_visibility()
+
+
+func set_modal_suppressed(suppressed: bool) -> void:
+	## Prefer hard-hide for full-screen modals; soft-dim is via set_obscured(_, reward_visible).
+	set_obscured(suppressed, false)
+
+func _refresh_status_visibility() -> void:
+	var show: bool = not _obscured and not _reward_visible
+	status_label.visible = show
+	_status_panel.visible = show

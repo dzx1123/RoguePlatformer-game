@@ -13,21 +13,23 @@ position = Vector2(160, 580)
 layer = 10
 
 [node name="Title" type="Label" parent="HUD" unique_id=1377092095]
+visible = false
 offset_left = 28.0
 offset_top = 20.0
 offset_right = 714.0
 offset_bottom = 108.0
 theme_override_colors/font_color = Color(0.86, 0.95, 1, 1)
 theme_override_font_sizes/font_size = 26
-text = "ROGUE PLATFORMER  /  PROTOTYPE 01"
+text = ""
 
 [node name="Controls" type="Label" parent="HUD" unique_id=1254561163]
+visible = false
 offset_left = 30.0
 offset_top = 60.0
 offset_right = 950.0
 offset_bottom = 90.0
 theme_override_colors/font_color = Color(0.67, 0.78, 0.86, 1)
 theme_override_font_sizes/font_size = 16
-text = "移动: A/D or ←/→    跳跃: W / ↑ / Space    攻击: J    闪避: K    重置: R"
+text = ""
 
 [node name="AnimationPlayer" type="AnimationPlayer" parent="." unique_id=1962190840]

@@ -105,6 +105,21 @@ func _run_test() -> void:
 	await _tap_joy_button(JOY_BUTTON_DPAD_RIGHT)
 	if root.gui_get_focus_owner() != difficulty_buttons[1]:
 		return _fail("D-pad could not navigate between difficulty cards")
+	await _tap_joy_button(JOY_BUTTON_B)
+	if (difficulty_buttons[0] as Button).visible or not start_button.visible:
+		return _fail("B did not return from difficulty without starting a run")
+	start_button.grab_focus()
+	await _tap_joy_button(JOY_BUTTON_A)
+	await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
+	var back_button: Button = entry.get_node("DifficultyBack") as Button
+	if root.gui_get_focus_owner() != back_button:
+		return _fail("D-pad down did not reach the explicit difficulty return button")
+	await _tap_joy_button(JOY_BUTTON_A)
+	if back_button.visible or not start_button.visible:
+		return _fail("A did not activate the explicit difficulty return button")
+	start_button.grab_focus()
+	await _tap_joy_button(JOY_BUTTON_A)
+	await _tap_joy_button(JOY_BUTTON_DPAD_RIGHT)
 	await _tap_joy_button(JOY_BUTTON_A)
 	if bool(main.get("_entry_flow_active")):
 		return _fail("A did not confirm the focused difficulty")

@@ -38,7 +38,13 @@ func _run_test() -> void:
 		"res://assets/characters/frames_polished/hero_run_5.png",
 		"res://assets/characters/frames_polished/hero_run_6.png",
 		"res://assets/characters/frames_polished/hero_run_7.png",
+		"res://assets/characters/frames_polished/hero_run_8.png",
+		"res://assets/characters/frames_polished/hero_run_9.png",
+		"res://assets/characters/frames_polished/hero_run_10.png",
+		"res://assets/characters/frames_polished/hero_run_11.png",
 		"res://assets/characters/frames_polished/hero_jump_takeoff.png",
+		"res://assets/characters/frames_polished/hero_jump_rise.png",
+		"res://assets/characters/frames_polished/hero_jump_apex.png",
 		"res://assets/characters/frames_polished/hero_jump_tuck.png",
 		"res://assets/characters/frames_polished/hero_jump_fall.png",
 		"res://assets/characters/frames_polished/hero_land.png",
@@ -60,23 +66,26 @@ func _run_test() -> void:
 			return
 	var hero_sprite: Sprite2D = player.get_node("HeroSprite") as Sprite2D
 	var run_texture_paths: Dictionary = {}
-	for run_frame_index in range(8):
+	for run_frame_index in range(12):
 		player.set("_run_cycle", float(run_frame_index))
 		player.set("_movement_blend", 1.0)
 		player.call(&"_reset_sprite_pose")
 		player.call(&"_animate_run")
+		if not hero_sprite.texture.resource_path.contains("/frames_polished/hero_run_"):
+			_fail("Player run cycle is not using the idle-scaled locomotion frames")
+			return
 		run_texture_paths[hero_sprite.texture.resource_path] = true
-	if run_texture_paths.size() != 8:
-		_fail("Same-character run cycle used %d poses instead of 8" % run_texture_paths.size())
+	if run_texture_paths.size() != 12:
+		_fail("Run cycle used %d poses instead of 12" % run_texture_paths.size())
 		return
 	player.set("_run_cycle", 2.35)
 	player.set("_run_is_settling", false)
 	player.set("_run_has_settled", false)
-	for _settle_frame in range(20):
+	for _settle_frame in range(30):
 		player.call(&"_settle_run_cycle", 1.0 / 60.0)
 	if (
 		not bool(player.get("_run_has_settled"))
-		or absf(float(player.get("_run_cycle")) - 4.0) > 0.01
+		or absf(float(player.get("_run_cycle")) - 6.0) > 0.01
 	):
 		_fail("Run stop did not settle onto the next planted-foot pose")
 		return
@@ -94,8 +103,8 @@ func _run_test() -> void:
 	player.set("_turn_remaining", turn_duration * 0.40)
 	player.call(&"_reset_sprite_pose")
 	player.call(&"_animate_turn")
-	if not hero_sprite.flip_h or not hero_sprite.texture.resource_path.ends_with("hero_run_4.png"):
-		_fail("Turn completion did not switch to the planted incoming-facing pose")
+	if not hero_sprite.flip_h or not hero_sprite.texture.resource_path.ends_with("hero_run_6.png"):
+		_fail("Turn completion did not switch to the opposite planted pose")
 		return
 	player.set("_turn_remaining", 0.0)
 	player.set("_facing", 1.0)
@@ -108,10 +117,18 @@ func _run_test() -> void:
 		return
 
 	player.set("_airborne_time", 0.20)
+	player.velocity.y = -420.0
 	player.call(&"_reset_sprite_pose")
 	player.call(&"_animate_jump_rise")
-	if not hero_sprite.texture.resource_path.ends_with("hero_jump_tuck.png"):
-		_fail("Jump rise did not tuck the legs")
+	if not hero_sprite.texture.resource_path.ends_with("hero_jump_rise.png"):
+		_fail("Jump ascent did not use the authored rise pose")
+		return
+
+	player.velocity.y = -80.0
+	player.call(&"_reset_sprite_pose")
+	player.call(&"_animate_jump_rise")
+	if not hero_sprite.texture.resource_path.ends_with("hero_jump_apex.png"):
+		_fail("Jump ascent did not transition into the apex pose")
 		return
 
 	player.velocity.y = 400.0
@@ -121,6 +138,30 @@ func _run_test() -> void:
 		_fail("Jump fall did not extend the legs")
 		return
 
+	# Pose transforms must be continuous even at texture/state boundaries.
+	for threshold: float in [-280.0, 0.0, 120.0, 300.0]:
+		player.velocity.y = threshold - 0.1
+		player.call(&"_reset_sprite_pose")
+		player.call(&"_animate_jump_rise" if player.velocity.y < 0.0 else &"_animate_jump_fall")
+		var before_position := hero_sprite.position
+		var before_scale := hero_sprite.scale
+		var before_rotation := hero_sprite.rotation
+		player.velocity.y = threshold + 0.1
+		player.call(&"_reset_sprite_pose")
+		player.call(&"_animate_jump_rise" if player.velocity.y < 0.0 else &"_animate_jump_fall")
+		if hero_sprite.position.distance_to(before_position) > 0.01 or hero_sprite.scale.distance_to(before_scale) > 0.0001 or absf(hero_sprite.rotation - before_rotation) > 0.0001:
+			_fail("Air pose transform jumps at vertical speed %s" % threshold)
+			return
+	player.velocity.x = 160.0
+	player.set("_landing_recovery_duration", 0.09)
+	player.set("_landing_squash_remaining", 0.02)
+	player.call(&"_reset_sprite_pose")
+	player.call(&"_animate_land")
+	if not hero_sprite.texture.resource_path.get_file().begins_with("hero_run_"):
+		_fail("Moving landing recovered into idle instead of running")
+		return
+	player.velocity.x = 0.0
+	player.set("_landing_recovery_duration", 0.20)
 	player.set("_landing_squash_remaining", 0.18)
 	player.call(&"_reset_sprite_pose")
 	player.call(&"_animate_land")

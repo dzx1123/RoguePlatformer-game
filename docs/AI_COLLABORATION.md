@@ -19,6 +19,15 @@
 
 Grok Bot 不直接修改代码、不运行格式化写回、不提交 Git。需要修改时，在 `docs/GROK_REVIEW.md` 中给出证据和验收标准，由 Codex 复核后执行。
 
+
+
+### U3 窗口（2026-09-05）临时分工
+| 范围 | 负责人 | 说明 |
+| --- | --- | --- |
+| U3 关键 `scripts/`（`run_hud_*`、相关 HUD） | demon | 本窗口允许 demon 实现关键代码；完成后回写 `CODEX_HANDOFF.md` |
+| 跑 smoke + `docs/GROK_REVIEW.md` + `tests/artifacts/` 截图 | Grok app | 验证与文档/截图；不重写 U3 布局实现 |
+| 其余 `docs/` 计划/状态 | Codex / demon | 与既有表一致；U3 验证结论由 Grok app 写入 `GROK_REVIEW` |
+
 ## 一轮协作流程
 
 1. Codex 在 `CODEX_HANDOFF.md` 写明当前状态、测试结果和需要审查的问题。

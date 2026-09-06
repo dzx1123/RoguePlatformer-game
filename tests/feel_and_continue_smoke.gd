@@ -35,6 +35,15 @@ func _verify_event_tradeoffs() -> bool:
 	var shard_choice: Dictionary = choices[2]
 	if int(shard_choice.get("max_health", 0)) >= 0:
 		return _fail_bool("Shard event no longer reduces maximum health")
+	var late_choices: Array[Dictionary] = EVENT_CATALOG.create_choices(2)
+	if late_choices.size() != 3:
+		return _fail_bool("Later-chapter events must still offer three responses")
+	var has_omen := false
+	for late_choice in late_choices:
+		if String(late_choice.get("next_encounter", "")) == "elite":
+			has_omen = true
+	if not has_omen:
+		return _fail_bool("Chapter two did not offer a next-room elite tradeoff")
 	return true
 
 

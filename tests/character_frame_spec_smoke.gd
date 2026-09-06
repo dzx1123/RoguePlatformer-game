@@ -5,7 +5,7 @@ const CANONICAL_SIZE := Vector2i(640, 416)
 const ALPHA_THRESHOLD := 0.01
 const EDGE_MARGIN := 4
 const MAX_EDGE_ALPHA_PIXELS := 96
-const MAX_RUN_BASELINE_SPREAD := 2
+const MAX_RUN_FLIGHT_LIFT := 14
 
 const CANONICAL_FRAMES: Array[String] = [
 	"hero_idle.png",
@@ -15,6 +15,8 @@ const CANONICAL_FRAMES: Array[String] = [
 	"hero_walk_2.png",
 	"hero_walk_3.png",
 	"hero_jump_takeoff.png",
+	"hero_jump_rise.png",
+	"hero_jump_apex.png",
 	"hero_jump_tuck.png",
 	"hero_jump_fall.png",
 	"hero_land.png",
@@ -34,6 +36,10 @@ const CANONICAL_FRAMES: Array[String] = [
 	"hero_run_5.png",
 	"hero_run_6.png",
 	"hero_run_7.png",
+	"hero_run_8.png",
+	"hero_run_9.png",
+	"hero_run_10.png",
+	"hero_run_11.png",
 ]
 
 
@@ -64,17 +70,21 @@ func _run_test() -> void:
 		if frame_name.begins_with("hero_run_"):
 			run_baselines.append(int(alpha_metrics.get("bottom", -1)))
 
-	if run_baselines.size() != 8:
-		_fail("The canonical locomotion set does not contain eight run frames")
+	if run_baselines.size() != 12:
+		_fail("The canonical locomotion set does not contain twelve run frames")
 		return
-	var baseline_min: int = run_baselines.min()
-	var baseline_max: int = run_baselines.max()
-	if baseline_max - baseline_min > MAX_RUN_BASELINE_SPREAD:
+	var contact_bottom: int = run_baselines[0]
+	if abs(run_baselines[4] - contact_bottom) > 1:
 		_fail(
-			"Run-frame source baselines drift by %d px"
-			% (baseline_max - baseline_min)
+			"The two planted run poses do not share a foot baseline: %d / %d"
+			% [contact_bottom, run_baselines[4]]
 		)
 		return
+	for bottom: int in run_baselines:
+		var lift: int = contact_bottom - bottom
+		if lift < 0 or lift > MAX_RUN_FLIGHT_LIFT:
+			_fail("Run-frame lift %d px escaped the authored sprint range" % lift)
+			return
 
 	if not _check_special_asset("hero_near_arm.png", Vector2i(84, 168)):
 		return
@@ -84,8 +94,8 @@ func _run_test() -> void:
 		return
 
 	print(
-		"character_frame_spec_smoke: PASS (run baseline %d..%d)"
-		% [baseline_min, baseline_max]
+		"character_frame_spec_smoke: PASS (contact %d, flight lift <= %d)"
+		% [contact_bottom, MAX_RUN_FLIGHT_LIFT]
 	)
 	quit(0)
 

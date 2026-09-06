@@ -28,9 +28,9 @@ func _run_test() -> void:
 			return
 
 	var run_asset_paths: Array[String] = [
-		"res://assets/enemies/red_fang_goblin_club_run_sheet_v2.png",
-		"res://assets/enemies/red_fang_goblin_elite_run_sheet_v2.png",
-		"res://assets/enemies/red_fang_goblin_archer_run_sheet_v2.png",
+		"res://assets/enemies/red_fang_goblin_club_walk_sheet_v4.png",
+		"res://assets/enemies/red_fang_goblin_elite_walk_sheet_v4.png",
+		"res://assets/enemies/red_fang_goblin_archer_walk_sheet_v4.png",
 	]
 	for asset_path in run_asset_paths:
 		var texture := load(asset_path) as Texture2D
@@ -41,6 +41,8 @@ func _run_test() -> void:
 		var image := Image.new()
 		if image.load_png_from_buffer(png_bytes) != OK or image.get_pixel(0, 0).a > 0.01:
 			_fail("Goblin run sheet is missing real alpha transparency: %s" % asset_path)
+			return
+		if not _validate_walk_sheet(image, asset_path):
 			return
 
 	var club := _make_goblin(RogueEnemy.EnemyRole.MELEE, RogueEnemy.EnemyRank.NORMAL)
@@ -79,7 +81,7 @@ func _run_test() -> void:
 		club.set("_locomotion_cycle", float(frame_index) + 0.01)
 		club.set("_sprite_pose_initialized", false)
 		club.call(&"_update_sprite_animation")
-		if not club_sprite.texture.resource_path.ends_with("red_fang_goblin_club_run_sheet_v2.png"):
+		if not club_sprite.texture.resource_path.ends_with("red_fang_goblin_club_walk_sheet_v4.png"):
 			_fail("Ordinary goblin did not switch to its authored run sheet")
 			return
 		var run_cell_width: float = float(club_sprite.texture.get_width()) / 4.0
@@ -99,14 +101,14 @@ func _run_test() -> void:
 	elite.set("_locomotion_cycle", 0.01)
 	elite.set("_sprite_pose_initialized", false)
 	elite.call(&"_update_sprite_animation")
-	if not elite_sprite.texture.resource_path.ends_with("red_fang_goblin_elite_run_sheet_v2.png"):
+	if not elite_sprite.texture.resource_path.ends_with("red_fang_goblin_elite_walk_sheet_v4.png"):
 		_fail("Elite goblin did not switch to its authored run sheet")
 		return
 	archer.velocity.x = 100.0
 	archer.set("_locomotion_cycle", 0.01)
 	archer.set("_sprite_pose_initialized", false)
 	archer.call(&"_update_sprite_animation")
-	if not archer_sprite.texture.resource_path.ends_with("red_fang_goblin_archer_run_sheet_v2.png"):
+	if not archer_sprite.texture.resource_path.ends_with("red_fang_goblin_archer_walk_sheet_v4.png"):
 		_fail("Archer goblin did not switch to its authored run sheet")
 		return
 
@@ -279,6 +281,64 @@ func _validate_clean_registered_sheet(image: Image, asset_path: String) -> bool:
 		return false
 	if maximum_idle_anchor - minimum_idle_anchor > 4:
 		_fail("Goblin idle frames do not share one torso anchor: %s" % asset_path)
+		return false
+	return true
+
+
+func _validate_walk_sheet(image: Image, asset_path: String) -> bool:
+	image.convert(Image.FORMAT_RGBA8)
+	var width: int = image.get_width()
+	var height: int = image.get_height()
+	var cell_width: int = width / 4
+	var cell_height: int = height / 2
+	var pixels: PackedByteArray = image.get_data()
+	var minimum_bottom: int = cell_height
+	var maximum_bottom: int = -1
+	var green_fringe_pixels: int = 0
+	var transparent_white_pixels: int = 0
+
+	for row in range(2):
+		for column in range(4):
+			var origin_x: int = column * cell_width
+			var origin_y: int = row * cell_height
+			var frame_bottom: int = -1
+			for local_y in range(cell_height):
+				var y: int = origin_y + local_y
+				for local_x in range(cell_width):
+					var pixel_index: int = (y * width + origin_x + local_x) * 4
+					var red: int = pixels[pixel_index]
+					var green: int = pixels[pixel_index + 1]
+					var blue: int = pixels[pixel_index + 2]
+					var alpha: int = pixels[pixel_index + 3]
+					if alpha == 0:
+						if red >= 245 and green >= 245 and blue >= 245:
+							transparent_white_pixels += 1
+						continue
+					if alpha >= 64:
+						frame_bottom = maxi(frame_bottom, local_y)
+					if (
+						green >= 90
+						and float(green) > float(red) * 1.40
+						and float(green) > float(blue) * 1.35
+					):
+						green_fringe_pixels += 1
+			if frame_bottom < 0:
+				_fail("Goblin walk sheet contains an empty frame: %s" % asset_path)
+				return false
+			minimum_bottom = mini(minimum_bottom, frame_bottom)
+			maximum_bottom = maxi(maximum_bottom, frame_bottom)
+
+	if maximum_bottom - minimum_bottom > 1:
+		_fail(
+			"Goblin walk frames do not share one floor anchor (%dpx): %s"
+			% [maximum_bottom - minimum_bottom, asset_path]
+		)
+		return false
+	if green_fringe_pixels > 24:
+		_fail("Goblin walk sheet still contains green fringe: %s" % asset_path)
+		return false
+	if transparent_white_pixels > 256:
+		_fail("Goblin walk sheet contains white RGB below transparency: %s" % asset_path)
 		return false
 	return true
 

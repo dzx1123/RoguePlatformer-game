@@ -4,10 +4,11 @@ extends RefCounted
 ## Builds the compact moonlit combat rail. Gameplay state is still supplied by
 ## RunHUDPresenter; this class only owns the stable visual layout.
 
-const DISPLAY_SIZE := Vector2(1280.0, 840.0)
-const HUD_DOCK_TOP := 720.0
+const DISPLAY_SIZE := Vector2(1280.0, 720.0)
+const HUD_DOCK_TOP := 640.0
 const HEALTH_FILL_WIDTH := 316.0
 const ABILITY_SLOT_SCRIPT := preload("res://scripts/ability_slot.gd")
+const UI := preload("res://scripts/ui_theme.gd")
 
 
 static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -> void:
@@ -24,9 +25,9 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 	bottom_hud.size = Vector2(DISPLAY_SIZE.x, DISPLAY_SIZE.y - HUD_DOCK_TOP)
 	bottom_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var bottom_style := StyleBoxFlat.new()
-	bottom_style.bg_color = Color(0.006, 0.018, 0.042, 0.76)
-	bottom_style.border_color = Color(0.39, 0.82, 0.94, 0.44)
-	bottom_style.border_width_top = 1
+	bottom_style.bg_color = Color(UI.BG_PANEL, 0.92)
+	bottom_style.border_color = UI.ACCENT_MOON
+	bottom_style.border_width_top = 2
 	bottom_style.shadow_color = Color(0.0, 0.0, 0.0, 0.66)
 	bottom_style.shadow_size = 14
 	bottom_style.shadow_offset = Vector2(0.0, -4.0)
@@ -36,23 +37,23 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 	var top_rune := ColorRect.new()
 	top_rune.position = Vector2(24.0, 6.0)
 	top_rune.size = Vector2(1232.0, 1.0)
-	top_rune.color = Color(0.40, 0.86, 0.98, 0.46)
+	top_rune.color = Color.TRANSPARENT
 	top_rune.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bottom_hud.add_child(top_rune)
 
 	_create_hud_panel(
-		hud, "VitalsPanel", Vector2(28.0, 728.0), Vector2(356.0, 88.0), Color("#63dce8")
+		hud, "VitalsPanel", Vector2(32.0, 644.0), Vector2(352.0, 72.0), Color("#63dce8")
 	)
 	_create_hud_panel(
-		hud, "AbilityPanel", Vector2(402.0, 722.0), Vector2(476.0, 106.0), Color("#91a9ff")
+		hud, "AbilityPanel", Vector2(408.0, 644.0), Vector2(464.0, 72.0), Color("#91a9ff")
 	)
 	var weapon_panel := _create_hud_panel(
-		hud, "WeaponPanel", Vector2(894.0, 728.0), Vector2(358.0, 88.0), Color("#d9ba73")
+		hud, "WeaponPanel", Vector2(894.0, 644.0), Vector2(354.0, 72.0), Color("#d9ba73")
 	)
 
 	var health_background := ColorRect.new()
 	health_background.name = "HealthBackground"
-	health_background.position = Vector2(44.0, 754.0)
+	health_background.position = Vector2(48.0, 670.0)
 	health_background.size = Vector2(328.0, 26.0)
 	health_background.color = Color(0.004, 0.018, 0.036, 0.84)
 	health_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -72,7 +73,7 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 	health_label.size = Vector2(HEALTH_FILL_WIDTH, 26.0)
 	health_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	health_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	health_label.add_theme_font_size_override("font_size", 14)
+	health_label.add_theme_font_size_override("font_size", UI.BODY)
 	health_label.add_theme_color_override("font_color", Color(0.94, 1.0, 1.0, 1.0))
 	health_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.82))
 	health_label.add_theme_constant_override("outline_size", 2)
@@ -80,40 +81,47 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 	health_background.add_child(health_label)
 
 	_create_hud_panel(
-		hud, "RoomCard", Vector2(1006.0, 16.0), Vector2(242.0, 64.0), Color("#69d9ed")
+		hud, "RoomCard", Vector2(40.0, 40.0), Vector2(280.0, 32.0), Color("#69d9ed")
 	)
-	_create_hud_panel(
-		hud, "StatusToast", Vector2(44.0, 802.0), Vector2(328.0, 20.0), Color("#e6bd70")
+	var status_toast_pos := Vector2(440.0, HUD_DOCK_TOP - 20.0 - 32.0)
+	var status_toast := _create_hud_panel(
+		hud, "StatusToast", status_toast_pos, Vector2(400.0, 32.0), Color("#e6bd70")
 	)
+	status_toast.add_theme_stylebox_override(
+		"panel",
+		UI.surface(Color(UI.BG_PANEL, 0.88), Color(UI.ACCENT_GOLD, 0.35), UI.CHIP_RADIUS, 1)
+	)
+	status_toast.z_index = 90
 
 	var status_label := Label.new()
 	status_label.name = "CombatStatus"
-	status_label.position = Vector2(54.0, 802.0)
-	status_label.size = Vector2(308.0, 20.0)
-	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	status_label.position = status_toast_pos + Vector2(12.0, 4.0)
+	status_label.size = Vector2(376.0, 24.0)
+	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	status_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	status_label.clip_text = true
-	status_label.add_theme_font_size_override("font_size", 11)
+	status_label.add_theme_font_size_override("font_size", UI.CAPTION)
 	status_label.add_theme_color_override("font_color", Color(1.0, 0.84, 0.54, 1.0))
 	status_label.add_theme_color_override("font_outline_color", Color(0.025, 0.045, 0.07, 0.96))
 	status_label.add_theme_constant_override("outline_size", 1)
 	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	status_label.z_index = 91
 	hud.add_child(status_label)
 
 	var room_label := Label.new()
 	room_label.name = "RoomProgress"
-	room_label.position = Vector2(1022.0, 22.0)
-	room_label.size = Vector2(210.0, 48.0)
+	room_label.position = Vector2(40.0, 28.0)
+	room_label.size = Vector2(360.0, 22.0)
 	room_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	room_label.add_theme_font_size_override("font_size", 13)
-	room_label.add_theme_color_override("font_color", Color(0.80, 0.92, 0.98, 1.0))
+	room_label.add_theme_font_size_override("font_size", UI.CAPTION)
+	room_label.add_theme_color_override("font_color", UI.TEXT_SECONDARY)
 	room_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(room_label)
 
 	var currency_label := Label.new()
 	currency_label.name = "Currency"
-	currency_label.position = Vector2(44.0, 784.0)
+	currency_label.position = Vector2(48.0, 698.0)
 	currency_label.size = Vector2(328.0, 16.0)
 	currency_label.clip_text = true
 	currency_label.add_theme_font_size_override("font_size", 12)
@@ -123,7 +131,7 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 
 	var equipment_label := Label.new()
 	equipment_label.name = "Equipment"
-	equipment_label.position = Vector2(910.0, 734.0)
+	equipment_label.position = Vector2(908.0, 646.0)
 	equipment_label.size = Vector2(326.0, 18.0)
 	equipment_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	equipment_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -135,7 +143,7 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 
 	var lives_label := Label.new()
 	lives_label.name = "Lives"
-	lives_label.position = Vector2(44.0, 734.0)
+	lives_label.position = Vector2(48.0, 646.0)
 	lives_label.size = Vector2(328.0, 18.0)
 	lives_label.add_theme_font_size_override("font_size", 12)
 	lives_label.clip_text = true
@@ -145,7 +153,7 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 
 	var boss_health_background := ColorRect.new()
 	boss_health_background.name = "BossHealth"
-	boss_health_background.position = Vector2(390.0, 22.0)
+	boss_health_background.position = Vector2(390.0, 44.0)
 	boss_health_background.size = Vector2(500.0, 28.0)
 	boss_health_background.color = Color(0.04, 0.015, 0.030, 0.74)
 	boss_health_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -169,10 +177,10 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 	boss_health_background.visible = false
 
 	var ability_heading := Label.new()
-	ability_heading.position = Vector2(422.0, 729.0)
+	ability_heading.position = Vector2(422.0, HUD_DOCK_TOP + 4.0)
 	ability_heading.size = Vector2(436.0, 16.0)
 	ability_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ability_heading.text = "战技 · COMBAT ARTS"
+	ability_heading.text = ""
 	ability_heading.add_theme_font_size_override("font_size", 11)
 	ability_heading.add_theme_color_override("font_color", Color(0.70, 0.84, 1.0, 0.88))
 	ability_heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -194,23 +202,11 @@ static func _create_hud_panel(
 	panel.position = panel_position
 	panel.size = panel_size
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.010, 0.034, 0.062, 0.44)
-	panel_style.border_color = Color(accent_color, 0.42)
-	panel_style.border_width_top = 1
-	panel_style.corner_radius_top_left = 12
-	panel_style.corner_radius_top_right = 12
-	panel_style.shadow_color = Color(0.0, 0.0, 0.0, 0.26)
-	panel_style.shadow_size = 7
-	panel_style.shadow_offset = Vector2(0.0, 2.0)
-	panel.add_theme_stylebox_override("panel", panel_style)
+	var decorative: bool = panel_name in ["VitalsPanel", "AbilityPanel", "WeaponPanel", "RoomCard"]
+	panel.add_theme_stylebox_override("panel",
+		UI.surface(Color.TRANSPARENT if decorative else Color(UI.BG_DEEP, 0.90),
+			Color.TRANSPARENT if decorative else Color(UI.STROKE_QUIET, 0.65), UI.CHIP_RADIUS, 0 if decorative else 1))
 	hud.add_child(panel)
-	var accent := ColorRect.new()
-	accent.position = Vector2(18.0, 0.0)
-	accent.size = Vector2(42.0, 2.0)
-	accent.color = Color(accent_color, 0.90)
-	accent.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(accent)
 	return panel
 
 
@@ -218,7 +214,7 @@ static func _create_weapon_hud(weapon_panel: Panel) -> void:
 	for weapon_index: int in range(WeaponCatalog.all_weapon_ids().size()):
 		var slot := Panel.new()
 		slot.name = "WeaponSlot_%d" % weapon_index
-		slot.position = Vector2(14.0 + float(weapon_index) * 78.0, 29.0)
+		slot.position = Vector2(14.0 + float(weapon_index) * 78.0, 20.0)
 		slot.size = Vector2(70.0, 48.0)
 		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		weapon_panel.add_child(slot)
@@ -235,7 +231,7 @@ static func _create_weapon_hud(weapon_panel: Panel) -> void:
 
 	var switch_panel := Panel.new()
 	switch_panel.name = "WeaponSwitch"
-	switch_panel.position = Vector2(278.0, 29.0)
+	switch_panel.position = Vector2(278.0, 20.0)
 	switch_panel.size = Vector2(66.0, 48.0)
 	switch_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var switch_style := StyleBoxFlat.new()
@@ -265,7 +261,7 @@ static func _create_weapon_hud(weapon_panel: Panel) -> void:
 static func _create_ability_hud(hud: CanvasLayer) -> void:
 	var ability_bar := Control.new()
 	ability_bar.name = "AbilityBar"
-	ability_bar.position = Vector2(499.0, 750.0)
+	ability_bar.position = Vector2(499.0, 644.0)
 	ability_bar.size = Vector2(282.0, 72.0)
 	ability_bar.mouse_filter = Control.MOUSE_FILTER_PASS
 	hud.add_child(ability_bar)

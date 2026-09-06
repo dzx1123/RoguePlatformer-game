@@ -43,7 +43,13 @@ const HERO_RUN_4: Texture2D = preload("res://assets/characters/frames_polished/h
 const HERO_RUN_5: Texture2D = preload("res://assets/characters/frames_polished/hero_run_5.png")
 const HERO_RUN_6: Texture2D = preload("res://assets/characters/frames_polished/hero_run_6.png")
 const HERO_RUN_7: Texture2D = preload("res://assets/characters/frames_polished/hero_run_7.png")
+const HERO_RUN_8: Texture2D = preload("res://assets/characters/frames_polished/hero_run_8.png")
+const HERO_RUN_9: Texture2D = preload("res://assets/characters/frames_polished/hero_run_9.png")
+const HERO_RUN_10: Texture2D = preload("res://assets/characters/frames_polished/hero_run_10.png")
+const HERO_RUN_11: Texture2D = preload("res://assets/characters/frames_polished/hero_run_11.png")
 const HERO_JUMP_TAKEOFF: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_takeoff.png")
+const HERO_JUMP_RISE: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_rise.png")
+const HERO_JUMP_APEX: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_apex.png")
 const HERO_JUMP_TUCK: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_tuck.png")
 const HERO_JUMP_FALL: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_fall.png")
 const HERO_LAND: Texture2D = preload("res://assets/characters/frames_polished/hero_land.png")
@@ -58,15 +64,20 @@ const HERO_SLASH_DOWN_WINDUP: Texture2D = preload("res://assets/characters/frame
 const HERO_SLASH_DOWN: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down.png")
 const HERO_SLASH_DOWN_FOLLOWTHROUGH: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down_followthrough.png")
 const DASH_ECHO_SCRIPT := preload("res://scripts/dash_echo.gd")
+const AIR_JUMP_RING_SCRIPT := preload("res://scripts/air_jump_ring.gd")
 const MOON_WHEEL_GEOMETRY := preload("res://scripts/moon_wheel_geometry.gd")
 const UPGRADE_CATALOG := preload("res://scripts/upgrade_catalog.gd")
 
 const HERO_FRAME_SIZE := Vector2(640.0, 416.0)
 const HERO_SCALE := 0.22
-const RUN_FRAME_COUNT := 8.0
-const RUN_PIXELS_PER_FRAME := 19.0
+const RUN_FRAME_COUNT := 12.0
+# One full cycle covers a fixed stride. Cadence therefore scales with |vx|:
+# faster movement → faster steps. Do not clamp this below one frame/tick.
+const RUN_STRIDE_PIXELS := 118.0
+const RUN_START_BLEND := 0.10
 const RUN_SETTLE_FRAMES_PER_SECOND := 20.0
 const LANDING_SQUASH_DURATION := 0.20
+const MOVING_LANDING_DURATION := 0.09
 const TURN_BLEND_DURATION := 0.10
 const ATTACK_HIT_PROGRESS := 0.38
 const ATTACK_FAILSAFE_MARGIN := 0.08
@@ -85,7 +96,7 @@ const HITSTOP_SKILL := 0.072
 const HITSTOP_BOSS_BONUS := 0.028
 
 @export_category("Movement")
-@export var run_speed := 320.0
+@export var run_speed := 380.0
 @export var ground_acceleration := 2600.0
 @export var air_acceleration := 1800.0
 @export var gravity := 1800.0
@@ -140,10 +151,12 @@ var _run_cycle: float = 0.0
 var _run_settle_target: float = 0.0
 var _run_is_settling: bool = false
 var _run_has_settled: bool = true
+var _run_start_remaining: float = 0.0
 var _movement_blend: float = 0.0
 var _turn_remaining: float = 0.0
 var _turn_from_facing: float = 1.0
 var _landing_squash_remaining: float = 0.0
+var _landing_recovery_duration: float = LANDING_SQUASH_DURATION
 var _airborne_time: float = 0.0
 var _hurt_remaining: float = 0.0
 var _hurt_invulnerability_remaining: float = 0.0
@@ -159,7 +172,7 @@ var _input_enabled: bool = true
 var _reduced_effects_enabled: bool = false
 var _base_max_health: int = 100
 var _base_attack_damage: int = 34
-var _base_run_speed: float = 320.0
+var _base_run_speed: float = 380.0
 var _base_dash_speed: float = 800.0
 var _base_attack_cooldown: float = 0.38
 var _weapon_id: StringName = WeaponCatalog.SWORD
@@ -257,6 +270,7 @@ func _physics_process(delta: float) -> void:
 		elif _air_jumps_used < extra_jumps:
 			_air_jumps_used += 1
 			_jump()
+			_spawn_air_jump_ring()
 
 	if (
 		_input_enabled
@@ -308,7 +322,9 @@ func _physics_process(delta: float) -> void:
 	var now_on_floor: bool = is_on_floor()
 	if now_on_floor:
 		if not was_on_floor:
-			_landing_squash_remaining = LANDING_SQUASH_DURATION
+			_landing_recovery_duration = MOVING_LANDING_DURATION if absf(velocity.x) >= 40.0 else LANDING_SQUASH_DURATION
+			_landing_squash_remaining = _landing_recovery_duration
+			_run_cycle = 0.0
 			if _airborne_time > 0.08:
 				action_started.emit(&"land")
 		_airborne_time = 0.0
@@ -329,7 +345,7 @@ func _physics_process(delta: float) -> void:
 	var target_visual_motion: float = speed_ratio
 	if _dash_remaining > 0.0:
 		target_visual_motion = 1.15
-	var movement_blend_rate: float = 14.0 if target_visual_motion > _movement_blend else 5.0
+	var movement_blend_rate: float = 8.0 if target_visual_motion > _movement_blend else 6.0
 	_movement_blend = move_toward(
 		_movement_blend,
 		target_visual_motion,
@@ -347,8 +363,13 @@ func _physics_process(delta: float) -> void:
 		and _dash_exit_blend_remaining <= 0.0
 	):
 		var previous_cycle: float = _run_cycle
+		var pixels_per_frame: float = RUN_STRIDE_PIXELS / RUN_FRAME_COUNT
+		var advance: float = delta * absf(velocity.x) / maxf(pixels_per_frame, 1.0)
+		# Allow the cycle to keep up with speed upgrades; only stop skipping
+		# more than one authored pose in a single physics tick.
+		advance = minf(advance, 0.99)
 		_run_cycle = fposmod(
-			_run_cycle + delta * absf(velocity.x) / RUN_PIXELS_PER_FRAME,
+			_run_cycle + advance,
 			RUN_FRAME_COUNT
 		)
 		_run_is_settling = false
@@ -802,6 +823,14 @@ func _jump() -> void:
 	action_started.emit(&"jump")
 
 
+func _spawn_air_jump_ring() -> void:
+	if _reduced_effects_enabled:
+		return
+	var ring: Node2D = AIR_JUMP_RING_SCRIPT.new() as Node2D
+	add_child(ring)
+	ring.position = Vector2(0.0, 22.0)
+
+
 func _can_drop_through_platform() -> bool:
 	# The base floor remains solid.  Raised room platforms are intentionally one-way.
 	# A height check is stable even on frames where Godot has already cleared slide data.
@@ -1247,7 +1276,7 @@ func _emit_run_footstep(previous_cycle: float) -> void:
 	var planted_frame: int = int(floor(_run_cycle))
 	if planted_frame == _last_footstep_cycle:
 		return
-	if posmod(planted_frame, 4) != 0:
+	if planted_frame != 0 and planted_frame != 6:
 		return
 	if previous_cycle < _run_cycle or planted_frame == 0:
 		_last_footstep_cycle = planted_frame
@@ -1259,9 +1288,9 @@ func _settle_run_cycle(delta: float) -> void:
 		return
 	if not _run_is_settling:
 		var current_cycle: float = fposmod(_run_cycle, RUN_FRAME_COUNT)
-		_run_settle_target = ceil(current_cycle / 4.0) * 4.0
+		_run_settle_target = ceil(current_cycle / 6.0) * 6.0
 		if _run_settle_target - current_cycle < 0.08:
-			_run_settle_target += 4.0
+			_run_settle_target += 6.0
 		_run_is_settling = true
 	_run_cycle = move_toward(
 		_run_cycle,
@@ -1310,8 +1339,14 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 	if state_changed:
 		_visual_state = next_visual_state
 		_visual_state_elapsed = 0.0
+		if _visual_state == VisualState.RUN and previous_visual_state == VisualState.IDLE:
+			_run_start_remaining = RUN_START_BLEND
 	else:
 		_visual_state_elapsed += maxf(0.0, delta)
+	if _visual_state == VisualState.RUN:
+		_run_start_remaining = maxf(0.0, _run_start_remaining - maxf(0.0, delta))
+	else:
+		_run_start_remaining = 0.0
 
 	var previous_position: Vector2 = hero_sprite.position
 	var previous_scale: Vector2 = hero_sprite.scale
@@ -1357,20 +1392,29 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 		var smoothing_rate: float = _get_pose_smoothing_rate(_visual_state)
 		var pose_blend: float = 1.0 - exp(-smoothing_rate * maxf(delta, 0.0001))
 		if state_changed:
-			var minimum_transition_blend: float = (
-				0.56
-				if _visual_state in [
-					VisualState.TURN,
-					VisualState.ATTACK,
-					VisualState.ATTACK_RECOVERY,
-					VisualState.SKILL,
-					VisualState.SKILL_RECOVERY,
-					VisualState.DASH,
-					VisualState.DASH_RECOVERY,
-				]
-				else 0.40
-			)
+			var minimum_transition_blend: float = 0.28
+			if _visual_state in [
+				VisualState.TURN,
+				VisualState.ATTACK,
+				VisualState.ATTACK_RECOVERY,
+				VisualState.SKILL,
+				VisualState.SKILL_RECOVERY,
+				VisualState.DASH,
+				VisualState.DASH_RECOVERY,
+			]:
+				minimum_transition_blend = 0.56
+			elif _visual_state in [VisualState.RUN, VisualState.JUMP_RISE, VisualState.JUMP_FALL, VisualState.LAND]:
+				minimum_transition_blend = 0.22
 			pose_blend = maxf(pose_blend, minimum_transition_blend)
+		if state_changed and _visual_state == VisualState.RUN and previous_visual_state == VisualState.IDLE:
+			_run_cycle = 0.0
+			_run_has_settled = false
+			_run_is_settling = false
+			_reset_sprite_pose()
+			_animate_run()
+			target_position = hero_sprite.position
+			target_scale = hero_sprite.scale
+			target_rotation = hero_sprite.rotation
 		hero_sprite.position = previous_position.lerp(target_position, pose_blend)
 		hero_sprite.scale = previous_scale.lerp(target_scale, pose_blend)
 		hero_sprite.rotation = lerp_angle(previous_rotation, target_rotation, pose_blend)
@@ -1425,9 +1469,9 @@ func _get_pose_smoothing_rate(visual_state: int) -> float:
 		VisualState.LAND, VisualState.TURN, VisualState.HURT:
 			return 32.0
 		VisualState.RUN:
-			return 25.0
-		VisualState.JUMP_RISE, VisualState.JUMP_FALL:
-			return 23.0
+			return 34.0
+		VisualState.JUMP_RISE, VisualState.JUMP_FALL, VisualState.IDLE:
+			return 28.0
 		_:
 			return 18.0
 
@@ -1450,7 +1494,7 @@ func _set_texture(texture: Texture2D) -> void:
 
 func _run_texture(frame_index: int = -1) -> Texture2D:
 	var resolved_index := int(floor(_run_cycle)) if frame_index < 0 else frame_index
-	match posmod(resolved_index, 8):
+	match posmod(resolved_index, 12):
 		0:
 			return HERO_RUN_0
 		1:
@@ -1465,8 +1509,16 @@ func _run_texture(frame_index: int = -1) -> Texture2D:
 			return HERO_RUN_5
 		6:
 			return HERO_RUN_6
-		_:
+		7:
 			return HERO_RUN_7
+		8:
+			return HERO_RUN_8
+		9:
+			return HERO_RUN_9
+		10:
+			return HERO_RUN_10
+		_:
+			return HERO_RUN_11
 
 
 func _animate_idle() -> void:
@@ -1480,21 +1532,22 @@ func _animate_idle() -> void:
 
 
 func _animate_run() -> void:
+	if _run_start_remaining > 0.0:
+		var start_weight: float = 1.0 - clampf(
+			_run_start_remaining / maxf(RUN_START_BLEND, 0.001),
+			0.0,
+			1.0
+		)
+		_set_texture(HERO_IDLE)
+		hero_sprite.position.x += _facing * lerpf(0.0, 1.2, start_weight)
+		hero_sprite.rotation = -_facing * lerpf(0.0, 0.028, start_weight)
+		hero_sprite.scale = Vector2(HERO_SCALE, HERO_SCALE)
+		return
 	var current_frame := int(floor(_run_cycle))
 	_set_texture(_run_texture(current_frame))
-	var cycle_phase: float = _run_cycle / RUN_FRAME_COUNT * TAU
-	var speed_ratio: float = clampf(_movement_blend, 0.0, 1.0)
-	var step_lift: float = absf(sin(cycle_phase)) * 1.05 * speed_ratio
-	var contact_weight: float = 0.5 + 0.5 * cos(cycle_phase * 2.0)
-	hero_sprite.position.y -= step_lift
-	hero_sprite.rotation = -_facing * (
-		lerpf(0.003, 0.017, speed_ratio)
-		+ sin(cycle_phase) * 0.005 * speed_ratio
-	)
-	hero_sprite.scale = Vector2(
-		HERO_SCALE * (1.0 + contact_weight * 0.006 * speed_ratio),
-		HERO_SCALE * (1.0 - contact_weight * 0.005 * speed_ratio)
-	)
+	hero_sprite.position.x += _facing * 1.2
+	hero_sprite.rotation = -_facing * 0.028
+	hero_sprite.scale = Vector2(HERO_SCALE, HERO_SCALE)
 
 
 func _animate_turn() -> void:
@@ -1504,9 +1557,7 @@ func _animate_turn() -> void:
 		1.0
 	)
 	var braking_weight: float = sin(turn_progress * PI)
-	# Frames 0 and 4 are the planted poses used for walk-stop settling, so a
-	# reversal keeps the feet grounded while the torso shifts through the turn.
-	_set_texture(HERO_RUN_0 if turn_progress < 0.5 else HERO_RUN_4)
+	_set_texture(HERO_RUN_6 if turn_progress >= 0.5 else HERO_RUN_0)
 	hero_sprite.position += Vector2(
 		-_turn_from_facing * braking_weight * 1.4,
 		braking_weight * 0.35
@@ -1519,51 +1570,55 @@ func _animate_turn() -> void:
 
 
 func _animate_jump_rise() -> void:
-	if _airborne_time < 0.11:
+	if _airborne_time < 0.085:
 		_set_texture(HERO_JUMP_TAKEOFF)
-		hero_sprite.position += Vector2(-_facing * 0.4, 1.0)
-		hero_sprite.scale = Vector2(HERO_SCALE * 1.035, HERO_SCALE * 0.965)
+	elif velocity.y < -280.0:
+		_set_texture(HERO_JUMP_RISE)
 	else:
-		_set_texture(HERO_JUMP_TUCK)
-		hero_sprite.position += Vector2(_facing * 1.0, -2.0)
-		hero_sprite.scale = Vector2(HERO_SCALE * 0.98, HERO_SCALE * 1.025)
-	hero_sprite.rotation = -_facing * 0.032
+		_set_texture(HERO_JUMP_APEX)
+	_apply_air_pose()
 
 
 func _animate_jump_fall() -> void:
-	if velocity.y < 150.0:
+	# Stepping off a ledge starts extending immediately; it is not a jump apex.
+	if velocity.y < 120.0 and _airborne_time >= 0.12:
+		_set_texture(HERO_JUMP_APEX)
+	elif velocity.y < 300.0:
 		_set_texture(HERO_JUMP_TUCK)
-		hero_sprite.position += Vector2(_facing * 0.4, -1.0)
 	else:
 		_set_texture(HERO_JUMP_FALL)
-		hero_sprite.position += Vector2(-_facing * 0.5, 0.6)
-	hero_sprite.rotation = _facing * 0.02
-	var fall_blend: float = clampf((velocity.y - 80.0) / 520.0, 0.0, 1.0)
+	_apply_air_pose()
+
+
+func _apply_air_pose() -> void:
+	# Share a continuous transform across ascent/apex/descent texture changes.
+	var rise_weight: float = smoothstep(0.0, 520.0, maxf(0.0, -velocity.y))
+	var fall_weight: float = smoothstep(0.0, 520.0, maxf(0.0, velocity.y))
+	var launch_weight: float = 1.0 - smoothstep(0.0, 0.13, _airborne_time)
+	hero_sprite.position += Vector2(
+		_facing * (0.15 + rise_weight * 0.20 - fall_weight * 0.45),
+		-0.8 + fall_weight * 1.2 + launch_weight * 0.5
+	)
+	hero_sprite.rotation = _facing * (rise_weight * 0.018 - fall_weight * 0.014)
 	hero_sprite.scale = Vector2(
-		HERO_SCALE * lerpf(0.99, 1.025, fall_blend),
-		HERO_SCALE * lerpf(1.015, 0.985, fall_blend)
+		HERO_SCALE * (1.0 - rise_weight * 0.008),
+		HERO_SCALE * (1.0 + rise_weight * 0.012)
 	)
 
 
 func _animate_land() -> void:
-	var landing_progress: float = 1.0 - _landing_squash_remaining / LANDING_SQUASH_DURATION
+	var moving: bool = absf(velocity.x) >= 40.0
+	var landing_progress: float = 1.0 - _landing_squash_remaining / _landing_recovery_duration
 	landing_progress = clampf(landing_progress, 0.0, 1.0)
 	if landing_progress < 0.58:
 		var crouch_recovery: float = smoothstep(0.0, 1.0, landing_progress / 0.58)
 		_set_texture(HERO_LAND)
-		hero_sprite.position.y += lerpf(2.2, 0.3, crouch_recovery)
-		hero_sprite.scale = Vector2(
-			HERO_SCALE * lerpf(1.055, 1.01, crouch_recovery),
-			HERO_SCALE * lerpf(0.93, 0.995, crouch_recovery)
-		)
+		hero_sprite.position.y += lerpf(1.2, 0.2, crouch_recovery)
 	else:
 		var stand_up: float = smoothstep(0.0, 1.0, (landing_progress - 0.58) / 0.42)
-		_set_texture(HERO_IDLE)
-		hero_sprite.position.y += lerpf(1.0, 0.0, stand_up)
-		hero_sprite.scale = Vector2(
-			HERO_SCALE * lerpf(1.025, 1.0, stand_up),
-			HERO_SCALE * lerpf(0.975, 1.0, stand_up)
-		)
+		_set_texture(_run_texture() if moving else HERO_IDLE)
+		hero_sprite.position.y += lerpf(0.6, 0.0, stand_up)
+	hero_sprite.scale = Vector2(HERO_SCALE, HERO_SCALE)
 
 
 func _animate_dash() -> void:
@@ -1573,11 +1628,11 @@ func _animate_dash() -> void:
 		1.0
 	)
 	if dash_progress < 0.24:
-		_set_texture(HERO_RUN_2)
+		_set_texture(HERO_RUN_5)
 	elif dash_progress < 0.74:
-		_set_texture(HERO_RUN_4)
-	else:
 		_set_texture(HERO_RUN_6)
+	else:
+		_set_texture(HERO_RUN_4)
 	var dash_punch: float = sin(dash_progress * PI)
 	hero_sprite.position += Vector2(_facing * (4.0 + dash_punch * 3.0), 1.0)
 	hero_sprite.rotation = -_facing * lerpf(0.018, 0.034, dash_punch)
@@ -2132,7 +2187,7 @@ func _draw() -> void:
 		draw_line(_p(-48.0, 7.0), _p(-12.0, 7.0), Color(0.38, 0.92, 1.0, 0.25), 4.0)
 
 	if _landing_squash_remaining > 0.0 and is_on_floor():
-		var landing_time: float = 1.0 - _landing_squash_remaining / LANDING_SQUASH_DURATION
+		var landing_time: float = 1.0 - _landing_squash_remaining / _landing_recovery_duration
 		var dust_alpha: float = 0.28 * (1.0 - clampf(landing_time, 0.0, 1.0))
 		draw_circle(Vector2(-17.0, 24.0), 5.0 + landing_time * 5.0, Color(0.50, 0.78, 0.82, dust_alpha))
 		draw_circle(Vector2(17.0, 24.0), 4.0 + landing_time * 4.0, Color(0.50, 0.78, 0.82, dust_alpha))

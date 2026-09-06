@@ -1,6 +1,6 @@
 extends SceneTree
 
-const WINDOW_SIZE := Vector2i(1280, 840)
+const WINDOW_SIZE := Vector2i(1280, 720)
 
 var _original_mode: int
 var _original_size: Vector2i

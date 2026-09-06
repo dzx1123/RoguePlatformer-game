@@ -8,12 +8,26 @@ func _initialize() -> void:
 func _run_test() -> void:
 	var main_scene: PackedScene = load("res://scenes/Main.tscn")
 	var main: Node2D = main_scene.instantiate() as Node2D
+	main.set("save_enabled", false)
 	root.add_child(main)
+	main.call(&"_show_start_screen")
 	await process_frame
 
 	var entry_flow: Control = main.get_node("HUD/EntryFlow") as Control
 	if entry_flow == null or not entry_flow.visible:
 		_fail("The start screen was not shown on game entry")
+		return
+	var entry_kicker: Label = entry_flow.get_node("EntryKicker") as Label
+	var entry_subtitle: Label = main.get("_entry_subtitle") as Label
+	var about: Label = main.get_node("HUD/SettingsMenu/SettingsAbout") as Label
+	if (
+		entry_kicker.text != "踏入月夜 · 循回不息"
+		or entry_subtitle.text != "二十房月桥 · 肉鸽动作"
+		or (main.get_node("HUD/Title") as Label).visible
+		or (main.get_node("HUD/Controls") as Label).visible
+		or about == null or about.text.is_empty()
+	):
+		_fail("Entry copy retained prototype text or lost the settings version label")
 		return
 	var player: RoguePlayer = main.get_node("Player") as RoguePlayer
 	var entry_position: Vector2 = player.global_position
@@ -75,6 +89,8 @@ func _run_test() -> void:
 		return
 
 	main.queue_free()
+	await process_frame
+	await process_frame
 	print("entry_flow_smoke: PASS")
 	quit(0)
 

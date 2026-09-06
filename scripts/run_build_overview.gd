@@ -7,7 +7,7 @@ extends Control
 
 signal close_requested
 
-const DISPLAY_SIZE := Vector2(1280.0, 840.0)
+const DISPLAY_SIZE := Vector2(1280.0, 720.0)
 const UPGRADE_CATALOG := preload("res://scripts/upgrade_catalog.gd")
 
 var _weapon_name_label: Label
@@ -75,8 +75,8 @@ func _build_interface() -> void:
 
 	var sheet := Panel.new()
 	sheet.name = "BuildSheet"
-	sheet.position = Vector2(58.0, 42.0)
-	sheet.size = Vector2(1164.0, 756.0)
+	sheet.position = Vector2(58.0, 32.0)
+	sheet.size = Vector2(1164.0, 656.0)
 	sheet.mouse_filter = Control.MOUSE_FILTER_STOP
 	sheet.add_theme_stylebox_override("panel", _make_sheet_style())
 	add_child(sheet)
@@ -119,8 +119,8 @@ func _build_interface() -> void:
 	var weapon_card := _create_card(
 		sheet,
 		"WeaponCard",
-		Vector2(28.0, 118.0),
-		Vector2(300.0, 430.0),
+		Vector2(28.0, 110.0),
+		Vector2(300.0, 360.0),
 		"当前武器 · 流派",
 		Color("#72d9ed")
 	)
@@ -136,8 +136,8 @@ func _build_interface() -> void:
 	weapon_card.add_child(_weapon_name_label)
 	_weapon_detail_label = _make_rich_label(
 		"WeaponDetail",
-		Vector2(20.0, 144.0),
-		Vector2(260.0, 266.0),
+		Vector2(20.0, 132.0),
+		Vector2(260.0, 210.0),
 		15,
 		Color(0.74, 0.87, 0.92, 1.0)
 	)
@@ -146,15 +146,15 @@ func _build_interface() -> void:
 	var stats_card := _create_card(
 		sheet,
 		"StatsCard",
-		Vector2(343.0, 118.0),
-		Vector2(350.0, 430.0),
+		Vector2(343.0, 110.0),
+		Vector2(350.0, 360.0),
 		"关键属性 · 实际生效",
 		Color("#8daeff")
 	)
 	_stats_label = _make_rich_label(
 		"Stats",
 		Vector2(20.0, 58.0),
-		Vector2(310.0, 350.0),
+		Vector2(310.0, 284.0),
 		16,
 		Color(0.83, 0.90, 1.0, 1.0)
 	)
@@ -163,15 +163,15 @@ func _build_interface() -> void:
 	var upgrades_card := _create_card(
 		sheet,
 		"UpgradesCard",
-		Vector2(708.0, 118.0),
-		Vector2(428.0, 430.0),
+		Vector2(708.0, 110.0),
+		Vector2(428.0, 360.0),
 		"已选强化 · 层数 / 上限",
 		Color("#efbd68")
 	)
 	_upgrades_label = _make_rich_label(
 		"Upgrades",
 		Vector2(20.0, 58.0),
-		Vector2(388.0, 350.0),
+		Vector2(388.0, 284.0),
 		15,
 		Color(0.92, 0.88, 0.76, 1.0)
 	)
@@ -181,8 +181,8 @@ func _build_interface() -> void:
 	var synergy_card := _create_card(
 		sheet,
 		"SynergyCard",
-		Vector2(28.0, 568.0),
-		Vector2(1108.0, 142.0),
+		Vector2(28.0, 486.0),
+		Vector2(1108.0, 120.0),
 		"联动关系 · 下一次强化方向",
 		Color("#c392ff")
 	)
@@ -197,7 +197,7 @@ func _build_interface() -> void:
 
 	var hint := _make_label(
 		"Hint",
-		Vector2(30.0, 721.0),
+		Vector2(30.0, 618.0),
 		Vector2(1100.0, 20.0),
 		"数值会在选牌或切换武器后立即更新；武器专属强化只会在对应武器装备时生效。",
 		13,

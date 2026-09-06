@@ -1,6 +1,8 @@
 extends SceneTree
 
 const CHEST_SCRIPT := preload("res://scripts/reward_chest.gd")
+const UI := preload("res://scripts/ui_theme.gd")
+const HUD_LAYOUT := preload("res://scripts/run_hud_builder.gd")
 
 
 func _initialize() -> void:
@@ -21,7 +23,7 @@ func _run_test() -> void:
 
 	main.call(&"_show_upgrade_choice")
 	await process_frame
-	if not _assert_layer_mode(main, "LUNAR RELIC", false):
+	if not _assert_layer_mode(main, "月弧遗物", false):
 		return
 	var relic_choices: Array[Dictionary] = main.call(&"get_upgrade_choices") as Array[Dictionary]
 	var relic_name: String = String(relic_choices[0].get("name", ""))
@@ -38,8 +40,11 @@ func _run_test() -> void:
 	main.set("_gold", 999)
 	main.call(&"_show_shop")
 	await process_frame
-	if not _assert_layer_mode(main, "ASTRAL MARKET", false):
+	if not _assert_layer_mode(main, "星尘旅商", false):
 		return
+	for button: Button in main.get("_upgrade_buttons"):
+		if not (button.get_node("CardBadge") as Panel).visible or not (button.get_node("CardFooter") as Label).text.contains("金币"):
+			return _fail("Shop card did not expose its distinct price badge")
 	var shop_choices: Array[Dictionary] = main.call(&"get_upgrade_choices") as Array[Dictionary]
 	var shop_name: String = String(shop_choices[0].get("name", ""))
 	if not bool(main.call(&"choose_upgrade", 0)):
@@ -51,14 +56,31 @@ func _run_test() -> void:
 		or not String(feedback_snapshot.get("title", "")).contains(shop_name)
 	):
 		return _fail("Shop purchase did not use the shared confirmation feedback")
+	main.set("_gold", 0)
+	main.call(&"_show_shop")
+	for button: Button in main.get("_upgrade_buttons"):
+		var card_title: Label = button.get_node("CardTitle") as Label
+		var sigil: Label = button.get_node("CardSigil") as Label
+		if (
+			not button.disabled
+			or card_title.get_theme_color("font_color") != UI.TEXT_DISABLED
+			or not sigil.get_theme_color("font_color").is_equal_approx(Color(UI.TEXT_DISABLED, 0.84))
+		):
+			return _fail("Unaffordable shop cards did not use the disabled visual state")
+	if bool(main.call(&"choose_upgrade", 0)):
+		return _fail("An unaffordable shop card accepted confirmation")
+	main.set("_gold", 999)
 
 	var player: RoguePlayer = main.get_node("Player") as RoguePlayer
 	player.set_current_health(player.get_max_health())
 	var gold_before_event: int = int(main.call(&"get_gold"))
 	main.call(&"_show_event_choice")
 	await process_frame
-	if not _assert_layer_mode(main, "ECLIPSE OMEN", false):
+	if not _assert_layer_mode(main, "月蚀奇遇", false):
 		return
+	for button: Button in main.get("_upgrade_buttons"):
+		if not (button.get_node("CardCost") as Label).text.begins_with("代价") or not (button.get_node("CardDescription") as Label).text.begins_with("收益"):
+			return _fail("Event card must separate cost and benefit")
 	var event_choices: Array[Dictionary] = main.call(&"get_upgrade_choices") as Array[Dictionary]
 	var event_name: String = String(event_choices[0].get("name", ""))
 	if not bool(main.call(&"choose_upgrade", 0)):
@@ -128,6 +150,17 @@ func _run_test() -> void:
 		or not String(active_risk_chest.get_prompt_snapshot().get("text", "")).contains("伏兵来袭")
 	):
 		return _fail("Risk-chest opening obscured or failed to announce the ambush")
+	# Keep the real opening flow alive for a second; a deferred toast must not
+	# obscure the ambush either. Freeze only actors so the test cannot die.
+	player.set_physics_process(false)
+	for enemy in get_nodes_in_group("enemies"):
+		enemy.set_physics_process(false)
+	var ambush_deadline: int = Time.get_ticks_msec() + 1000
+	while Time.get_ticks_msec() < ambush_deadline:
+		await process_frame
+		if feedback.visible:
+			return _fail("Risk-chest opening showed a delayed reward toast")
+	player.set_physics_process(true)
 	main.call(&"_clear_enemies")
 	main.call(&"_clear_chest")
 
@@ -151,7 +184,7 @@ func _run_test() -> void:
 
 	main.call(&"_complete_run")
 	await process_frame
-	if not _assert_layer_mode(main, "ROUTE SEALED", true):
+	if not _assert_layer_mode(main, "月蚀封印", true):
 		return
 	var victory_summary: Control = main.get("_upgrade_victory_summary") as Control
 	var victory_restart: Button = main.get("_victory_restart_button") as Button
@@ -165,6 +198,8 @@ func _run_test() -> void:
 		or victory_restart == null
 		or not victory_restart.visible
 		or victory_restart.disabled
+		or not victory_restart.text.contains("再来一局")
+		or root.gui_get_focus_owner() != victory_restart
 	):
 		return _fail("Victory reward summary did not expose its results and primary action")
 	var victory_result: Label = victory_summary.get_node("VictoryResult") as Label
@@ -196,6 +231,17 @@ func _assert_layer_mode(main: Node2D, kicker_fragment: String, expect_victory: b
 	):
 		_fail("Reward layer mode was not configured for %s" % kicker_fragment)
 		return false
+	var expected_accent: Color = UI.ACCENT_MOON
+	if kicker_fragment == "星尘旅商":
+		expected_accent = UI.ACCENT_GOLD
+	elif kicker_fragment == "月蚀奇遇":
+		expected_accent = UI.ACCENT_OMEN
+	elif expect_victory:
+		expected_accent = UI.ACCENT_SEAL
+	var rule: ColorRect = main.get("_upgrade_rule") as ColorRect
+	if not rule.color.is_equal_approx(expected_accent):
+		_fail("Reward layer did not use its semantic MoonUI accent")
+		return false
 	return true
 
 
@@ -203,12 +249,25 @@ func _assert_feedback_lifecycle(feedback: RewardFeedback, reduced_motion: bool) 
 	feedback.set_reduced_motion(reduced_motion)
 	feedback.present(
 		&"timing_test",
-		"TIMING CHECK",
+		"可读时长检查",
 		"奖励反馈可读",
 		"普通与减弱动效都应完整显示并自动关闭",
-		Color("#69d9ed"),
+		UI.ACCENT_MOON,
 		0.72
 	)
+	var panel: Panel = feedback.get_node("RewardToast") as Panel
+	var title: Label = panel.get_node("Title") as Label
+	var detail: Label = panel.get_node("Detail") as Label
+	if (
+		feedback.has_node("RewardVeil")
+		or panel.size != Vector2(520.0, 56.0)
+		or feedback.mouse_filter != Control.MOUSE_FILTER_IGNORE
+		or panel.mouse_filter != Control.MOUSE_FILTER_IGNORE
+		or not title.clip_text or not detail.clip_text
+	):
+		_fail("Toast must be a non-blocking two-line rail without a full-screen veil")
+		return false
+	var target_position := Vector2(380.0, HUD_LAYOUT.HUD_DOCK_TOP - 64.0)
 	var readable_deadline: int = Time.get_ticks_msec() + 1500
 	var became_readable: bool = false
 	while Time.get_ticks_msec() < readable_deadline:
@@ -227,6 +286,14 @@ func _assert_feedback_lifecycle(feedback: RewardFeedback, reduced_motion: bool) 
 	var hidden_deadline: int = Time.get_ticks_msec() + 2200
 	while Time.get_ticks_msec() < hidden_deadline:
 		await process_frame
+		if (
+			panel.scale != Vector2.ONE
+			or panel.position.distance_to(target_position) > 8.01
+			or (reduced_motion and panel.position != target_position)
+			or panel.get_rect().end.y > HUD_LAYOUT.HUD_DOCK_TOP
+		):
+			_fail("Toast motion overlaps the HUD or violates reduced-motion constraints")
+			return false
 		if not bool(feedback.get_snapshot().get("visible", false)):
 			return true
 	_fail("Reward confirmation did not close (reduced=%s)" % reduced_motion)

@@ -20,9 +20,9 @@ const BOSS_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_boss_s
 const GOBLIN_CLUB_SHEET := preload("res://assets/enemies/red_fang_goblin_club_sheet.png")
 const GOBLIN_ELITE_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_sheet.png")
 const GOBLIN_ARCHER_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_sheet.png")
-const GOBLIN_CLUB_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_club_run_sheet_v2.png")
-const GOBLIN_ELITE_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_run_sheet_v2.png")
-const GOBLIN_ARCHER_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_run_sheet_v2.png")
+const GOBLIN_CLUB_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_club_walk_sheet_v4.png")
+const GOBLIN_ELITE_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_walk_sheet_v4.png")
+const GOBLIN_ARCHER_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_walk_sheet_v4.png")
 const MOON_WHEEL_GEOMETRY := preload("res://scripts/moon_wheel_geometry.gd")
 const WEAPON_SKILL_GEOMETRY := preload("res://scripts/weapon_skill_geometry.gd")
 const GOBLIN_EDGE_MATERIAL := preload("res://assets/shaders/goblin_edge_cleanup.tres")
@@ -101,7 +101,9 @@ const DEATH_ANIMATION_DURATION := 0.42
 const SPRITE_COLUMNS := 4.0
 const SPRITE_ROWS := 4.0
 const GOBLIN_IDLE_FPS := 4.5
-const GOBLIN_RUN_FPS := 11.0
+const GOBLIN_WALK_MIN_FPS := 10.0
+const GOBLIN_WALK_MAX_FPS := 24.0
+const GOBLIN_STRIDE_PIXELS := 44.0
 const GOBLIN_RUN_COLUMNS := 4.0
 const GOBLIN_RUN_ROWS := 2.0
 const GOBLIN_RUN_FRAME_COUNT := 8
@@ -110,15 +112,6 @@ const SLIME_RUN_FPS := 10.0
 const LOCOMOTION_SETTLE_FPS := 18.0
 const LANDING_MOTION_DURATION := 0.16
 const TURN_BLEND_DURATION := 0.085
-# Generated run sheets use different internal frame registration. These measured
-# anchors keep the head centered and the feet on one floor line before adding a
-# small controlled runtime bounce.
-const GOBLIN_CLUB_RUN_HEAD_X := [181.58, 167.84, 146.50, 165.55, 183.62, 159.71, 141.06, 154.83]
-const GOBLIN_CLUB_RUN_BOTTOM := [415.0, 417.0, 410.0, 396.0, 357.0, 361.0, 341.0, 341.0]
-const GOBLIN_ARCHER_RUN_HEAD_X := [205.87, 173.87, 178.71, 149.49, 199.83, 175.79, 157.49, 140.36]
-const GOBLIN_ARCHER_RUN_BOTTOM := [446.0, 445.0, 447.0, 447.0, 351.0, 351.0, 354.0, 354.0]
-const GOBLIN_ELITE_RUN_HEAD_X := [266.35, 234.95, 206.30, 170.48, 253.48, 223.68, 200.29, 170.03]
-const GOBLIN_ELITE_RUN_BOTTOM := [398.0, 397.0, 398.0, 362.0, 367.0, 361.0, 364.0, 339.0]
 const PURSUIT_JUMP_SPEED := 690.0
 const PURSUIT_JUMP_MIN_HEIGHT := 36.0
 const PURSUIT_JUMP_MAX_HEIGHT := 420.0
@@ -953,6 +946,10 @@ func _start_attack() -> void:
 	_attack_remaining = _get_attack_duration()
 	_attack_cooldown_remaining = _get_attack_cooldown()
 	_attack_action_performed = false
+	sound_requested.emit(
+		&"slime_attack" if _family == EnemyFamily.SLIME else &"goblin_attack",
+		is_boss()
+	)
 
 
 func _get_attack_duration() -> float:
@@ -1346,18 +1343,18 @@ func _update_locomotion_animation(delta: float) -> void:
 		else float(SLIME_RUN_FRAME_COUNT)
 	)
 	if _turn_remaining > 0.0:
-		_locomotion_cycle = 0.0
 		_locomotion_active = true
 		_locomotion_is_settling = false
-		_locomotion_blend = move_toward(_locomotion_blend, 0.0, delta * 12.0)
-		return
 	if can_stride:
-		var maximum_fps: float = (
-			GOBLIN_RUN_FPS
+		var stride_fps: float = (
+			clampf(
+				horizontal_speed * frame_count / GOBLIN_STRIDE_PIXELS,
+				GOBLIN_WALK_MIN_FPS,
+				GOBLIN_WALK_MAX_FPS
+			)
 			if _family == EnemyFamily.GOBLIN
-			else SLIME_RUN_FPS
+			else SLIME_RUN_FPS * clampf(speed_ratio, 0.60, 1.35)
 		)
-		var stride_fps: float = maximum_fps * clampf(speed_ratio, 0.24, 1.35)
 		_locomotion_cycle = fposmod(
 			_locomotion_cycle + delta * stride_fps,
 			frame_count
@@ -1370,7 +1367,8 @@ func _update_locomotion_animation(delta: float) -> void:
 		return
 	if not _locomotion_is_settling:
 		var current_cycle: float = fposmod(_locomotion_cycle, frame_count)
-		_locomotion_settle_target = ceil(current_cycle / 4.0) * 4.0
+		var contact_interval: float = frame_count * 0.5
+		_locomotion_settle_target = ceil(current_cycle / contact_interval) * contact_interval
 		_locomotion_is_settling = true
 	_locomotion_cycle = move_toward(
 		_locomotion_cycle,
@@ -1423,42 +1421,14 @@ func _get_sprite_scale() -> float:
 
 
 func _get_goblin_run_scale() -> float:
-	if is_boss():
-		return 0.54
-	if is_elite():
-		return 0.25
-	return 0.21 if is_ranged_enemy() else 0.23
+	# Walk v4 is registered to the same 313px canvas and size as the idle art.
+	return _get_sprite_scale()
 
 
-func _get_goblin_run_registration(frame_index: int) -> Vector2:
-	var head_values: Array
-	var bottom_values: Array
-	var target_head_x: float
-	var target_bottom: float
-	if is_ranged_enemy():
-		head_values = GOBLIN_ARCHER_RUN_HEAD_X
-		bottom_values = GOBLIN_ARCHER_RUN_BOTTOM
-		target_head_x = 172.68
-		target_bottom = 447.0
-	elif is_elite() or is_boss():
-		head_values = GOBLIN_ELITE_RUN_HEAD_X
-		bottom_values = GOBLIN_ELITE_RUN_BOTTOM
-		target_head_x = 215.69
-		target_bottom = 398.0
-	else:
-		head_values = GOBLIN_CLUB_RUN_HEAD_X
-		bottom_values = GOBLIN_CLUB_RUN_BOTTOM
-		target_head_x = 162.58
-		target_bottom = 417.0
-	var resolved_frame: int = posmod(frame_index, GOBLIN_RUN_FRAME_COUNT)
-	var source_head_x: float = float(head_values[resolved_frame])
-	var source_bottom: float = float(bottom_values[resolved_frame])
-	var run_scale: float = _get_goblin_run_scale()
-	var display_facing: float = _get_display_facing()
-	return Vector2(
-		(source_head_x - target_head_x) * run_scale * display_facing,
-		(target_bottom - source_bottom) * run_scale
-	)
+func _get_goblin_run_registration(_frame_index: int) -> Vector2:
+	# Registration is baked into all authored walk cells; the old wide-run offsets
+	# must not be applied to these poses.
+	return Vector2.ZERO
 
 
 func _get_sprite_baseline_offset() -> float:
@@ -1562,22 +1532,10 @@ func _apply_goblin_sprite_motion(
 	elif animation_row == 1:
 		var registration: Vector2 = _get_goblin_run_registration(animation_column)
 		_enemy_sprite.position += registration
-		var run_cycle: float = fposmod(
-			_locomotion_cycle,
-			float(GOBLIN_RUN_FRAME_COUNT)
-		) / float(GOBLIN_RUN_FRAME_COUNT)
-		var run_phase: float = run_cycle * TAU
-		var stride_weight: float = clampf(_locomotion_blend, 0.0, 1.0)
 		var run_scale: float = _get_goblin_run_scale()
-		var contact_weight: float = 0.5 + 0.5 * cos(run_phase * 2.0)
-		_enemy_sprite.position.y -= absf(sin(run_phase)) * 0.90 * stride_weight
-		_enemy_sprite.rotation = -_get_display_facing() * (
-			0.008 + sin(run_phase) * 0.004
-		) * stride_weight
-		_enemy_sprite.scale = Vector2(
-			run_scale * (1.0 + contact_weight * 0.008 * stride_weight),
-			run_scale * (1.0 - contact_weight * 0.007 * stride_weight)
-		)
+		# Keep the authored pixel grid stable; registration already aligns each
+		# drawing. Extra per-frame rotation/scaling made the limbs shimmer.
+		_enemy_sprite.scale = Vector2.ONE * run_scale
 	elif animation_row == 2:
 		if is_ranged_enemy():
 			var bow_draw: float = smoothstep(0.02, 0.45, attack_progress)
@@ -1647,11 +1605,11 @@ func _apply_slime_sprite_motion(
 			float(SLIME_RUN_FRAME_COUNT)
 		) / float(SLIME_RUN_FRAME_COUNT) * TAU
 		var stride_weight: float = clampf(_locomotion_blend, 0.0, 1.0)
-		var hop: float = absf(sin(run_phase)) * stride_weight
+		var hop: float = (0.5 - 0.5 * cos(run_phase)) * stride_weight
 		_enemy_sprite.position.y -= hop * (2.0 if is_boss() else 1.25)
 		_enemy_sprite.scale = Vector2(
-			sprite_scale * (1.0 + hop * 0.035),
-			sprite_scale * (1.0 - hop * 0.045)
+			sprite_scale * (1.0 - hop * 0.025),
+			sprite_scale * (1.0 + hop * 0.035)
 		)
 	elif animation_row == 2:
 		var anticipation: float = (
@@ -1855,7 +1813,7 @@ func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 			if using_goblin_run_sheet
 			else previous_position.lerp(target_position, pose_blend)
 		)
-		_enemy_sprite.scale = previous_scale.lerp(target_scale, pose_blend)
+		_enemy_sprite.scale = target_scale if using_goblin_run_sheet else previous_scale.lerp(target_scale, pose_blend)
 		_enemy_sprite.rotation = lerp_angle(previous_rotation, target_rotation, pose_blend)
 	else:
 		_sprite_pose_initialized = true
@@ -1932,9 +1890,27 @@ func _draw() -> void:
 func _draw_archetype_marker() -> void:
 	match _archetype:
 		EnemyArchetype.SHIELD_GUARD:
-			var shield_center: Vector2 = Vector2(_facing * 20.0, -7.0)
-			draw_circle(shield_center, 13.0, Color(0.96, 0.70, 0.22, 0.20))
-			draw_arc(shield_center, 15.0, 0.0, TAU, 20, Color(1.0, 0.79, 0.34, 0.78), 2.0)
+			# A full ring sat behind the sprite and was occluded into two stray arcs.
+			# Keep the guard read as a compact forward-facing shield badge instead.
+			var shield_center := Vector2(_facing * 30.0, -8.0)
+			var shield_points := PackedVector2Array([
+				shield_center + Vector2(-_facing * 7.0, -10.0),
+				shield_center + Vector2(_facing * 6.0, -7.0),
+				shield_center + Vector2(_facing * 7.0, 2.0),
+				shield_center + Vector2(0.0, 11.0),
+				shield_center + Vector2(-_facing * 7.0, 2.0),
+			])
+			draw_colored_polygon(shield_points, Color(0.96, 0.70, 0.22, 0.18))
+			var shield_outline := PackedVector2Array(shield_points)
+			shield_outline.append(shield_points[0])
+			draw_polyline(shield_outline, Color(1.0, 0.82, 0.38, 0.88), 1.8, true)
+			draw_line(
+				shield_center + Vector2(0.0, -6.0),
+				shield_center + Vector2(0.0, 6.0),
+				Color(1.0, 0.88, 0.54, 0.68),
+				1.2,
+				true
+			)
 		EnemyArchetype.FLYER:
 			var halo_radius: float = 28.0 + sin(_elapsed * 4.2 + _phase) * 2.0
 			draw_arc(

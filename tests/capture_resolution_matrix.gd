@@ -2,7 +2,7 @@ extends SceneTree
 
 const OUTPUT_DIR := "res://tests/artifacts/resolution-matrix"
 const TEST_SIZES: Array[Vector2i] = [
-	Vector2i(1280, 840),
+	Vector2i(1280, 720),
 	Vector2i(1600, 900),
 	Vector2i(1920, 1080),
 	Vector2i(2560, 1440),
@@ -112,7 +112,7 @@ func _write_report(entries: Array[Dictionary]) -> bool:
 		_fail("Could not open resolution report for writing")
 		return false
 	report_file.store_string(JSON.stringify({
-		"design_size": [1280, 840],
+		"design_size": [1280, 720],
 		"stretch_mode": "canvas_items",
 		"stretch_aspect": "keep",
 		"captures": entries,
