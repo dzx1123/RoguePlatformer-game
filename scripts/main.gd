@@ -691,8 +691,12 @@ func _fit_to_viewport() -> void:
 				(child as Control).size = DISPLAY_SIZE
 	var bottom := hud.get_node_or_null("BottomHUD") as Control
 	if bottom != null:
-		bottom.position = Vector2(0.0, RUN_HUD_BUILDER_SCRIPT.HUD_DOCK_TOP)
-		bottom.size = Vector2(DISPLAY_SIZE.x, DISPLAY_SIZE.y - RUN_HUD_BUILDER_SCRIPT.HUD_DOCK_TOP)
+		var dock_top: float = RUN_HUD_BUILDER_SCRIPT.HUD_DOCK_TOP
+		var vitals := hud.get_node_or_null("VitalsPanel") as Control
+		if vitals != null:
+			dock_top = minf(dock_top, vitals.position.y)
+		bottom.position = Vector2(0.0, dock_top)
+		bottom.size = Vector2(DISPLAY_SIZE.x, DISPLAY_SIZE.y - dock_top)
 	if is_instance_valid(_entry_overlay):
 		var fade := _entry_overlay.get_node_or_null("BottomGradient") as Control
 		if fade != null:
@@ -1465,7 +1469,7 @@ func _reset_entry_layout() -> void:
 	(_entry_overlay.get_node("EntryKicker") as Label).position = Vector2(300, 132)
 	(_entry_overlay.get_node("EntryFooter") as Label).position = Vector2(240, 588)
 	var has_continue: bool = is_instance_valid(_continue_button) and _continue_button.visible
-	_start_button.position = Vector2(440, 386) if has_continue else Vector2(432, 318)
+	_start_button.position = Vector2(440, 402) if has_continue else Vector2(432, 318)
 	_start_button.size = Vector2(400, 60) if has_continue else Vector2(416, 68)
 	_style_entry_button(_start_button, UI.ACCENT_MOON, not has_continue)
 	_start_button.add_theme_color_override("font_color", UI.ACCENT_MOON)
@@ -1473,8 +1477,8 @@ func _reset_entry_layout() -> void:
 		_continue_button.position = Vector2(432, 318)
 	var settings_button: Button = _entry_overlay.get_node("EntrySettings") as Button
 	var quit_button: Button = _entry_overlay.get_node("EntryQuit") as Button
-	settings_button.position = Vector2(480, 460 if has_continue else 400)
-	quit_button.position = Vector2(480, 508 if has_continue else 448)
+	settings_button.position = Vector2(480, 476 if has_continue else 400)
+	quit_button.position = Vector2(480, 524 if has_continue else 448)
 	(_entry_overlay.get_node("EntryFrame") as Panel).visible = false
 	_entry_progress_panel.position = Vector2(48, 616)
 	var focus_buttons: Array = [_start_button, settings_button, quit_button]
@@ -2271,7 +2275,7 @@ func _refresh_settings_operation_guide() -> void:
 		+ ("LS / 十字键  左右移动\n" if _using_controller_input else "%s / %s  左右移动\n" % [left_key, right_key])
 		+ "%s  跳跃 / 二段跳\n" % jump_key
 		+ "%s + %s  下平台\n" % [down_key, jump_key]
-		+ "%s  开宝箱 / 进入光柱\n\n" % interact_key
+		+ "%s  开宝箱 / 进入光柱\n" % interact_key
 		+ "[color=#72e4f4]菜单与选择[/color]\n"
 		+ "%s  暂停与设置\n" % pause_key
 		+ "%s  构筑总览\n" % _get_action_prompt(&"build_overview")
@@ -2288,7 +2292,7 @@ func _refresh_settings_operation_guide() -> void:
 		+ "%s + %s  下劈\n" % [down_key, attack_key]
 		+ "%s  冲刺（短暂无敌）\n" % dash_key
 		+ "%s  主动技能\n" % skill_key
-		+ "%s  切换武器\n\n" % weapon_key
+		+ "%s  切换武器\n" % weapon_key
 		+ "[color=#72e4f4]其他操作[/color]\n"
 		+ "%s  离开商店\n" % interact_key
 		+ "%s  重新开局" % restart_key
@@ -2478,7 +2482,7 @@ func _show_difficulty_selection() -> void:
 	(_entry_overlay.get_node("EntryKicker") as Label).position = Vector2(300, 76)
 	(_entry_overlay.get_node("EntryKicker") as Label).text = "选择你的旅程"
 	(_entry_overlay.get_node("EntryFooter") as Label).text = "键鼠与手柄可切换焦点 · Enter / A 确认 · Esc / B 返回"
-	(_entry_overlay.get_node("EntryFooter") as Label).position = Vector2(240, 732)
+	(_entry_overlay.get_node("EntryFooter") as Label).position = Vector2(240, 628)
 	(_entry_overlay.get_node("DifficultyBack") as Button).visible = true
 	_start_button.visible = false
 	if is_instance_valid(_continue_button):

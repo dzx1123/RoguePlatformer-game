@@ -43,11 +43,16 @@ func _run_test() -> void:
 	if not guide_text.contains("移动与探索") or not guide_text.contains("开宝箱") or not guide_text.contains("二段跳"):
 		_fail("Settings operation guide did not contain the moved gameplay instructions")
 		return
+	var guide_heading := settings_menu.get_node("SettingsGuideCard/Heading") as Label
+	var guide_heading_bottom: float = guide_heading.get_global_rect().end.y
 	for use_controller: bool in [false, true]:
 		menu_main.call(&"_on_input_device_changed", use_controller)
 		await process_frame
 		for column_name: String in ["OperationGuide", "OperationGuideCombat"]:
 			var column := settings_menu.get_node(column_name) as RichTextLabel
+			if column.get_global_rect().position.y < guide_heading_bottom + 2.0:
+				_fail("Operation guide overlaps its card heading: %s" % column_name)
+				return
 			if column.get_content_height() > column.size.y or column.get_theme_font_size("normal_font_size") < 16:
 				_fail("Operation guide is clipped or too small: %s controller=%s height=%d" % [column_name, use_controller, column.get_content_height()])
 				return

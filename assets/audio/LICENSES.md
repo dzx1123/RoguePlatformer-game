@@ -40,10 +40,3 @@ Files in `music/` (`cover.wav`, `explore.wav`, `boss.wav`) are original
 synthesized loops for this project. Regenerate with:
 
 `Godot --headless --path D:\Godot\RoguePlatformer-game --script res://tools/render_bgm.gd`
-
-## Archived vocalizations
-
-The older files in `player_voice/` are selected from **RPG Male Vocal** by
-konakuma. The author permits free use and modification, and asks to be
-included in the credits. They are no longer wired into gameplay.
-Source: https://konakuma.itch.io/rpg-male-vocal

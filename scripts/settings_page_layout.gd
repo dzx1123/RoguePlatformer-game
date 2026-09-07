@@ -57,14 +57,17 @@ static func apply(page: Control) -> void:
 		"HUDScaleSelector": Rect2(630, 304, 208, 34),
 		"ControllerStatus": Rect2(876, 304, 320, 34),
 		"DisplayStatus": Rect2(544, 334, 652, 20),
-		"OperationGuide": Rect2(700, 380, 250, 288),
-		"OperationGuideCombat": Rect2(976, 380, 236, 288),
+		"OperationGuide": Rect2(700, 412, 250, 256),
+		"OperationGuideCombat": Rect2(976, 412, 236, 256),
 		"ResetBindings": Rect2(48, 672, 252, 40),
 		"CloseSettings": Rect2(992, 672, 240, 40),
 		"SettingsAbout": Rect2(350, 676, 580, 22),
 	}
 	for key: String in controls:
 		_place(page, key, controls[key])
+	for key: String in ["OperationGuide", "OperationGuideCombat"]:
+		var guide_column := page.get_node(key) as RichTextLabel
+		guide_column.add_theme_constant_override("line_separation", 2)
 	for key in ["ControllerStatus", "DisplayStatus", "SettingsAbout"]:
 		var label := page.get_node(key) as Label
 		label.add_theme_font_size_override("font_size", 13)

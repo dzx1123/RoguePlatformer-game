@@ -39,6 +39,8 @@ func _run() -> void:
 		return _fail("Saved entry must prioritize Continue Journey")
 	if resume.position.y >= start.position.y or resume.size.y <= start.size.y:
 		return _fail("Continue and New Game do not have the specified primary/secondary hierarchy")
+	if start.position.y < resume.position.y + resume.size.y + 12.0:
+		return _fail("Continue and New Game are packed without a visible gap")
 	if not (resume.get_theme_stylebox("focus") as StyleBoxFlat).border_color.is_equal_approx(UI.ACCENT_GOLD):
 		return _fail("Continue focus is not the gold primary action")
 	main.call(&"_show_difficulty_selection")
@@ -46,6 +48,9 @@ func _run() -> void:
 	var cards: Array = main.get("_difficulty_buttons")
 	if not back.visible or profile.visible or root.gui_get_focus_owner() != cards[0]:
 		return _fail("Difficulty must expose return, hide progression and establish one focus")
+	var footer: Label = entry.get_node("EntryFooter") as Label
+	if footer.position.y + footer.size.y > 720.1:
+		return _fail("Difficulty footer left the 1280x720 canvas at y=%s" % footer.position.y)
 	for reduced in [false, true]:
 		(main.get("_settings") as RefCounted).set("_reduced_effects_enabled", reduced)
 		main.call(&"_show_difficulty_selection")

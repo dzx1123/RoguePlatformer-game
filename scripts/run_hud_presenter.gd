@@ -18,6 +18,15 @@ const HUD_SCALE_ANCHORS := {
 	"CombatStatus": Vector2(640.0, 620.0),
 	"BossHealth": Vector2(640.0, 44.0),
 }
+const HUD_SCALE_COLUMNS: Array[Array] = [
+	["VitalsPanel", "HealthBackground", "Lives", "Currency"],
+	["AbilityPanel", "AbilityBar"],
+	["WeaponPanel", "Equipment"],
+]
+const HUD_CANVAS := Vector2(1280.0, 720.0)
+const HUD_SCALE_MARGIN := 8.0
+const HUD_SCALE_GAP := 8.0
+const HUD_DOCK_TOP := 640.0
 var _hud: CanvasLayer
 var _status_tween: Tween
 var _health_tween: Tween
@@ -143,6 +152,8 @@ func apply_accessibility(
 func _apply_hud_scale(scale_factor: float) -> void:
 	if _hud == null:
 		return
+	var requested_scale: float = clampf(scale_factor, 0.90, 1.10)
+	var applied_scale: float = _fitted_bottom_hud_scale(requested_scale)
 	for path_value: Variant in HUD_SCALE_ANCHORS:
 		var path := String(path_value)
 		var control := _hud.get_node_or_null(path) as Control
@@ -154,8 +165,56 @@ func _apply_hud_scale(scale_factor: float) -> void:
 		var base_position: Vector2 = control.get_meta(&"hud_scale_base_position")
 		var base_scale: Vector2 = control.get_meta(&"hud_scale_base_scale")
 		var anchor: Vector2 = HUD_SCALE_ANCHORS[path]
-		control.position = anchor + (base_position - anchor) * scale_factor
-		control.scale = base_scale * scale_factor
+		control.position = anchor + (base_position - anchor) * applied_scale
+		control.scale = base_scale * applied_scale
+	if applied_scale > 1.0:
+		_pack_bottom_hud_columns()
+	_sync_bottom_dock_to_scaled_hud()
+
+
+func _fitted_bottom_hud_scale(requested_scale: float) -> float:
+	if requested_scale <= 1.0:
+		return requested_scale
+	var native_width: float = 0.0
+	for column: Array in HUD_SCALE_COLUMNS:
+		var panel := _hud.get_node_or_null(String(column[0])) as Control
+		if panel == null:
+			return requested_scale
+		native_width += panel.size.x
+	if native_width <= 0.0:
+		return requested_scale
+	var inner_width: float = (
+		HUD_CANVAS.x
+		- HUD_SCALE_MARGIN * 2.0
+		- HUD_SCALE_GAP * float(HUD_SCALE_COLUMNS.size() - 1)
+	)
+	return minf(requested_scale, inner_width / native_width)
+
+
+func _pack_bottom_hud_columns() -> void:
+	var cursor_x: float = HUD_SCALE_MARGIN
+	for column: Array in HUD_SCALE_COLUMNS:
+		var panel := _hud.get_node_or_null(String(column[0])) as Control
+		if panel == null:
+			return
+		var delta_x: float = cursor_x - panel.position.x
+		for path_value: Variant in column:
+			var control := _hud.get_node_or_null(String(path_value)) as Control
+			if control != null:
+				control.position.x += delta_x
+		cursor_x += panel.size.x * panel.scale.x + HUD_SCALE_GAP
+
+
+func _sync_bottom_dock_to_scaled_hud() -> void:
+	var dock := _hud.get_node_or_null("BottomHUD") as Control
+	if dock == null:
+		return
+	var dock_top: float = HUD_DOCK_TOP
+	var vitals := _hud.get_node_or_null("VitalsPanel") as Control
+	if vitals != null:
+		dock_top = minf(dock_top, vitals.position.y)
+	dock.position = Vector2(0.0, dock_top)
+	dock.size = Vector2(HUD_CANVAS.x, HUD_CANVAS.y - dock_top)
 
 
 func _health_color(health_ratio: float) -> Color:
