@@ -43,8 +43,8 @@ func _run_test() -> void:
 		"res://assets/characters/frames_polished/hero_run_10.png",
 		"res://assets/characters/frames_polished/hero_run_11.png",
 		"res://assets/characters/frames_polished/hero_jump_takeoff.png",
-		"res://assets/characters/frames_polished/hero_jump_rise.png",
-		"res://assets/characters/frames_polished/hero_jump_apex.png",
+		"res://assets/characters/frames_polished/hero_jump_rise_v2.png",
+		"res://assets/characters/frames_polished/hero_jump_apex_v2.png",
 		"res://assets/characters/frames_polished/hero_jump_tuck.png",
 		"res://assets/characters/frames_polished/hero_jump_fall.png",
 		"res://assets/characters/frames_polished/hero_land.png",
@@ -120,14 +120,14 @@ func _run_test() -> void:
 	player.velocity.y = -420.0
 	player.call(&"_reset_sprite_pose")
 	player.call(&"_animate_jump_rise")
-	if not hero_sprite.texture.resource_path.ends_with("hero_jump_rise.png"):
+	if not hero_sprite.texture.resource_path.ends_with("hero_jump_rise_v2.png"):
 		_fail("Jump ascent did not use the authored rise pose")
 		return
 
 	player.velocity.y = -80.0
 	player.call(&"_reset_sprite_pose")
 	player.call(&"_animate_jump_rise")
-	if not hero_sprite.texture.resource_path.ends_with("hero_jump_apex.png"):
+	if not hero_sprite.texture.resource_path.ends_with("hero_jump_apex_v2.png"):
 		_fail("Jump ascent did not transition into the apex pose")
 		return
 

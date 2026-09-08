@@ -48,8 +48,8 @@ const HERO_RUN_9: Texture2D = preload("res://assets/characters/frames_polished/h
 const HERO_RUN_10: Texture2D = preload("res://assets/characters/frames_polished/hero_run_10.png")
 const HERO_RUN_11: Texture2D = preload("res://assets/characters/frames_polished/hero_run_11.png")
 const HERO_JUMP_TAKEOFF: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_takeoff.png")
-const HERO_JUMP_RISE: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_rise.png")
-const HERO_JUMP_APEX: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_apex.png")
+const HERO_JUMP_RISE: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_rise_v2.png")
+const HERO_JUMP_APEX: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_apex_v2.png")
 const HERO_JUMP_TUCK: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_tuck.png")
 const HERO_JUMP_FALL: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_fall.png")
 const HERO_LAND: Texture2D = preload("res://assets/characters/frames_polished/hero_land.png")
@@ -63,6 +63,10 @@ const HERO_SLASH_UP_FOLLOWTHROUGH: Texture2D = preload("res://assets/characters/
 const HERO_SLASH_DOWN_WINDUP: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down_windup.png")
 const HERO_SLASH_DOWN: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down.png")
 const HERO_SLASH_DOWN_FOLLOWTHROUGH: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_down_followthrough.png")
+const WEAPON_POSE_DIRECTORIES := {
+	WeaponCatalog.TWIN_BLADES: "res://assets/characters/weapon_sets/twin_blades",
+	WeaponCatalog.GREATSWORD: "res://assets/characters/weapon_sets/greatsword",
+}
 const DASH_ECHO_SCRIPT := preload("res://scripts/dash_echo.gd")
 const AIR_JUMP_RING_SCRIPT := preload("res://scripts/air_jump_ring.gd")
 const MOON_WHEEL_GEOMETRY := preload("res://scripts/moon_wheel_geometry.gd")
@@ -194,6 +198,7 @@ var _visual_state: int = VisualState.IDLE
 var _visual_state_elapsed: float = 0.0
 var _sprite_pose_initialized: bool = false
 var _current_texture: Texture2D
+var _weapon_pose_cache: Dictionary = {}
 
 
 func _ready() -> void:
@@ -1486,43 +1491,104 @@ func _reset_sprite_pose() -> void:
 
 
 func _set_texture(texture: Texture2D) -> void:
+	texture = _resolve_weapon_texture_alias(texture)
 	if texture == _current_texture:
 		return
 	_current_texture = texture
 	hero_sprite.texture = texture
 
 
+func _weapon_pose_texture(pose_name: StringName, fallback: Texture2D) -> Texture2D:
+	if _weapon_id == WeaponCatalog.SWORD:
+		return fallback
+	var pose_directory: String = String(WEAPON_POSE_DIRECTORIES.get(_weapon_id, ""))
+	if pose_directory.is_empty():
+		return fallback
+	var resource_path := "%s/%s.png" % [pose_directory, String(pose_name)]
+	if _weapon_pose_cache.has(resource_path):
+		return _weapon_pose_cache[resource_path] as Texture2D
+	if not ResourceLoader.exists(resource_path, "Texture2D"):
+		push_warning("Missing weapon pose: %s" % resource_path)
+		return fallback
+	var texture := load(resource_path) as Texture2D
+	if texture == null:
+		return fallback
+	_weapon_pose_cache[resource_path] = texture
+	return texture
+
+
+func _resolve_weapon_texture_alias(texture: Texture2D) -> Texture2D:
+	if _weapon_id == WeaponCatalog.SWORD:
+		return texture
+	if texture == HERO_IDLE:
+		return _weapon_pose_texture(&"hero_idle", texture)
+	if texture == HERO_WINDUP:
+		return _weapon_pose_texture(&"hero_attack_forward_windup", texture)
+	if texture == HERO_SLASH:
+		return _weapon_pose_texture(&"hero_attack_forward_strike", texture)
+	if texture == HERO_SLASH_FOLLOWTHROUGH:
+		return _weapon_pose_texture(&"hero_attack_forward_follow", texture)
+	if texture == HERO_RECOVERY:
+		return _weapon_pose_texture(&"hero_attack_recovery", texture)
+	if texture == HERO_SLASH_UP_WINDUP:
+		return _weapon_pose_texture(&"hero_attack_up_windup", texture)
+	if texture == HERO_SLASH_UP:
+		return _weapon_pose_texture(&"hero_attack_up_strike", texture)
+	if texture == HERO_SLASH_UP_FOLLOWTHROUGH:
+		return _weapon_pose_texture(&"hero_attack_up_follow", texture)
+	if texture == HERO_SLASH_DOWN_WINDUP:
+		return _weapon_pose_texture(&"hero_attack_down_windup", texture)
+	if texture == HERO_SLASH_DOWN:
+		return _weapon_pose_texture(&"hero_attack_down_strike", texture)
+	if texture == HERO_SLASH_DOWN_FOLLOWTHROUGH:
+		return _weapon_pose_texture(&"hero_attack_down_follow", texture)
+	if texture == HERO_JUMP_TAKEOFF:
+		return _weapon_pose_texture(&"hero_jump_takeoff", texture)
+	if texture == HERO_JUMP_RISE:
+		return _weapon_pose_texture(&"hero_jump_rise", texture)
+	if texture == HERO_JUMP_APEX or texture == HERO_JUMP_TUCK:
+		return _weapon_pose_texture(&"hero_jump_apex", texture)
+	if texture == HERO_JUMP_FALL:
+		return _weapon_pose_texture(&"hero_jump_fall", texture)
+	if texture == HERO_LAND:
+		return _weapon_pose_texture(&"hero_land", texture)
+	return texture
+
+
 func _run_texture(frame_index: int = -1) -> Texture2D:
 	var resolved_index := int(floor(_run_cycle)) if frame_index < 0 else frame_index
-	match posmod(resolved_index, 12):
+	var normalized_index := posmod(resolved_index, 12)
+	var fallback: Texture2D
+	match normalized_index:
 		0:
-			return HERO_RUN_0
+			fallback = HERO_RUN_0
 		1:
-			return HERO_RUN_1
+			fallback = HERO_RUN_1
 		2:
-			return HERO_RUN_2
+			fallback = HERO_RUN_2
 		3:
-			return HERO_RUN_3
+			fallback = HERO_RUN_3
 		4:
-			return HERO_RUN_4
+			fallback = HERO_RUN_4
 		5:
-			return HERO_RUN_5
+			fallback = HERO_RUN_5
 		6:
-			return HERO_RUN_6
+			fallback = HERO_RUN_6
 		7:
-			return HERO_RUN_7
+			fallback = HERO_RUN_7
 		8:
-			return HERO_RUN_8
+			fallback = HERO_RUN_8
 		9:
-			return HERO_RUN_9
+			fallback = HERO_RUN_9
 		10:
-			return HERO_RUN_10
+			fallback = HERO_RUN_10
 		_:
-			return HERO_RUN_11
+			fallback = HERO_RUN_11
+	return _weapon_pose_texture(StringName("hero_run_%d" % normalized_index), fallback)
 
 
 func _animate_idle() -> void:
-	_set_texture(HERO_IDLE)
+	_set_texture(_weapon_pose_texture(&"hero_idle", HERO_IDLE))
 	var breath: float = sin(_visual_time * 2.2)
 	hero_sprite.position.y += breath * 0.45
 	hero_sprite.scale = Vector2(
@@ -1538,7 +1604,7 @@ func _animate_run() -> void:
 			0.0,
 			1.0
 		)
-		_set_texture(HERO_IDLE)
+		_set_texture(_weapon_pose_texture(&"hero_idle", HERO_IDLE))
 		hero_sprite.position.x += _facing * lerpf(0.0, 1.2, start_weight)
 		hero_sprite.rotation = -_facing * lerpf(0.0, 0.028, start_weight)
 		hero_sprite.scale = Vector2(HERO_SCALE, HERO_SCALE)
@@ -1557,7 +1623,7 @@ func _animate_turn() -> void:
 		1.0
 	)
 	var braking_weight: float = sin(turn_progress * PI)
-	_set_texture(HERO_RUN_6 if turn_progress >= 0.5 else HERO_RUN_0)
+	_set_texture(_run_texture(6 if turn_progress >= 0.5 else 0))
 	hero_sprite.position += Vector2(
 		-_turn_from_facing * braking_weight * 1.4,
 		braking_weight * 0.35
@@ -1571,22 +1637,22 @@ func _animate_turn() -> void:
 
 func _animate_jump_rise() -> void:
 	if _airborne_time < 0.085:
-		_set_texture(HERO_JUMP_TAKEOFF)
+		_set_texture(_weapon_pose_texture(&"hero_jump_takeoff", HERO_JUMP_TAKEOFF))
 	elif velocity.y < -280.0:
-		_set_texture(HERO_JUMP_RISE)
+		_set_texture(_weapon_pose_texture(&"hero_jump_rise", HERO_JUMP_RISE))
 	else:
-		_set_texture(HERO_JUMP_APEX)
+		_set_texture(_weapon_pose_texture(&"hero_jump_apex", HERO_JUMP_APEX))
 	_apply_air_pose()
 
 
 func _animate_jump_fall() -> void:
 	# Stepping off a ledge starts extending immediately; it is not a jump apex.
 	if velocity.y < 120.0 and _airborne_time >= 0.12:
-		_set_texture(HERO_JUMP_APEX)
+		_set_texture(_weapon_pose_texture(&"hero_jump_apex", HERO_JUMP_APEX))
 	elif velocity.y < 300.0:
-		_set_texture(HERO_JUMP_TUCK)
+		_set_texture(_weapon_pose_texture(&"hero_jump_apex", HERO_JUMP_TUCK))
 	else:
-		_set_texture(HERO_JUMP_FALL)
+		_set_texture(_weapon_pose_texture(&"hero_jump_fall", HERO_JUMP_FALL))
 	_apply_air_pose()
 
 
@@ -1612,7 +1678,7 @@ func _animate_land() -> void:
 	landing_progress = clampf(landing_progress, 0.0, 1.0)
 	if landing_progress < 0.58:
 		var crouch_recovery: float = smoothstep(0.0, 1.0, landing_progress / 0.58)
-		_set_texture(HERO_LAND)
+		_set_texture(_weapon_pose_texture(&"hero_land", HERO_LAND))
 		hero_sprite.position.y += lerpf(1.2, 0.2, crouch_recovery)
 	else:
 		var stand_up: float = smoothstep(0.0, 1.0, (landing_progress - 0.58) / 0.42)
@@ -1628,11 +1694,11 @@ func _animate_dash() -> void:
 		1.0
 	)
 	if dash_progress < 0.24:
-		_set_texture(HERO_RUN_5)
+		_set_texture(_run_texture(5))
 	elif dash_progress < 0.74:
-		_set_texture(HERO_RUN_6)
+		_set_texture(_run_texture(6))
 	else:
-		_set_texture(HERO_RUN_4)
+		_set_texture(_run_texture(4))
 	var dash_punch: float = sin(dash_progress * PI)
 	hero_sprite.position += Vector2(_facing * (4.0 + dash_punch * 3.0), 1.0)
 	hero_sprite.rotation = -_facing * lerpf(0.018, 0.034, dash_punch)
@@ -1645,11 +1711,11 @@ func _animate_dash() -> void:
 func _animate_dash_recovery() -> void:
 	# Rejoin locomotion on a planted pose instead of displaying a single frozen
 	# travel frame between the dash and the next run cycle.
-	_set_texture(HERO_RUN_0)
+	_set_texture(_run_texture(0))
 
 
 func _animate_hurt() -> void:
-	_set_texture(HERO_IDLE)
+	_set_texture(_weapon_pose_texture(&"hero_idle", HERO_IDLE))
 	var hurt_progress: float = clampf(1.0 - _hurt_remaining / 0.18, 0.0, 1.0)
 	var recoil_weight: float = 1.0 - smoothstep(0.0, 1.0, hurt_progress)
 	hero_sprite.position += Vector2(-_facing * 4.0 * recoil_weight, recoil_weight)
@@ -1661,7 +1727,7 @@ func _animate_hurt() -> void:
 
 
 func _animate_dead() -> void:
-	_set_texture(HERO_IDLE)
+	_set_texture(_weapon_pose_texture(&"hero_idle", HERO_IDLE))
 	var death_progress: float = 1.0 - _death_remaining / DEATH_DURATION
 	death_progress = clampf(death_progress, 0.0, 1.0)
 	hero_sprite.position += Vector2(-_facing * 4.0, lerpf(1.0, 7.0, death_progress))
@@ -1674,6 +1740,13 @@ func _animate_dead() -> void:
 
 func _animate_attack() -> void:
 	var attack_progress: float = 1.0 - _attack_remaining / maxf(attack_duration, 0.001)
+	match _weapon_id:
+		WeaponCatalog.TWIN_BLADES:
+			_animate_twin_blades_attack(attack_progress)
+			return
+		WeaponCatalog.GREATSWORD:
+			_animate_greatsword_attack(attack_progress)
+			return
 	match _attack_type:
 		AttackType.UPWARD:
 			_animate_up_attack(attack_progress)
@@ -1719,6 +1792,102 @@ func _animate_attack() -> void:
 			HERO_SCALE * lerpf(1.025, 1.0, recovery_time),
 			HERO_SCALE * lerpf(0.98, 1.0, recovery_time)
 		)
+
+
+func _attack_pose_name(phase: String) -> StringName:
+	var direction_name := "forward"
+	if _attack_type == AttackType.UPWARD:
+		direction_name = "up"
+	elif _attack_type == AttackType.DOWNWARD:
+		direction_name = "down"
+	return StringName("hero_attack_%s_%s" % [direction_name, phase])
+
+
+func _keep_attack_entry_pose() -> void:
+	# Keep the exact locomotion pose for the first display frames.  Swapping
+	# straight from a tucked jump or a planted run pose to a deep attack pose is
+	# perceived as a broken model even when both textures are individually valid.
+	if _current_texture == null:
+		_set_texture(_weapon_pose_texture(&"hero_idle", HERO_IDLE))
+
+
+func _animate_twin_blades_attack(attack_progress: float) -> void:
+	# Fast draw-cut cadence: a short readable draw, two crisp cutting poses and
+	# an early re-sheath.  It deliberately does not reuse the longsword timing.
+	if attack_progress < 0.08:
+		var entry := smoothstep(0.0, 1.0, attack_progress / 0.08)
+		_keep_attack_entry_pose()
+		hero_sprite.position += Vector2(-_facing * 0.8 * entry, 0.2 * entry)
+		return
+	if attack_progress < 0.24:
+		var draw := smoothstep(0.0, 1.0, (attack_progress - 0.08) / 0.16)
+		_set_texture(_weapon_pose_texture(_attack_pose_name("windup"), HERO_WINDUP))
+		hero_sprite.position += Vector2(-_facing * lerpf(0.8, 2.6, draw), lerpf(0.2, 1.0, draw))
+		hero_sprite.rotation = -_facing * lerpf(0.01, 0.042, draw)
+		hero_sprite.scale = Vector2(HERO_SCALE * lerpf(1.0, 0.985, draw), HERO_SCALE * lerpf(1.0, 1.02, draw))
+		return
+	if attack_progress < 0.50:
+		var cut := smoothstep(0.0, 1.0, (attack_progress - 0.24) / 0.26)
+		var cut_punch := sin(cut * PI)
+		_set_texture(_weapon_pose_texture(_attack_pose_name("strike"), HERO_SLASH))
+		var cut_y := 0.0
+		if _attack_type == AttackType.UPWARD:
+			cut_y = -5.0 * cut
+		elif _attack_type == AttackType.DOWNWARD:
+			cut_y = 4.0 * cut
+		hero_sprite.position += Vector2(_facing * lerpf(-1.5, 6.5, cut), cut_y)
+		hero_sprite.rotation = _facing * lerpf(-0.035, 0.052, cut)
+		hero_sprite.scale = Vector2(HERO_SCALE * (1.0 + cut_punch * 0.055), HERO_SCALE * (1.0 - cut_punch * 0.04))
+		return
+	if attack_progress < 0.76:
+		var follow := smoothstep(0.0, 1.0, (attack_progress - 0.50) / 0.26)
+		_set_texture(_weapon_pose_texture(_attack_pose_name("follow"), HERO_SLASH_FOLLOWTHROUGH))
+		var follow_y := -2.0 if _attack_type == AttackType.UPWARD else (2.5 if _attack_type == AttackType.DOWNWARD else 0.8)
+		hero_sprite.position += Vector2(_facing * lerpf(6.5, 3.0, follow), lerpf(follow_y, 0.5, follow))
+		hero_sprite.rotation = _facing * lerpf(0.052, 0.012, follow)
+		return
+	var sheath := smoothstep(0.0, 1.0, (attack_progress - 0.76) / 0.24)
+	_set_texture(_weapon_pose_texture(&"hero_attack_recovery", HERO_RECOVERY))
+	hero_sprite.position += Vector2(_facing * lerpf(3.0, 0.0, sheath), lerpf(0.5, 0.0, sheath))
+	hero_sprite.rotation = _facing * lerpf(0.012, 0.0, sheath)
+
+
+func _animate_greatsword_attack(attack_progress: float) -> void:
+	# Weight comes from anticipation, whole-body drive and a brief impact hold;
+	# the animation length remains the weapon's configured 0.52 seconds.
+	if attack_progress < 0.08:
+		var entry := smoothstep(0.0, 1.0, attack_progress / 0.08)
+		_keep_attack_entry_pose()
+		hero_sprite.position += Vector2(-_facing * 1.0 * entry, 0.4 * entry)
+		return
+	if attack_progress < 0.36:
+		var brace := smoothstep(0.0, 1.0, (attack_progress - 0.08) / 0.28)
+		_set_texture(_weapon_pose_texture(_attack_pose_name("windup"), HERO_WINDUP))
+		hero_sprite.position += Vector2(-_facing * lerpf(1.0, 4.2, brace), lerpf(0.4, 2.2, brace))
+		hero_sprite.rotation = -_facing * lerpf(0.012, 0.065, brace)
+		hero_sprite.scale = Vector2(HERO_SCALE * lerpf(1.0, 0.965, brace), HERO_SCALE * lerpf(1.0, 1.045, brace))
+		return
+	if attack_progress < 0.61:
+		var hew := smoothstep(0.0, 1.0, (attack_progress - 0.36) / 0.25)
+		var impact := sin(hew * PI)
+		_set_texture(_weapon_pose_texture(_attack_pose_name("strike"), HERO_SLASH))
+		var hew_y := -6.0 * hew if _attack_type == AttackType.UPWARD else (6.5 * hew if _attack_type == AttackType.DOWNWARD else 1.5)
+		hero_sprite.position += Vector2(_facing * lerpf(-4.0, 7.0, hew), hew_y)
+		hero_sprite.rotation = _facing * lerpf(-0.065, 0.065, hew)
+		hero_sprite.scale = Vector2(HERO_SCALE * (0.97 + impact * 0.11), HERO_SCALE * (1.04 - impact * 0.085))
+		return
+	if attack_progress < 0.83:
+		var drag := smoothstep(0.0, 1.0, (attack_progress - 0.61) / 0.22)
+		_set_texture(_weapon_pose_texture(_attack_pose_name("follow"), HERO_SLASH_FOLLOWTHROUGH))
+		var drag_y := -3.0 if _attack_type == AttackType.UPWARD else (3.5 if _attack_type == AttackType.DOWNWARD else 1.8)
+		hero_sprite.position += Vector2(_facing * lerpf(7.0, 3.5, drag), lerpf(drag_y, 1.0, drag))
+		hero_sprite.rotation = _facing * lerpf(0.065, 0.018, drag)
+		return
+	var recover := smoothstep(0.0, 1.0, (attack_progress - 0.83) / 0.17)
+	_set_texture(_weapon_pose_texture(&"hero_attack_recovery", HERO_RECOVERY))
+	hero_sprite.position += Vector2(_facing * lerpf(3.5, 0.0, recover), lerpf(1.0, 0.0, recover))
+	hero_sprite.rotation = _facing * lerpf(0.018, 0.0, recover)
+	hero_sprite.scale = Vector2(HERO_SCALE * lerpf(1.015, 1.0, recover), HERO_SCALE * lerpf(0.99, 1.0, recover))
 
 
 func _animate_attack_recovery() -> void:
@@ -1913,7 +2082,7 @@ func _animate_twin_blades_skill(skill_progress: float) -> void:
 			(skill_progress - 0.10) / 0.20
 		)
 		var first_impact: float = sin(first_cut * PI)
-		_set_texture(HERO_SLASH)
+		_set_texture(_weapon_pose_texture(&"hero_skill_a", HERO_SLASH))
 		hero_sprite.position += Vector2(
 			_facing * lerpf(-2.5, 5.0, first_cut),
 			lerpf(1.0, -1.0, first_cut)
@@ -1942,7 +2111,7 @@ func _animate_twin_blades_skill(skill_progress: float) -> void:
 			(skill_progress - 0.42) / 0.18
 		)
 		var second_impact: float = sin(second_cut * PI)
-		_set_texture(HERO_SLASH_UP)
+		_set_texture(_weapon_pose_texture(&"hero_skill_b", HERO_SLASH_UP))
 		hero_sprite.position += Vector2(
 			_facing * lerpf(-1.0, 6.0, second_cut),
 			lerpf(2.0, -3.5, second_cut)
@@ -1971,7 +2140,7 @@ func _animate_twin_blades_skill(skill_progress: float) -> void:
 			(skill_progress - 0.72) / 0.14
 		)
 		var third_impact: float = sin(third_cut * PI)
-		_set_texture(HERO_SLASH_DOWN)
+		_set_texture(_weapon_pose_texture(&"hero_skill_a", HERO_SLASH_DOWN))
 		hero_sprite.position += Vector2(
 			_facing * lerpf(-1.0, 7.0, third_cut),
 			lerpf(-2.0, 3.5, third_cut)
@@ -2039,7 +2208,7 @@ func _animate_greatsword_skill(skill_progress: float) -> void:
 			1.0,
 			(skill_progress - 0.44) / 0.16
 		)
-		_set_texture(HERO_SLASH_DOWN_WINDUP)
+		_set_texture(_weapon_pose_texture(&"hero_skill_a", HERO_SLASH_DOWN_WINDUP))
 		hero_sprite.position += Vector2(
 			_facing * lerpf(-1.0, -2.0, overhead_hold),
 			lerpf(-4.0, -3.0, overhead_hold)
@@ -2056,7 +2225,7 @@ func _animate_greatsword_skill(skill_progress: float) -> void:
 			(skill_progress - 0.60) / 0.14
 		)
 		var heavy_impact: float = sin(ground_cut * PI)
-		_set_texture(HERO_SLASH_DOWN)
+		_set_texture(_weapon_pose_texture(&"hero_skill_b", HERO_SLASH_DOWN))
 		hero_sprite.position += Vector2(
 			_facing * lerpf(-2.0, 6.0, ground_cut),
 			lerpf(-3.0, 5.0, ground_cut)
@@ -2154,6 +2323,23 @@ func _update_skill_pose_echo(delta: float) -> void:
 
 
 func _update_skill_effect() -> void:
+	var attack_active: bool = _attack_remaining > 0.0 and not _is_dead
+	var attack_progress: float = 0.0
+	if attack_active:
+		attack_progress = clampf(
+			1.0 - _attack_remaining / maxf(attack_duration, 0.001),
+			0.0,
+			1.0
+		)
+	weapon_skill_effect.set_attack_state(
+		attack_active,
+		attack_progress,
+		_facing,
+		_weapon_id,
+		_weapon_reach,
+		_weapon_accent,
+		_attack_type
+	)
 	var active: bool = _skill_remaining > 0.0 and not _is_dead
 	var progress: float = 0.0
 	if active:
