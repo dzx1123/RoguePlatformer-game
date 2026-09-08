@@ -111,6 +111,34 @@ func _run_test() -> void:
 	if player.get_attack_type() != RoguePlayer.AttackType.DOWNWARD:
 		_fail("Left-stick down plus X did not produce a down slash")
 		return
+	enemy.position = Vector2(200.0, 330.0)
+	if enemy.is_hit_by_attack(
+		Vector2(100.0, 300.0),
+		1.0,
+		1.0,
+		RoguePlayer.AttackType.DOWNWARD
+	):
+		_fail("Default down slash should not hit a far side enemy")
+		return
+	if not enemy.is_hit_by_attack(
+		Vector2(100.0, 300.0),
+		1.0,
+		1.28,
+		RoguePlayer.AttackType.DOWNWARD,
+		WeaponCatalog.GREATSWORD
+	):
+		_fail("Greatsword down smash did not hit a nearby side enemy")
+		return
+	enemy.position = Vector2(-120.0, 330.0)
+	if enemy.is_hit_by_attack(
+		Vector2(100.0, 300.0),
+		1.0,
+		1.28,
+		RoguePlayer.AttackType.DOWNWARD,
+		WeaponCatalog.GREATSWORD
+	):
+		_fail("Greatsword down smash reached an enemy outside the shock area")
+		return
 	enemy.queue_free()
 	player.queue_free()
 	await process_frame

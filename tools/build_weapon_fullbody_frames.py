@@ -76,14 +76,38 @@ ATTACK_REFERENCES = (
     "hero_slash.png",
     "hero_slash_down.png",
 )
+TWIN_SKILL_OUTPUTS = tuple(f"hero_skill_{index}.png" for index in range(12))
+TWIN_SKILL_REFERENCES = (
+    "hero_idle.png",
+    "hero_windup.png",
+    "hero_windup.png",
+    "hero_slash.png",
+    "hero_slash_followthrough.png",
+    "hero_slash.png",
+    "hero_slash_up_windup.png",
+    "hero_slash_up.png",
+    "hero_slash_down_windup.png",
+    "hero_slash_down.png",
+    "hero_slash_down_followthrough.png",
+    "hero_recovery.png",
+)
 
 SPECS = (
-    SheetSpec("twin_blades", "hero_run_fullbody_sheet_v3.png", 4, 3, RUN_OUTPUTS, RUN_REFERENCES, 640, True),
-    SheetSpec("greatsword", "hero_run_fullbody_sheet_v3.png", 4, 3, RUN_OUTPUTS, RUN_REFERENCES, 768, True),
-    SheetSpec("twin_blades", "hero_air_fullbody_sheet_v3.png", 5, 1, AIR_OUTPUTS, AIR_REFERENCES, 640, True),
-    SheetSpec("greatsword", "hero_air_fullbody_sheet_v3.png", 5, 1, AIR_OUTPUTS, AIR_REFERENCES, 768, True),
+    SheetSpec("twin_blades", "hero_run_fullbody_sheet_v5.png", 4, 3, RUN_OUTPUTS, RUN_REFERENCES, 640, True),
+    SheetSpec("greatsword", "hero_run_fullbody_sheet_v5.png", 4, 3, RUN_OUTPUTS, RUN_REFERENCES, 768, True),
+    SheetSpec("twin_blades", "hero_air_fullbody_sheet_v4.png", 5, 1, AIR_OUTPUTS, AIR_REFERENCES, 640, True),
+    SheetSpec("greatsword", "hero_air_fullbody_sheet_v4.png", 5, 1, AIR_OUTPUTS, AIR_REFERENCES, 768, True),
     SheetSpec("twin_blades", "hero_attack_fullbody_sheet_v3.png", 4, 3, ATTACK_OUTPUTS, ATTACK_REFERENCES, 640),
     SheetSpec("greatsword", "hero_attack_fullbody_sheet_v3.png", 4, 3, ATTACK_OUTPUTS, ATTACK_REFERENCES, 768),
+    SheetSpec(
+        "twin_blades",
+        "hero_skill_fullbody_sheet_v2.png",
+        4,
+        3,
+        TWIN_SKILL_OUTPUTS,
+        TWIN_SKILL_REFERENCES,
+        640,
+    ),
 )
 
 
@@ -269,49 +293,110 @@ def hair_anchor_x(image: Image.Image) -> float:
 
 
 def character_scale_anchors(image: Image.Image) -> tuple[float, float, float] | None:
-    """Return hair center, hair height and body foot line, ignoring long weapons."""
+    """Return hair center, body height and foot line, ignoring carried weapons.
+
+    The old detector started from skin-colored pixels.  Gold trim and blade
+    reflections can satisfy that heuristic, so later run frames occasionally
+    anchored to the weapon instead of the head.  The hero's connected white
+    hair mass is a much stronger invariant across every weapon set.
+    """
     bounds = image.getchannel("A").getbbox()
     if bounds is None:
         return None
     left, top, right, bottom = bounds
     pixels = image.convert("RGBA").load()
-    skin: list[tuple[int, int]] = []
-    scan_bottom = top + round((bottom - top) * 0.72)
+
+    neutral_pixels: set[tuple[int, int]] = set()
+    scan_bottom = top + max(1, round((bottom - top) * 0.62))
     for y in range(top, scan_bottom):
         for x in range(left, right):
             red, green, blue, alpha = pixels[x, y]
-            if alpha and red >= 145 and red >= green + 22 and 45 <= green <= 190 and blue <= 165:
-                skin.append((x, y))
-    if not skin:
+            if (
+                alpha
+                and min(red, green, blue) >= 105
+                and max(red, green, blue) - min(red, green, blue) <= 72
+            ):
+                neutral_pixels.add((x, y))
+    if not neutral_pixels:
         return None
-    skin.sort(key=lambda point: point[1])
-    upper_skin = skin[:max(1, len(skin) // 2)]
-    face_x = sorted(point[0] for point in upper_skin)[len(upper_skin) // 2]
-    face_y = sorted(point[1] for point in upper_skin)[len(upper_skin) // 2]
 
-    hair: list[tuple[int, int]] = []
-    for y in range(max(top, face_y - 105), min(bottom, face_y + 12)):
-        for x in range(max(left, face_x - 95), min(right, face_x + 82)):
-            red, green, blue, alpha = pixels[x, y]
-            if alpha and min(red, green, blue) >= 120 and max(red, green, blue) - min(red, green, blue) <= 58:
-                hair.append((x, y))
-    if len(hair) < 24:
+    neutral_components: list[list[tuple[int, int]]] = []
+    while neutral_pixels:
+        start = neutral_pixels.pop()
+        component = [start]
+        queue = deque([start])
+        while queue:
+            x, y = queue.popleft()
+            for neighbor_x in range(x - 1, x + 2):
+                for neighbor_y in range(y - 1, y + 2):
+                    neighbor = (neighbor_x, neighbor_y)
+                    if neighbor in neutral_pixels:
+                        neutral_pixels.remove(neighbor)
+                        component.append(neighbor)
+                        queue.append(neighbor)
+        if len(component) >= 24:
+            neutral_components.append(component)
+    if not neutral_components:
         return None
+
+    hair = max(neutral_components, key=len)
     hair_left = min(point[0] for point in hair)
     hair_right = max(point[0] for point in hair) + 1
     hair_top = min(point[1] for point in hair)
-    hair_bottom = max(point[1] for point in hair) + 1
     hair_center = (hair_left + hair_right) * 0.5
 
-    body_left = max(left, round(hair_center - 68))
-    body_right = min(right, round(hair_center + 104))
-    foot_y = max(
-        y
-        for y in range(top, bottom)
-        for x in range(body_left, body_right)
-        if pixels[x, y][3]
-    ) + 1
-    return hair_center, float(hair_bottom - hair_top), float(foot_y)
+    hair_width = float(hair_right - hair_left)
+    warm_pixels: set[tuple[int, int]] = set()
+    for y in range(top, bottom):
+        for x in range(left, right):
+            red, green, blue, alpha = pixels[x, y]
+            if (
+                alpha
+                and red >= 38
+                and 18 <= green <= 170
+                and blue <= 130
+                and red >= blue + 12
+                and red * 100 >= green * 92
+            ):
+                warm_pixels.add((x, y))
+
+    foot_components: list[list[tuple[int, int]]] = []
+    while warm_pixels:
+        start = warm_pixels.pop()
+        component = [start]
+        queue = deque([start])
+        while queue:
+            x, y = queue.popleft()
+            for neighbor_x in range(x - 1, x + 2):
+                for neighbor_y in range(y - 1, y + 2):
+                    neighbor = (neighbor_x, neighbor_y)
+                    if neighbor in warm_pixels:
+                        warm_pixels.remove(neighbor)
+                        component.append(neighbor)
+                        queue.append(neighbor)
+        if len(component) >= 8:
+            component_left = min(point[0] for point in component)
+            component_right = max(point[0] for point in component) + 1
+            component_center = sum(point[0] for point in component) / len(component)
+            if (
+                component_right - component_left <= max(12.0, hair_width * 0.80)
+                and hair_center - hair_width * 1.35 <= component_center
+                and component_center <= hair_center + hair_width * 0.95
+            ):
+                foot_components.append(component)
+
+    if foot_components:
+        foot_y = max(max(point[1] for point in component) for component in foot_components) + 1
+    else:
+        body_left = max(left, round(hair_center - hair_width * 1.20))
+        body_right = min(right, round(hair_center + hair_width * 0.95))
+        foot_y = max(
+            y
+            for y in range(top, bottom)
+            for x in range(body_left, body_right)
+            if pixels[x, y][3]
+        ) + 1
+    return hair_center, float(foot_y - hair_top), float(foot_y)
 
 
 def normalize_complete_pose(
@@ -394,6 +479,27 @@ def validate_frame(path: Path, image: Image.Image) -> None:
         raise RuntimeError(f"Possible pale fringe: {path} count={fringe}")
 
 
+def validate_locomotion_alignment(
+    path: Path,
+    image: Image.Image,
+    reference: Image.Image,
+) -> None:
+    image_anchors = character_scale_anchors(image)
+    reference_anchors = character_scale_anchors(reference)
+    if image_anchors is None or reference_anchors is None:
+        raise RuntimeError(f"Missing locomotion anchors: {path}")
+    expected_hair_x = reference_anchors[0] + (image.width - reference.width) * 0.5
+    hair_drift = abs(image_anchors[0] - expected_hair_x)
+    foot_drift = abs(image_anchors[2] - reference_anchors[2])
+    body_height_drift = abs(image_anchors[1] - reference_anchors[1])
+    if hair_drift > 1.5 or foot_drift > 2.0 or body_height_drift > 22.0:
+        raise RuntimeError(
+            f"Locomotion anchor drift: {path} "
+            f"hair={hair_drift:.1f}px foot={foot_drift:.1f}px "
+            f"height={body_height_drift:.1f}px"
+        )
+
+
 def build_sheet(spec: SheetSpec) -> None:
     source_path = WEAPON_ROOT / spec.weapon_dir / "source" / spec.source_name
     sheet = Image.open(source_path).convert("RGBA")
@@ -416,6 +522,8 @@ def build_sheet(spec: SheetSpec) -> None:
         )
         output_path = output_dir / output_name
         validate_frame(output_path, frame)
+        if spec.match_character_scale:
+            validate_locomotion_alignment(output_path, frame, reference)
         frame.save(output_path, optimize=True)
         print(f"wrote {output_path.relative_to(PROJECT_ROOT)} bounds={frame.getchannel('A').getbbox()}")
 

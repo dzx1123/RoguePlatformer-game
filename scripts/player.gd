@@ -98,6 +98,48 @@ const DROP_THROUGH_DURATION := 0.20
 const HITSTOP_ATTACK := 0.050
 const HITSTOP_SKILL := 0.072
 const HITSTOP_BOSS_BONUS := 0.028
+const TWIN_SKILL_FRAME_ENDS := [
+	0.055,
+	0.10,
+	0.145,
+	0.235,
+	0.34,
+	0.54,
+	0.63,
+	0.71,
+	0.755,
+	0.835,
+	0.93,
+	1.0,
+]
+const TWIN_SKILL_POSE_OFFSETS := [
+	Vector2(0.0, 0.0),
+	Vector2(-0.8, 0.2),
+	Vector2(-2.5, 1.0),
+	Vector2(-1.0, 0.6),
+	Vector2(5.0, -0.5),
+	Vector2(-1.5, 1.0),
+	Vector2(5.5, -3.0),
+	Vector2(2.0, -4.0),
+	Vector2(-1.0, -3.0),
+	Vector2(-2.0, -1.5),
+	Vector2(6.5, 3.5),
+	Vector2(2.0, 1.0),
+]
+const TWIN_SKILL_POSE_ROTATIONS := [
+	0.0,
+	-0.01,
+	-0.035,
+	-0.025,
+	0.045,
+	-0.03,
+	0.025,
+	0.052,
+	0.025,
+	-0.065,
+	-0.018,
+	0.0,
+]
 
 @export_category("Movement")
 @export var run_speed := 380.0
@@ -2067,113 +2109,70 @@ func _animate_moon_wheel_skill(skill_progress: float) -> void:
 
 
 func _animate_twin_blades_skill(skill_progress: float) -> void:
-	if skill_progress < 0.10:
-		var anticipation: float = smoothstep(0.0, 1.0, skill_progress / 0.10)
-		_set_texture(HERO_WINDUP)
-		hero_sprite.position += Vector2(
-			-_facing * 2.5 * anticipation,
-			1.0 * anticipation
-		)
-		hero_sprite.rotation = -_facing * 0.035 * anticipation
-	elif skill_progress < 0.30:
-		var first_cut: float = smoothstep(
-			0.0,
-			1.0,
-			(skill_progress - 0.10) / 0.20
-		)
-		var first_impact: float = sin(first_cut * PI)
-		_set_texture(_weapon_pose_texture(&"hero_skill_a", HERO_SLASH))
-		hero_sprite.position += Vector2(
-			_facing * lerpf(-2.5, 5.0, first_cut),
-			lerpf(1.0, -1.0, first_cut)
-		)
-		hero_sprite.rotation = _facing * lerpf(-0.035, 0.045, first_cut)
-		hero_sprite.scale = Vector2(
-			HERO_SCALE * (1.0 + first_impact * 0.055),
-			HERO_SCALE * (1.0 - first_impact * 0.045)
-		)
-	elif skill_progress < 0.42:
-		var first_follow: float = smoothstep(
-			0.0,
-			1.0,
-			(skill_progress - 0.30) / 0.12
-		)
-		_set_texture(HERO_SLASH_FOLLOWTHROUGH)
-		hero_sprite.position += Vector2(
-			_facing * lerpf(5.0, 2.0, first_follow),
-			lerpf(-1.0, 1.0, first_follow)
-		)
-		hero_sprite.rotation = _facing * lerpf(0.045, -0.018, first_follow)
-	elif skill_progress < 0.60:
-		var second_cut: float = smoothstep(
-			0.0,
-			1.0,
-			(skill_progress - 0.42) / 0.18
-		)
-		var second_impact: float = sin(second_cut * PI)
-		_set_texture(_weapon_pose_texture(&"hero_skill_b", HERO_SLASH_UP))
-		hero_sprite.position += Vector2(
-			_facing * lerpf(-1.0, 6.0, second_cut),
-			lerpf(2.0, -3.5, second_cut)
-		)
-		hero_sprite.rotation = _facing * lerpf(-0.03, 0.052, second_cut)
-		hero_sprite.scale = Vector2(
-			HERO_SCALE * (1.0 + second_impact * 0.06),
-			HERO_SCALE * (1.0 - second_impact * 0.05)
-		)
-	elif skill_progress < 0.72:
-		var second_follow: float = smoothstep(
-			0.0,
-			1.0,
-			(skill_progress - 0.60) / 0.12
-		)
-		_set_texture(HERO_SLASH_UP_FOLLOWTHROUGH)
-		hero_sprite.position += Vector2(
-			_facing * lerpf(6.0, 2.0, second_follow),
-			lerpf(-3.5, -1.0, second_follow)
-		)
-		hero_sprite.rotation = _facing * lerpf(0.052, 0.012, second_follow)
-	elif skill_progress < 0.86:
-		var third_cut: float = smoothstep(
-			0.0,
-			1.0,
-			(skill_progress - 0.72) / 0.14
-		)
-		var third_impact: float = sin(third_cut * PI)
-		_set_texture(_weapon_pose_texture(&"hero_skill_a", HERO_SLASH_DOWN))
-		hero_sprite.position += Vector2(
-			_facing * lerpf(-1.0, 7.0, third_cut),
-			lerpf(-2.0, 3.5, third_cut)
-		)
-		hero_sprite.rotation = _facing * lerpf(0.03, -0.065, third_cut)
-		hero_sprite.scale = Vector2(
-			HERO_SCALE * (1.0 + third_impact * 0.07),
-			HERO_SCALE * (1.0 - third_impact * 0.055)
-		)
-	elif skill_progress < 0.94:
-		var final_follow: float = smoothstep(
-			0.0,
-			1.0,
-			(skill_progress - 0.86) / 0.08
-		)
-		_set_texture(HERO_SLASH_DOWN_FOLLOWTHROUGH)
-		hero_sprite.position += Vector2(
-			_facing * lerpf(7.0, 3.0, final_follow),
-			lerpf(3.5, 2.0, final_follow)
-		)
-		hero_sprite.rotation = _facing * lerpf(-0.065, -0.018, final_follow)
-	else:
-		var recovery: float = smoothstep(
-			0.0,
-			1.0,
-			(skill_progress - 0.94) / 0.06
-		)
-		_set_texture(HERO_RECOVERY)
-		hero_sprite.position += Vector2(
-			_facing * lerpf(3.0, 0.0, recovery),
-			lerpf(2.0, 0.0, recovery)
-		)
-		hero_sprite.rotation = _facing * lerpf(-0.018, 0.0, recovery)
+	# Twelve complete-character poses make the draw, three cuts and re-sheath
+	# readable without borrowing any longsword silhouette.  Phase boundaries are
+	# placed around the existing 0.18 / 0.48 / 0.78 hit timings, so this remains
+	# a visual-only upgrade and does not change combat behaviour.
+	var frame_index := 0
+	while frame_index < TWIN_SKILL_FRAME_ENDS.size() - 1 and skill_progress >= float(TWIN_SKILL_FRAME_ENDS[frame_index]):
+		frame_index += 1
+	var phase_start := 0.0 if frame_index == 0 else float(TWIN_SKILL_FRAME_ENDS[frame_index - 1])
+	var phase_end := float(TWIN_SKILL_FRAME_ENDS[frame_index])
+	var phase_progress := smoothstep(
+		0.0,
+		1.0,
+		(skill_progress - phase_start) / maxf(phase_end - phase_start, 0.001)
+	)
+	_set_texture(_weapon_pose_texture(
+		StringName("hero_skill_%d" % frame_index),
+		_twin_skill_fallback(frame_index)
+	))
+
+	var pose_offset: Vector2 = TWIN_SKILL_POSE_OFFSETS[frame_index]
+	var pose_rotation: float = float(TWIN_SKILL_POSE_ROTATIONS[frame_index])
+	var next_offset := Vector2.ZERO
+	var next_rotation := 0.0
+	if frame_index < TWIN_SKILL_POSE_OFFSETS.size() - 1:
+		next_offset = TWIN_SKILL_POSE_OFFSETS[frame_index + 1]
+		next_rotation = float(TWIN_SKILL_POSE_ROTATIONS[frame_index + 1])
+	var blended_offset := pose_offset.lerp(next_offset, phase_progress)
+	hero_sprite.position += Vector2(_facing * blended_offset.x, blended_offset.y)
+	hero_sprite.rotation = _facing * lerpf(pose_rotation, next_rotation, phase_progress)
+
+	var impact_pulse := 0.0
+	if frame_index in [3, 5, 9]:
+		impact_pulse = sin(phase_progress * PI)
+	var anticipation_pulse := 0.0
+	if frame_index in [1, 2, 8]:
+		anticipation_pulse = sin(phase_progress * PI)
+	hero_sprite.scale = Vector2(
+		HERO_SCALE * (1.0 + impact_pulse * 0.06 - anticipation_pulse * 0.018),
+		HERO_SCALE * (1.0 - impact_pulse * 0.045 + anticipation_pulse * 0.025)
+	)
+
+
+func _twin_skill_fallback(frame_index: int) -> Texture2D:
+	match frame_index:
+		0, 11:
+			return HERO_RECOVERY
+		1, 2:
+			return HERO_WINDUP
+		3, 5:
+			return HERO_SLASH
+		4:
+			return HERO_SLASH_FOLLOWTHROUGH
+		6:
+			return HERO_SLASH_UP_WINDUP
+		7:
+			return HERO_SLASH_UP
+		8:
+			return HERO_SLASH_DOWN_WINDUP
+		9:
+			return HERO_SLASH_DOWN
+		10:
+			return HERO_SLASH_DOWN_FOLLOWTHROUGH
+		_:
+			return HERO_IDLE
 
 
 func _animate_greatsword_skill(skill_progress: float) -> void:

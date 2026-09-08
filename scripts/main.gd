@@ -43,6 +43,7 @@ const ENEMY_RANK_ELITE := 1
 const ENEMY_RANK_BOSS := 2
 const ENEMY_FAMILY_SLIME := 0
 const ENEMY_FAMILY_GOBLIN := 1
+const ENEMY_FAMILY_NIGHT_BAT := 2
 const ENEMY_ARCHETYPE_STANDARD := 0
 const ENEMY_ARCHETYPE_SHIELD_GUARD := 1
 const ENEMY_ARCHETYPE_FLYER := 2
@@ -374,6 +375,8 @@ func _on_enemy_sound_requested(cue: StringName, is_boss: bool) -> void:
 		return
 	match cue:
 		&"goblin_attack":
+			_soundscape.play_enemy_attack_voice(false, is_boss)
+		&"night_bat_attack":
 			_soundscape.play_enemy_attack_voice(false, is_boss)
 		&"slime_attack":
 			_soundscape.play_enemy_attack_voice(true, is_boss)
@@ -3013,7 +3016,11 @@ func _spawn_room_enemies() -> void:
 			rank,
 			family
 		)
-		var vertical_offset: float = 28.0 if rank == ENEMY_RANK_ELITE else 22.0
+		var vertical_offset: float = (
+			172.0
+			if family == ENEMY_FAMILY_NIGHT_BAT
+			else (28.0 if rank == ENEMY_RANK_ELITE else 22.0)
+		)
 		_spawn_enemy(
 			Vector2(lerpf(minimum_x, maximum_x, horizontal_ratio), surface.position.y - vertical_offset),
 			minimum_x,
@@ -3040,7 +3047,11 @@ func _spawn_enemy(
 	var variant: int = 1
 	if role != ENEMY_ROLE_RANGED:
 		variant = 0 if _rng.randi_range(0, 1) == 0 else 2
-	if family == ENEMY_FAMILY_GOBLIN:
+	if family == ENEMY_FAMILY_NIGHT_BAT:
+		enemy.name = (
+			"EliteNightBat_%02d" if rank == ENEMY_RANK_ELITE else "NightBat_%02d"
+		) % (_enemies.size() + 1)
+	elif family == ENEMY_FAMILY_GOBLIN:
 		if rank == ENEMY_RANK_BOSS:
 			enemy.name = "RedFangWarChief"
 		elif rank == ENEMY_RANK_ELITE:
@@ -3061,7 +3072,7 @@ func _spawn_enemy(
 			if role == ENEMY_ROLE_RANGED
 			else "MeleeRedCrystalSlime_%02d"
 		) % (_enemies.size() + 1)
-	if archetype != ENEMY_ARCHETYPE_STANDARD:
+	if archetype != ENEMY_ARCHETYPE_STANDARD and family != ENEMY_FAMILY_NIGHT_BAT:
 		enemy.name = "%s_%s" % [_get_enemy_archetype_node_prefix(archetype), enemy.name]
 	enemy.position = spawn_position
 	var combat_profile: Dictionary = _get_combat_profile()
@@ -3186,7 +3197,8 @@ func _on_player_attack_hit(origin: Vector2, facing: float) -> void:
 			facing,
 			damage_amount,
 			player.get_attack_reach(),
-			player.get_attack_type()
+			player.get_attack_type(),
+			player.get_weapon_id()
 		):
 			player.confirm_attack_connected()
 			_apply_hitstop(enemy, false)
@@ -3956,7 +3968,11 @@ func _spawn_risk_ambush() -> void:
 		var rank: int = ENEMY_RANK_ELITE if ambush_index < elite_slots else ENEMY_RANK_NORMAL
 		var family: int = _get_enemy_family_for_spawn(_current_room_index, ambush_index)
 		var ratio: float = 0.22 + float(posmod(ambush_index * 37, 57)) / 100.0
-		var vertical_offset: float = 28.0 if rank == ENEMY_RANK_ELITE else 22.0
+		var vertical_offset: float = (
+			172.0
+			if family == ENEMY_FAMILY_NIGHT_BAT
+			else (28.0 if rank == ENEMY_RANK_ELITE else 22.0)
+		)
 		_spawn_enemy(
 			Vector2(lerpf(minimum_x, maximum_x, ratio), surface.position.y - vertical_offset),
 			minimum_x,
@@ -4265,6 +4281,10 @@ func _get_primary_enemy_family_for_room(room_index: int) -> int:
 func _get_enemy_family_for_spawn(room_index: int, spawn_index: int) -> int:
 	if room_index < MIXED_CHAPTER_START:
 		return _get_primary_enemy_family_for_room(room_index)
+	# One slot in each five-enemy band becomes a night bat without replacing the
+	# chapter's guaranteed slime/goblin pairing.
+	if posmod(spawn_index, 5) == 2:
+		return ENEMY_FAMILY_NIGHT_BAT
 	return (
 		ENEMY_FAMILY_SLIME
 		if posmod(room_index + spawn_index, 2) == 0
@@ -4281,6 +4301,8 @@ func _get_enemy_archetype_for_spawn(
 ) -> int:
 	if rank != ENEMY_RANK_NORMAL or room_index < GOBLIN_CHAPTER_START:
 		return ENEMY_ARCHETYPE_STANDARD
+	if family == ENEMY_FAMILY_NIGHT_BAT:
+		return ENEMY_ARCHETYPE_FLYER
 	var pattern: int = posmod(room_index * 17 + spawn_index * 11 + role * 5 + family * 3, 9)
 	if (
 		room_index >= FINAL_CHAPTER_START

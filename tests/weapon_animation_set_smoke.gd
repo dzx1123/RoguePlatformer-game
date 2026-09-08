@@ -17,6 +17,20 @@ const POSE_NAMES := [
 	"hero_attack_down_windup", "hero_attack_down_strike", "hero_attack_down_follow",
 	"hero_skill_a", "hero_skill_b",
 ]
+const TWIN_SKILL_SAMPLES: Array[float] = [
+	0.02,
+	0.075,
+	0.12,
+	0.18,
+	0.28,
+	0.48,
+	0.585,
+	0.67,
+	0.73,
+	0.78,
+	0.88,
+	0.96,
+]
 
 var _failures: Array[String] = []
 
@@ -124,6 +138,51 @@ func _run_test() -> void:
 		if weapon_effect.is_attack_effect_active():
 			_failures.append("%s attack qi remained active after attack" % weapon_id)
 
+		if weapon_id == &"twin_blades":
+			var skill_duration: float = float(player.get("_skill_duration"))
+			var skill_paths: Dictionary = {}
+			for frame_index in range(TWIN_SKILL_SAMPLES.size()):
+				var progress: float = TWIN_SKILL_SAMPLES[frame_index]
+				player.set("_skill_remaining", skill_duration * (1.0 - progress))
+				player.call(&"_reset_sprite_pose")
+				player.call(&"_animate_skill")
+				var expected_path := "%s/hero_skill_%d.png" % [directory, frame_index]
+				_expect_path(hero_sprite, expected_path, "skill frame %d" % frame_index)
+				skill_paths[hero_sprite.texture.resource_path] = true
+			if skill_paths.size() != TWIN_SKILL_SAMPLES.size():
+				_failures.append(
+					"twin_blades skill resolved %d unique frames, expected %d"
+					% [skill_paths.size(), TWIN_SKILL_SAMPLES.size()]
+				)
+
+			player.set("_turn_remaining", 0.0)
+			player.set("_facing", 1.0)
+			player.set("_skill_remaining", skill_duration * (1.0 - 0.48))
+			player.call(&"_reset_sprite_pose")
+			player.call(&"_animate_skill")
+			var right_position := hero_sprite.position
+			var right_rotation := hero_sprite.rotation
+			var right_scale := hero_sprite.scale
+			var right_path := hero_sprite.texture.resource_path
+
+			player.set("_facing", -1.0)
+			player.call(&"_reset_sprite_pose")
+			player.call(&"_animate_skill")
+			if not hero_sprite.flip_h:
+				_failures.append("twin_blades mirrored skill frame did not flip horizontally")
+			if hero_sprite.texture.resource_path != right_path:
+				_failures.append("twin_blades mirrored skill resolved a different texture")
+			if absf(hero_sprite.position.x + right_position.x) > 0.001:
+				_failures.append("twin_blades skill horizontal offset was not mirrored")
+			if absf(hero_sprite.position.y - right_position.y) > 0.001:
+				_failures.append("twin_blades skill vertical anchor changed when mirrored")
+			if absf(hero_sprite.rotation + right_rotation) > 0.001:
+				_failures.append("twin_blades skill rotation was not mirrored")
+			if not hero_sprite.scale.is_equal_approx(right_scale):
+				_failures.append("twin_blades skill scale changed when mirrored")
+			player.set("_facing", 1.0)
+			player.set("_skill_remaining", 0.0)
+
 	player.configure_weapon(&"moon_sword")
 	player.call(&"_reset_sprite_pose")
 	player.call(&"_animate_idle")
@@ -144,6 +203,9 @@ func _validate_asset_set(weapon_id: StringName) -> void:
 	var names: Array[String] = []
 	for pose_name: String in POSE_NAMES:
 		names.append(pose_name)
+	if weapon_id == &"twin_blades":
+		for frame_index in range(12):
+			names.append("hero_skill_%d" % frame_index)
 	for frame_index in range(12):
 		names.append("hero_run_%d" % frame_index)
 	for pose_name: String in names:

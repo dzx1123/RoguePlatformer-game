@@ -23,6 +23,11 @@ const GOBLIN_ARCHER_SHEET := preload("res://assets/enemies/red_fang_goblin_arche
 const GOBLIN_CLUB_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_club_walk_sheet_v4.png")
 const GOBLIN_ELITE_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_walk_sheet_v4.png")
 const GOBLIN_ARCHER_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_walk_sheet_v4.png")
+const NIGHT_BAT_FLAP_MID := preload("res://assets/enemies/night_bat_flap_mid.png")
+const NIGHT_BAT_FLAP_DOWN := preload("res://assets/enemies/night_bat_flap_down.png")
+const NIGHT_BAT_FLAP_UP := preload("res://assets/enemies/night_bat_flap_up.png")
+const NIGHT_BAT_TUCK := preload("res://assets/enemies/night_bat_tuck.png")
+const NIGHT_BAT_DIVE := preload("res://assets/enemies/night_bat_dive.png")
 const MOON_WHEEL_GEOMETRY := preload("res://scripts/moon_wheel_geometry.gd")
 const WEAPON_SKILL_GEOMETRY := preload("res://scripts/weapon_skill_geometry.gd")
 const GOBLIN_EDGE_MATERIAL := preload("res://assets/shaders/goblin_edge_cleanup.tres")
@@ -41,6 +46,7 @@ enum EnemyRank {
 enum EnemyFamily {
 	SLIME,
 	GOBLIN,
+	NIGHT_BAT,
 }
 
 enum EnemyArchetype {
@@ -122,6 +128,24 @@ const BOSS_SLAM_REACH_Y := 135.0
 const FLYER_HOVER_ACCELERATION := 720.0
 const FLYER_MAX_VERTICAL_SPEED := 190.0
 const FLYER_HOVER_OFFSET_Y := 58.0
+const NIGHT_BAT_MAX_HEALTH := 46
+const NIGHT_BAT_DIVE_DAMAGE := 18
+const NIGHT_BAT_HOVER_SPEED := 176.0
+const NIGHT_BAT_HOVER_HEIGHT := 152.0
+const NIGHT_BAT_HOVER_DEADZONE_X := 62.0
+const NIGHT_BAT_DIVE_TRIGGER_X := 235.0
+const NIGHT_BAT_DIVE_MIN_DROP := 58.0
+const NIGHT_BAT_DIVE_MAX_DROP := 330.0
+const NIGHT_BAT_DIVE_DURATION := 1.16
+const NIGHT_BAT_DIVE_COOLDOWN := 1.58
+const NIGHT_BAT_DIVE_START_PROGRESS := 0.22
+const NIGHT_BAT_DIVE_END_PROGRESS := 0.70
+const NIGHT_BAT_DIVE_SPEED := 540.0
+const NIGHT_BAT_RECOVERY_SPEED := 330.0
+const NIGHT_BAT_DIVE_ACCELERATION := 1680.0
+const NIGHT_BAT_STRIKE_RANGE := Vector2(74.0, 66.0)
+const NIGHT_BAT_FLAP_FPS := 9.0
+const NIGHT_BAT_SPRITE_SCALE := 2.15
 
 var _variant: int = 0
 var _role: int = EnemyRole.MELEE
@@ -178,6 +202,10 @@ var _landing_motion_remaining: float = 0.0
 var _sprite_pose_initialized: bool = false
 var _enemy_sprite: Sprite2D
 var _hitstop_remaining: float = 0.0
+var _night_bat_dive_target: Vector2 = Vector2.ZERO
+var _night_bat_recovery_y: float = 0.0
+var _night_bat_dive_direction: Vector2 = Vector2.DOWN
+var _night_bat_dive_committed: bool = false
 
 
 func _ready() -> void:
@@ -186,8 +214,12 @@ func _ready() -> void:
 
 	var body_collision := CollisionShape2D.new()
 	var body_shape := CapsuleShape2D.new()
-	body_shape.radius = 44.0 if is_boss() else (24.0 if is_elite() else 18.0)
-	body_shape.height = 104.0 if is_boss() else (58.0 if is_elite() else 44.0)
+	if is_night_bat():
+		body_shape.radius = 15.0 if not is_elite() else 18.0
+		body_shape.height = 36.0 if not is_elite() else 42.0
+	else:
+		body_shape.radius = 44.0 if is_boss() else (24.0 if is_elite() else 18.0)
+		body_shape.height = 104.0 if is_boss() else (58.0 if is_elite() else 44.0)
 	body_collision.shape = body_shape
 	add_child(body_collision)
 
@@ -200,9 +232,13 @@ func _ready() -> void:
 	var hurtbox_collision := CollisionShape2D.new()
 	var hurtbox_shape := RectangleShape2D.new()
 	hurtbox_shape.size = (
-		Vector2(144.0, 124.0)
-		if is_boss()
-		else (Vector2(72.0, 64.0) if is_elite() else Vector2(58.0, 52.0))
+		(Vector2(60.0, 50.0) if is_elite() else Vector2(52.0, 44.0))
+		if is_night_bat()
+		else (
+			Vector2(144.0, 124.0)
+			if is_boss()
+			else (Vector2(72.0, 64.0) if is_elite() else Vector2(58.0, 52.0))
+		)
 	)
 	hurtbox_collision.position = Vector2(0.0, -12.0 if is_boss() else -3.0)
 	hurtbox_collision.shape = hurtbox_shape
@@ -237,9 +273,12 @@ func setup(
 ) -> void:
 	_role = clampi(role, EnemyRole.MELEE, EnemyRole.RANGED)
 	_rank = clampi(rank, EnemyRank.NORMAL, EnemyRank.BOSS)
-	_family = clampi(family, EnemyFamily.SLIME, EnemyFamily.GOBLIN)
+	_family = clampi(family, EnemyFamily.SLIME, EnemyFamily.NIGHT_BAT)
 	_archetype = clampi(archetype, EnemyArchetype.STANDARD, EnemyArchetype.AMBUSHER)
-	if is_boss():
+	if is_night_bat():
+		_role = EnemyRole.MELEE
+		_archetype = EnemyArchetype.FLYER
+	elif is_boss():
 		_archetype = EnemyArchetype.STANDARD
 	elif _archetype == EnemyArchetype.FLYER or _archetype == EnemyArchetype.CASTER:
 		if not is_ranged_enemy():
@@ -282,7 +321,11 @@ func setup(
 	_melee_combo_chain = 0
 	_attack_sequence_count = 0
 	_combo_followup_pending = false
-	var base_health: int = RANGED_MAX_HEALTH if is_ranged_enemy() else MELEE_MAX_HEALTH
+	var base_health: int = (
+		NIGHT_BAT_MAX_HEALTH
+		if is_night_bat()
+		else (RANGED_MAX_HEALTH if is_ranged_enemy() else MELEE_MAX_HEALTH)
+	)
 	if is_boss():
 		_max_health = BOSS_MAX_HEALTH
 	elif is_elite():
@@ -349,6 +392,10 @@ func is_boss() -> bool:
 	return _rank == EnemyRank.BOSS
 
 
+func is_night_bat() -> bool:
+	return _family == EnemyFamily.NIGHT_BAT
+
+
 func get_boss_identity() -> int:
 	return BossIdentity.WAR_CHIEF if _family == EnemyFamily.GOBLIN else BossIdentity.CRYSTAL_KING
 
@@ -366,7 +413,7 @@ func get_archetype() -> int:
 
 
 func is_flying_enemy() -> bool:
-	return _archetype == EnemyArchetype.FLYER
+	return _archetype == EnemyArchetype.FLYER or is_night_bat()
 
 
 func _is_shield_guard() -> bool:
@@ -382,6 +429,12 @@ func _is_ambusher() -> bool:
 
 
 func _configure_archetype_behavior() -> void:
+	if is_night_bat():
+		_ranged_volley_count = 1
+		_ranged_spread = 0.0
+		_melee_combo_chance = 0.0
+		_melee_combo_limit = 0
+		return
 	match _archetype:
 		EnemyArchetype.FLYER:
 			_ranged_volley_count = maxi(_ranged_volley_count, 2)
@@ -397,6 +450,8 @@ func _configure_archetype_behavior() -> void:
 
 
 func _get_archetype_health_multiplier() -> float:
+	if is_night_bat():
+		return 1.0
 	match _archetype:
 		EnemyArchetype.SHIELD_GUARD:
 			return 1.26
@@ -461,6 +516,9 @@ func get_behavior_profile() -> Dictionary:
 
 
 func get_hurtbox_rect() -> Rect2:
+	if is_night_bat():
+		var bat_size := Vector2(60.0, 50.0) if is_elite() else Vector2(52.0, 44.0)
+		return Rect2(global_position - bat_size * 0.5, bat_size)
 	if is_boss():
 		return Rect2(global_position - Vector2(72.0, 74.0), Vector2(144.0, 124.0))
 	if is_elite():
@@ -472,7 +530,8 @@ func is_hit_by_attack(
 	attack_origin: Vector2,
 	facing: float,
 	reach_scale: float = 1.0,
-	attack_type: int = 0
+	attack_type: int = 0,
+	weapon_id: StringName = &""
 ) -> bool:
 	if _is_defeated or _hurt_invulnerability_remaining > 0.0:
 		return false
@@ -484,6 +543,14 @@ func is_hit_by_attack(
 			Vector2(96.0 * safe_reach, 178.0 * safe_reach)
 		)
 		return up_rect.intersects(get_hurtbox_rect())
+	if attack_type == 2 and weapon_id == WeaponCatalog.GREATSWORD:
+		# Ground smash: a wide shock around the landing point, hitting both sides.
+		var half_width: float = 118.0 * safe_reach
+		var smash_rect := Rect2(
+			Vector2(attack_origin.x - half_width, attack_origin.y - 42.0 * safe_reach),
+			Vector2(half_width * 2.0, 158.0 * safe_reach)
+		)
+		return smash_rect.intersects(get_hurtbox_rect())
 	if attack_type == 2:
 		var down_rect := Rect2(
 			Vector2(attack_origin.x - 50.0 * safe_reach, attack_origin.y - 22.0 * safe_reach),
@@ -507,9 +574,10 @@ func receive_player_attack(
 	facing: float,
 	damage: int,
 	reach_scale: float = 1.0,
-	attack_type: int = 0
+	attack_type: int = 0,
+	weapon_id: StringName = &""
 ) -> bool:
-	if not is_hit_by_attack(attack_origin, facing, reach_scale, attack_type):
+	if not is_hit_by_attack(attack_origin, facing, reach_scale, attack_type, weapon_id):
 		return false
 	return _apply_player_hit(attack_origin, facing, damage)
 
@@ -690,6 +758,7 @@ func _physics_process(delta: float) -> void:
 	_hurt_invulnerability_remaining = maxf(0.0, _hurt_invulnerability_remaining - delta)
 
 	var desired_speed: float = 0.0
+	var night_bat_attack_progress: float = -1.0
 	if _hurt_remaining > 0.0:
 		desired_speed = 0.0
 	elif _attack_remaining > 0.0:
@@ -699,6 +768,8 @@ func _physics_process(delta: float) -> void:
 			0.0,
 			1.0
 		)
+		if is_night_bat():
+			night_bat_attack_progress = attack_progress
 		if (
 			is_boss()
 			and _boss_attack_pattern == BossAttackPattern.LUNGE
@@ -706,18 +777,30 @@ func _physics_process(delta: float) -> void:
 			and attack_progress <= 0.74
 		):
 			desired_speed = _facing * _get_boss_lunge_speed()
-		var action_time: float = _get_attack_duration() - _get_attack_action_delay()
-		if not _attack_action_performed and _attack_remaining <= action_time:
-			_attack_action_performed = true
-			if is_boss() and _boss_attack_pattern == BossAttackPattern.SLAM:
-				_perform_boss_slam()
-				sound_requested.emit(&"bite", true)
-			elif is_ranged_enemy() or (is_boss() and _boss_attack_uses_projectile):
-				_fire_projectile()
-				sound_requested.emit(&"spit", is_boss())
-			else:
-				_hit_target_if_still_close()
-				sound_requested.emit(&"bite", is_boss())
+		if is_night_bat():
+			if (
+				not _attack_action_performed
+				and attack_progress >= NIGHT_BAT_DIVE_START_PROGRESS
+			):
+				if _night_bat_target_in_strike_range():
+					_attack_action_performed = true
+					_hit_target_if_still_close()
+					sound_requested.emit(&"bite", false)
+				elif attack_progress >= NIGHT_BAT_DIVE_END_PROGRESS:
+					_attack_action_performed = true
+		else:
+			var action_time: float = _get_attack_duration() - _get_attack_action_delay()
+			if not _attack_action_performed and _attack_remaining <= action_time:
+				_attack_action_performed = true
+				if is_boss() and _boss_attack_pattern == BossAttackPattern.SLAM:
+					_perform_boss_slam()
+					sound_requested.emit(&"bite", true)
+				elif is_ranged_enemy() or (is_boss() and _boss_attack_uses_projectile):
+					_fire_projectile()
+					sound_requested.emit(&"spit", is_boss())
+				else:
+					_hit_target_if_still_close()
+					sound_requested.emit(&"bite", is_boss())
 		if _attack_remaining <= 0.0:
 			_try_schedule_melee_combo()
 	else:
@@ -734,18 +817,21 @@ func _physics_process(delta: float) -> void:
 		and not is_zero_approx(desired_speed)
 	):
 		acceleration_scale = 4.2
-	velocity.x = move_toward(
-		velocity.x,
-		desired_speed,
-		ACCELERATION * _difficulty_speed_multiplier * acceleration_scale * delta
-	)
-	if is_flying_enemy():
-		_update_flight_vertical_velocity(delta)
-	elif not is_on_floor():
-		velocity.y += GRAVITY * delta
+	if is_night_bat() and night_bat_attack_progress >= 0.0 and _hurt_remaining <= 0.0:
+		_update_night_bat_dive_velocity(night_bat_attack_progress, delta)
 	else:
-		velocity.y = 0.0
-		_try_pursuit_jump()
+		velocity.x = move_toward(
+			velocity.x,
+			desired_speed,
+			ACCELERATION * _difficulty_speed_multiplier * acceleration_scale * delta
+		)
+		if is_flying_enemy():
+			_update_flight_vertical_velocity(delta)
+		elif not is_on_floor():
+			velocity.y += GRAVITY * delta
+		else:
+			velocity.y = 0.0
+			_try_pursuit_jump()
 
 	move_and_slide()
 	var now_on_floor: bool = is_on_floor()
@@ -776,20 +862,67 @@ func _is_shield_blocking(attack_origin: Vector2) -> bool:
 
 
 func _update_flight_vertical_velocity(delta: float) -> void:
-	var hover_wave: float = sin(_elapsed * 3.6 + _phase) * 18.0
+	var hover_wave: float = sin(_elapsed * (5.2 if is_night_bat() else 3.6) + _phase) * (
+		10.0 if is_night_bat() else 18.0
+	)
 	var desired_y: float = _flight_anchor_y + hover_wave
 	if _target_is_visible():
-		desired_y = _target.global_position.y - FLYER_HOVER_OFFSET_Y + hover_wave
+		desired_y = _target.global_position.y - (
+			NIGHT_BAT_HOVER_HEIGHT if is_night_bat() else FLYER_HOVER_OFFSET_Y
+		) + hover_wave
 	desired_y = clampf(desired_y, 82.0, 690.0)
 	var desired_vertical_speed: float = clampf(
-		(desired_y - global_position.y) * 4.4,
-		-FLYER_MAX_VERTICAL_SPEED,
-		FLYER_MAX_VERTICAL_SPEED
+		(desired_y - global_position.y) * (5.4 if is_night_bat() else 4.4),
+		-(NIGHT_BAT_HOVER_SPEED if is_night_bat() else FLYER_MAX_VERTICAL_SPEED),
+		NIGHT_BAT_HOVER_SPEED if is_night_bat() else FLYER_MAX_VERTICAL_SPEED
 	)
 	velocity.y = move_toward(
 		velocity.y,
 		desired_vertical_speed,
-		FLYER_HOVER_ACCELERATION * delta
+		(FLYER_HOVER_ACCELERATION * 1.35 if is_night_bat() else FLYER_HOVER_ACCELERATION) * delta
+	)
+
+
+func _update_night_bat_dive_velocity(attack_progress: float, delta: float) -> void:
+	if attack_progress < NIGHT_BAT_DIVE_START_PROGRESS:
+		var windup_velocity := Vector2(-_facing * 72.0, -142.0)
+		velocity = velocity.move_toward(
+			windup_velocity,
+			NIGHT_BAT_DIVE_ACCELERATION * delta
+		)
+		return
+
+	if attack_progress < NIGHT_BAT_DIVE_END_PROGRESS:
+		if not _night_bat_dive_committed:
+			var aim_vector: Vector2 = _night_bat_dive_target - global_position
+			aim_vector.y = maxf(aim_vector.y, NIGHT_BAT_DIVE_MIN_DROP)
+			if absf(aim_vector.x) > 4.0:
+				_facing = signf(aim_vector.x)
+			_night_bat_dive_direction = aim_vector.normalized()
+			_night_bat_dive_committed = true
+		var dive_progress: float = inverse_lerp(
+			NIGHT_BAT_DIVE_START_PROGRESS,
+			NIGHT_BAT_DIVE_END_PROGRESS,
+			attack_progress
+		)
+		var dive_speed: float = lerpf(
+			NIGHT_BAT_DIVE_SPEED * 0.76,
+			NIGHT_BAT_DIVE_SPEED,
+			smoothstep(0.0, 0.72, dive_progress)
+		) * clampf(_difficulty_speed_multiplier, 0.88, 1.18)
+		velocity = _night_bat_dive_direction * dive_speed
+		return
+
+	var recovery_target := Vector2(
+		_night_bat_dive_target.x + _facing * 92.0,
+		_night_bat_recovery_y
+	)
+	var recovery_direction: Vector2 = recovery_target - global_position
+	if recovery_direction.is_zero_approx():
+		recovery_direction = Vector2(_facing, -1.0)
+	velocity = velocity.move_toward(
+		recovery_direction.normalized() * NIGHT_BAT_RECOVERY_SPEED,
+		NIGHT_BAT_DIVE_ACCELERATION * 1.18 * delta
 	)
 
 
@@ -800,6 +933,10 @@ func _get_desired_speed() -> float:
 		if absf(target_delta) > 6.0:
 			target_direction = signf(target_delta)
 		var distance_x: float = absf(target_delta)
+		if is_night_bat():
+			if distance_x > NIGHT_BAT_HOVER_DEADZONE_X:
+				return target_direction * NIGHT_BAT_HOVER_SPEED * _difficulty_speed_multiplier
+			return 0.0
 		if is_ranged_enemy():
 			var target_height: float = global_position.y - _target.global_position.y
 			if target_height > RANGED_ATTACK_RANGE_Y:
@@ -832,6 +969,8 @@ func _target_is_visible() -> bool:
 
 	var offset: Vector2 = _target.global_position - global_position
 	var detection_x: float = RANGED_DETECTION_RANGE_X if is_ranged_enemy() else MELEE_DETECTION_RANGE_X
+	if is_night_bat():
+		detection_x = 520.0
 	if is_boss():
 		detection_x = BOSS_DETECTION_RANGE_X
 	detection_x *= clampf(_difficulty_aggression_multiplier, 0.55, 2.20)
@@ -916,6 +1055,12 @@ func _target_in_attack_range() -> bool:
 					absf(offset.x) <= _get_boss_lunge_reach_x()
 					and absf(offset.y) <= _get_boss_lunge_reach_y()
 				)
+	if is_night_bat():
+		return (
+			absf(offset.x) <= NIGHT_BAT_DIVE_TRIGGER_X
+			and offset.y >= NIGHT_BAT_DIVE_MIN_DROP
+			and offset.y <= NIGHT_BAT_DIVE_MAX_DROP
+		)
 	if is_ranged_enemy():
 		return (
 			absf(offset.x) <= RANGED_ATTACK_RANGE_X
@@ -933,6 +1078,15 @@ func _start_attack() -> void:
 		if absf(target_delta_x) > 6.0:
 			_facing = signf(target_delta_x)
 	_clear_turn_transition()
+	if is_night_bat() and is_instance_valid(_target):
+		_night_bat_dive_target = _target.global_position + Vector2(0.0, -8.0)
+		_night_bat_recovery_y = clampf(
+			_target.global_position.y - NIGHT_BAT_HOVER_HEIGHT,
+			82.0,
+			520.0
+		)
+		_night_bat_dive_direction = Vector2(_facing, 1.0).normalized()
+		_night_bat_dive_committed = false
 	if is_boss() and is_instance_valid(_target):
 		_boss_attack_pattern = _peek_next_boss_attack_pattern()
 		_boss_attack_counter += 1
@@ -946,15 +1100,19 @@ func _start_attack() -> void:
 	_attack_remaining = _get_attack_duration()
 	_attack_cooldown_remaining = _get_attack_cooldown()
 	_attack_action_performed = false
-	sound_requested.emit(
-		&"slime_attack" if _family == EnemyFamily.SLIME else &"goblin_attack",
-		is_boss()
-	)
+	var attack_voice: StringName = &"slime_attack"
+	if _family == EnemyFamily.GOBLIN:
+		attack_voice = &"goblin_attack"
+	elif is_night_bat():
+		attack_voice = &"night_bat_attack"
+	sound_requested.emit(attack_voice, is_boss())
 
 
 func _get_attack_duration() -> float:
 	var base_duration: float
-	if is_boss():
+	if is_night_bat():
+		base_duration = NIGHT_BAT_DIVE_DURATION
+	elif is_boss():
 		match _boss_attack_pattern:
 			BossAttackPattern.VOLLEY:
 				base_duration = 0.92
@@ -971,7 +1129,9 @@ func _get_attack_duration() -> float:
 
 func _get_attack_action_delay() -> float:
 	var base_delay: float
-	if is_boss():
+	if is_night_bat():
+		base_delay = NIGHT_BAT_DIVE_DURATION * 0.56
+	elif is_boss():
 		match _boss_attack_pattern:
 			BossAttackPattern.VOLLEY:
 				base_delay = 0.58
@@ -988,7 +1148,9 @@ func _get_attack_action_delay() -> float:
 
 func _get_attack_cooldown() -> float:
 	var base_cooldown: float
-	if is_boss():
+	if is_night_bat():
+		base_cooldown = NIGHT_BAT_DIVE_COOLDOWN
+	elif is_boss():
 		base_cooldown = 1.08 / _get_boss_phase_speed_scale()
 	elif is_elite():
 		base_cooldown = (
@@ -1013,6 +1175,7 @@ func _get_attack_cooldown() -> float:
 func _try_schedule_melee_combo() -> void:
 	if (
 		is_boss()
+		or is_night_bat()
 		or is_ranged_enemy()
 		or _melee_combo_limit <= 0
 		or _melee_combo_chain >= _melee_combo_limit
@@ -1032,6 +1195,8 @@ func _try_schedule_melee_combo() -> void:
 
 
 func _get_melee_chase_speed() -> float:
+	if is_night_bat():
+		return NIGHT_BAT_HOVER_SPEED * _difficulty_speed_multiplier
 	if is_boss():
 		return (
 			MELEE_CHASE_SPEED
@@ -1063,7 +1228,10 @@ func _get_ranged_move_speed() -> float:
 func _hit_target_if_still_close() -> void:
 	if not is_instance_valid(_target):
 		return
-	if is_boss():
+	if is_night_bat():
+		if not _night_bat_target_in_strike_range():
+			return
+	elif is_boss():
 		var boss_melee_offset: Vector2 = _target.global_position - global_position
 		if (
 			absf(boss_melee_offset.x) > _get_boss_lunge_reach_x()
@@ -1074,18 +1242,32 @@ func _hit_target_if_still_close() -> void:
 		return
 	if _target.has_method(&"receive_enemy_attack"):
 		var damage: int = _get_scaled_damage(
-			(
+			NIGHT_BAT_DIVE_DAMAGE + (7 if is_elite() else 0)
+			if is_night_bat()
+			else (
 				36
-				if _is_war_chief()
-				else (30 if _is_crystal_king() else (28 if is_elite() else MELEE_DAMAGE))
+					if _is_war_chief()
+					else (30 if _is_crystal_king() else (28 if is_elite() else MELEE_DAMAGE))
 			)
 		)
 		var damage_cause: StringName = &"enemy_melee"
-		if _is_war_chief():
+		if is_night_bat():
+			damage_cause = &"night_bat_dive"
+		elif _is_war_chief():
 			damage_cause = &"war_chief_charge"
 		elif _is_crystal_king():
 			damage_cause = &"crystal_king_lunge"
 		_target.call(&"receive_enemy_attack", global_position, damage, damage_cause)
+
+
+func _night_bat_target_in_strike_range() -> bool:
+	if not is_instance_valid(_target):
+		return false
+	var offset: Vector2 = _target.global_position - global_position
+	return (
+		absf(offset.x) <= NIGHT_BAT_STRIKE_RANGE.x
+		and absf(offset.y) <= NIGHT_BAT_STRIKE_RANGE.y
+	)
 
 
 func _perform_boss_slam() -> void:
@@ -1312,6 +1494,11 @@ func _get_display_facing() -> float:
 
 func _update_locomotion_animation(delta: float) -> void:
 	_landing_motion_remaining = maxf(0.0, _landing_motion_remaining - delta)
+	if is_night_bat():
+		_locomotion_active = false
+		_locomotion_is_settling = false
+		_locomotion_blend = 0.0
+		return
 	var horizontal_speed: float = absf(velocity.x)
 	var reference_speed: float = (
 		_get_ranged_move_speed()
@@ -1699,8 +1886,126 @@ func _apply_turn_sprite_motion() -> void:
 	)
 
 
+func _get_night_bat_flap_texture() -> Texture2D:
+	var flap_frame: int = posmod(
+		int(floor(_elapsed * NIGHT_BAT_FLAP_FPS + _phase)),
+		4
+	)
+	match flap_frame:
+		0:
+			return NIGHT_BAT_FLAP_UP
+		1:
+			return NIGHT_BAT_FLAP_MID
+		2:
+			return NIGHT_BAT_FLAP_DOWN
+		_:
+			return NIGHT_BAT_FLAP_MID
+
+
+func _update_night_bat_sprite_animation(delta: float) -> void:
+	var previous_position: Vector2 = _enemy_sprite.position
+	var previous_scale: Vector2 = _enemy_sprite.scale
+	var previous_rotation: float = _enemy_sprite.rotation
+	var selected_texture: Texture2D = _get_night_bat_flap_texture()
+	var attack_progress: float = 0.0
+	var hurt_progress: float = 0.0
+	var death_progress: float = 0.0
+
+	if _is_defeated:
+		death_progress = clampf(
+			1.0 - _death_remaining / DEATH_ANIMATION_DURATION,
+			0.0,
+			1.0
+		)
+		selected_texture = NIGHT_BAT_FLAP_DOWN if death_progress < 0.36 else NIGHT_BAT_TUCK
+	elif _hurt_remaining > 0.0:
+		hurt_progress = clampf(
+			1.0 - _hurt_remaining / HURT_ANIMATION_DURATION,
+			0.0,
+			1.0
+		)
+		selected_texture = NIGHT_BAT_TUCK
+	elif _attack_remaining > 0.0:
+		attack_progress = clampf(
+			1.0 - _attack_remaining / maxf(_get_attack_duration(), 0.001),
+			0.0,
+			1.0
+		)
+		if attack_progress < NIGHT_BAT_DIVE_START_PROGRESS:
+			selected_texture = NIGHT_BAT_TUCK
+		elif attack_progress < NIGHT_BAT_DIVE_END_PROGRESS:
+			selected_texture = NIGHT_BAT_DIVE
+		else:
+			selected_texture = (
+				NIGHT_BAT_FLAP_UP
+				if posmod(int(floor(attack_progress * 16.0)), 2) == 0
+				else NIGHT_BAT_FLAP_MID
+			)
+
+	_enemy_sprite.region_enabled = false
+	_enemy_sprite.texture = selected_texture
+	_enemy_sprite.material = null
+	_enemy_sprite.flip_h = _get_display_facing() > 0.0
+	var sprite_scale: float = NIGHT_BAT_SPRITE_SCALE * (1.18 if is_elite() else 1.0)
+	_enemy_sprite.scale = Vector2.ONE * sprite_scale
+	_enemy_sprite.position = Vector2(0.0, -3.0)
+	_enemy_sprite.rotation = 0.0
+	_enemy_sprite.modulate = Color.WHITE
+
+	if _is_defeated:
+		_enemy_sprite.position.y += death_progress * 22.0
+		_enemy_sprite.rotation = _facing * death_progress * 1.42
+		_enemy_sprite.scale *= Vector2(
+			1.0 - death_progress * 0.28,
+			1.0 - death_progress * 0.38
+		)
+		_enemy_sprite.modulate.a = 1.0 - smoothstep(0.62, 1.0, death_progress)
+	elif _hurt_remaining > 0.0:
+		var recoil: float = 1.0 - hurt_progress
+		_enemy_sprite.position -= Vector2(_facing * recoil * 5.0, recoil * 2.0)
+		_enemy_sprite.rotation = -_facing * recoil * 0.24
+		_enemy_sprite.scale *= Vector2(1.0 + recoil * 0.12, 1.0 - recoil * 0.14)
+		_enemy_sprite.modulate = Color(1.0, 0.62 + hurt_progress * 0.38, 0.72, 1.0)
+	elif _attack_remaining > 0.0:
+		if attack_progress < NIGHT_BAT_DIVE_START_PROGRESS:
+			var windup_progress: float = attack_progress / NIGHT_BAT_DIVE_START_PROGRESS
+			var coil: float = sin(windup_progress * PI)
+			_enemy_sprite.position += Vector2(-_facing * coil * 4.0, -coil * 7.0)
+			_enemy_sprite.scale *= Vector2(1.0 - coil * 0.12, 1.0 + coil * 0.14)
+		elif attack_progress < NIGHT_BAT_DIVE_END_PROGRESS:
+			var base_angle: float = 0.0 if _enemy_sprite.flip_h else PI
+			_enemy_sprite.rotation = wrapf(velocity.angle() - base_angle, -PI, PI)
+			_enemy_sprite.scale *= Vector2(1.08, 0.96)
+			_enemy_sprite.position.y += 1.0
+		else:
+			var recovery_progress: float = inverse_lerp(
+				NIGHT_BAT_DIVE_END_PROGRESS,
+				1.0,
+				attack_progress
+			)
+			_enemy_sprite.rotation = -_facing * sin(recovery_progress * PI) * 0.18
+			_enemy_sprite.position.y -= sin(recovery_progress * PI) * 4.0
+	else:
+		_enemy_sprite.position.y += sin(_elapsed * 5.2 + _phase) * 1.4
+
+	var target_position: Vector2 = _enemy_sprite.position
+	var target_scale: Vector2 = _enemy_sprite.scale
+	var target_rotation: float = _enemy_sprite.rotation
+	if _sprite_pose_initialized:
+		var smoothing_rate: float = 36.0 if _attack_remaining > 0.0 else 24.0
+		var pose_blend: float = 1.0 - exp(-smoothing_rate * maxf(delta, 0.0001))
+		_enemy_sprite.position = previous_position.lerp(target_position, pose_blend)
+		_enemy_sprite.scale = previous_scale.lerp(target_scale, pose_blend)
+		_enemy_sprite.rotation = lerp_angle(previous_rotation, target_rotation, pose_blend)
+	else:
+		_sprite_pose_initialized = true
+
+
 func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 	if not is_instance_valid(_enemy_sprite):
+		return
+	if is_night_bat():
+		_update_night_bat_sprite_animation(delta)
 		return
 	_enemy_sprite.material = GOBLIN_EDGE_MATERIAL if _family == EnemyFamily.GOBLIN else null
 
@@ -1863,6 +2168,8 @@ func _draw() -> void:
 		var attack_progress: float = 1.0 - _attack_remaining / _get_attack_duration()
 		if is_boss():
 			_draw_boss_attack_telegraph(attack_progress)
+		elif is_night_bat():
+			_draw_night_bat_dive_telegraph(attack_progress)
 		elif is_ranged_enemy():
 			var charge_radius: float = lerpf(3.0, 9.0, sin(attack_progress * PI))
 			var charge_color: Color = Color(0.38, 0.94, 1.0, 0.66)
@@ -1879,7 +2186,11 @@ func _draw() -> void:
 	if _current_health < _max_health and not _is_defeated:
 		var health_ratio: float = float(_current_health) / float(maxi(_max_health, 1))
 		var bar_width: float = 126.0 if is_boss() else (64.0 if is_elite() else 48.0)
-		var bar_y: float = -112.0 if is_boss() else (-56.0 if is_elite() else -43.0)
+		var bar_y: float = (
+			(-70.0 if is_elite() else -60.0)
+			if is_night_bat()
+			else (-112.0 if is_boss() else (-56.0 if is_elite() else -43.0))
+		)
 		draw_rect(Rect2(-bar_width * 0.5, bar_y, bar_width, 6.0), Color(0.03, 0.07, 0.10, 0.88))
 		draw_rect(
 			Rect2(-bar_width * 0.5 + 2.0, bar_y + 2.0, (bar_width - 4.0) * health_ratio, 2.0),
@@ -1888,6 +2199,8 @@ func _draw() -> void:
 
 
 func _draw_archetype_marker() -> void:
+	if is_night_bat():
+		return
 	match _archetype:
 		EnemyArchetype.SHIELD_GUARD:
 			# A full ring sat behind the sprite and was occluded into two stray arcs.
@@ -1936,6 +2249,43 @@ func _draw_archetype_marker() -> void:
 				streak_end + Vector2(0.0, 8.0),
 				Color(1.0, 0.36, 0.28, 0.46),
 				1.3
+			)
+
+
+func _draw_night_bat_dive_telegraph(attack_progress: float) -> void:
+	var local_target: Vector2 = _night_bat_dive_target - global_position
+	if local_target.length() > 360.0:
+		local_target = local_target.normalized() * 360.0
+	if attack_progress < NIGHT_BAT_DIVE_START_PROGRESS:
+		var windup_progress: float = attack_progress / NIGHT_BAT_DIVE_START_PROGRESS
+		var pulse: float = sin(windup_progress * PI)
+		draw_line(
+			Vector2(0.0, 4.0),
+			local_target,
+			Color(0.93, 0.33, 1.0, 0.18 + pulse * 0.34),
+			1.6
+		)
+		draw_arc(
+			Vector2.ZERO,
+			24.0 + pulse * 8.0,
+			0.0,
+			TAU,
+			22,
+			Color(0.75, 0.36, 1.0, 0.32 + pulse * 0.34),
+			1.8
+		)
+		return
+	if attack_progress < NIGHT_BAT_DIVE_END_PROGRESS:
+		var trail_direction: Vector2 = -_night_bat_dive_direction
+		for trail_index in range(3):
+			var start_distance: float = 22.0 + float(trail_index) * 14.0
+			var trail_start: Vector2 = trail_direction * start_distance
+			var trail_end: Vector2 = trail_start + trail_direction * (16.0 + float(trail_index) * 5.0)
+			draw_line(
+				trail_start,
+				trail_end,
+				Color(1.0, 0.42 + float(trail_index) * 0.10, 0.16, 0.66 - float(trail_index) * 0.14),
+				3.2 - float(trail_index) * 0.6
 			)
 
 
