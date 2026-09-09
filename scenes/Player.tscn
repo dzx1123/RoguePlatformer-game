@@ -17,13 +17,13 @@ shape = SubResource("CapsuleShape_player")
 
 [node name="HeroSprite" type="Sprite2D" parent="." unique_id=2025043771]
 z_index = 1
-texture_filter = 0
+texture_filter = 1
 position = Vector2(0, -15)
 scale = Vector2(0.22, 0.22)
 
 [node name="SkillPoseEcho" type="Sprite2D" parent="."]
 visible = false
-texture_filter = 0
+texture_filter = 1
 position = Vector2(0, -15)
 scale = Vector2(0.22, 0.22)
 

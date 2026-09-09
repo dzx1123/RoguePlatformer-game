@@ -53,7 +53,12 @@ func _run_test() -> void:
 	await process_frame
 	player.set_physics_process(false)
 	var hero_sprite: Sprite2D = player.get_node("HeroSprite") as Sprite2D
+	var skill_pose_echo: Sprite2D = player.get_node("SkillPoseEcho") as Sprite2D
 	var weapon_effect: WeaponSkillEffect = player.get_node("WeaponSkillEffect") as WeaponSkillEffect
+	if hero_sprite.texture_filter != CanvasItem.TEXTURE_FILTER_NEAREST:
+		_failures.append("HeroSprite is not locked to nearest-neighbor filtering")
+	if skill_pose_echo.texture_filter != CanvasItem.TEXTURE_FILTER_NEAREST:
+		_failures.append("SkillPoseEcho is not locked to nearest-neighbor filtering")
 
 	for weapon_id: StringName in WEAPON_DIRS:
 		var directory: String = WEAPON_DIRS[weapon_id]

@@ -1432,6 +1432,7 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 		_:
 			_animate_idle()
 
+	_apply_weapon_pose_calibration()
 	var target_position: Vector2 = hero_sprite.position
 	var target_scale: Vector2 = hero_sprite.scale
 	var target_rotation: float = hero_sprite.rotation
@@ -1459,6 +1460,7 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 			_run_is_settling = false
 			_reset_sprite_pose()
 			_animate_run()
+			_apply_weapon_pose_calibration()
 			target_position = hero_sprite.position
 			target_scale = hero_sprite.scale
 			target_rotation = hero_sprite.rotation
@@ -1507,6 +1509,41 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 		)
 	hero_sprite.modulate = visual_modulate
 	_update_skill_effect()
+
+
+func _apply_weapon_pose_calibration() -> void:
+	hero_sprite.self_modulate = Color.WHITE
+	if _current_texture == null or _weapon_id == WeaponCatalog.SWORD:
+		return
+	var texture_path: String = _current_texture.resource_path
+	var scale_factor: float = 1.0
+	if _weapon_id == WeaponCatalog.TWIN_BLADES:
+		scale_factor = 1.05
+		if texture_path.contains("hero_attack_up") or texture_path.contains("hero_attack_down"):
+			scale_factor = 1.0
+		elif texture_path.contains("hero_attack_forward"):
+			scale_factor = 1.035
+	elif _weapon_id == WeaponCatalog.GREATSWORD:
+		scale_factor = 1.06
+		if texture_path.ends_with("hero_idle.png"):
+			scale_factor = 1.075
+			hero_sprite.position.x -= _get_display_facing() * 8.8
+		elif texture_path.contains("hero_attack_forward_windup"):
+			scale_factor = 1.18
+		elif texture_path.contains("hero_attack_up_windup"):
+			scale_factor = 1.16
+		elif texture_path.contains("hero_attack_up_strike"):
+			scale_factor = 1.24
+		elif texture_path.contains("hero_attack_up_follow"):
+			scale_factor = 1.18
+		elif texture_path.contains("hero_attack_down"):
+			scale_factor = 1.05
+		elif texture_path.contains("hero_attack"):
+			scale_factor = 1.07
+		if texture_path.contains("hero_attack") or texture_path.contains("hero_skill"):
+			hero_sprite.self_modulate = Color(0.97, 1.0, 1.035, 1.0)
+	hero_sprite.scale *= scale_factor
+	hero_sprite.position.y -= (scale_factor - 1.0) * 42.0
 
 
 func _get_pose_smoothing_rate(visual_state: int) -> float:

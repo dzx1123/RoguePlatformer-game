@@ -8,6 +8,7 @@ var _remaining := LIFETIME
 
 
 func setup(source_texture: Texture2D, facing: float, source_scale: Vector2) -> void:
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	texture = source_texture
 	flip_h = facing < 0.0
 	scale = source_scale

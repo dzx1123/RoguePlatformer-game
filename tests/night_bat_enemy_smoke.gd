@@ -6,6 +6,7 @@ const BAT_ASSET_PATHS: Array[String] = [
 	"res://assets/enemies/night_bat_flap_up.png",
 	"res://assets/enemies/night_bat_tuck.png",
 	"res://assets/enemies/night_bat_dive.png",
+	"res://assets/enemies/night_bat_hang.png",
 ]
 
 
@@ -57,7 +58,8 @@ func _run_test() -> void:
 		1.0,
 		1.0,
 		{},
-		RogueEnemy.EnemyArchetype.STANDARD
+		RogueEnemy.EnemyArchetype.STANDARD,
+		true
 	)
 	root.add_child(bat)
 	bat.set_physics_process(false)
@@ -74,13 +76,44 @@ func _run_test() -> void:
 	if sprite == null or sprite.region_enabled:
 		_fail("Night bat did not use individual unfiltered animation frames")
 		return
-	var flap_paths: Dictionary = {}
+	if not bat.is_night_bat_hanging() or not sprite.texture.resource_path.ends_with("night_bat_hang.png"):
+		_fail("Night bat did not begin in its fixed upside-down roost pose")
+		return
+	var hang_position: Vector2 = bat.global_position
 	for frame_index in range(3):
+		bat.set("_elapsed", 3.0 + float(frame_index))
+		bat.call(&"_update_sprite_animation")
+		if not sprite.texture.resource_path.ends_with("night_bat_hang.png"):
+			_fail("Night bat incorrectly looped flap frames while no target was present")
+			return
+	if bat.global_position != hang_position:
+		_fail("Night bat drifted away from its roost while idle")
+		return
+
+	var target := DamageTarget.new()
+	target.position = Vector2(340.0, 355.0)
+	root.add_child(target)
+	bat.set_target(target)
+	bat.call(&"_update_night_bat_awareness", 0.0)
+	bat.call(&"_update_night_bat_awareness", RogueEnemy.NIGHT_BAT_TAKEOFF_DURATION + 0.02)
+	if bat.is_night_bat_hanging():
+		_fail("Night bat did not wake when a player entered detection range")
+		return
+
+	var flap_paths: Dictionary = {}
+	for frame_index in range(4):
 		bat.set("_elapsed", (float(frame_index) + 0.02) / RogueEnemy.NIGHT_BAT_FLAP_FPS)
 		bat.call(&"_update_sprite_animation")
-		flap_paths[sprite.texture.resource_path] = true
-	if flap_paths.size() != 3:
-		_fail("Night bat hover loop did not expose all three authored flap poses")
+		var flight_path: String = sprite.texture.resource_path
+		if (
+			flight_path.ends_with("night_bat_hang.png")
+			or flight_path.ends_with("night_bat_flap_down.png")
+		):
+			_fail("Night bat displayed an upside-down frame while flying")
+			return
+		flap_paths[flight_path] = true
+	if flap_paths.size() != 2:
+		_fail("Night bat hover loop was not restricted to its two flight poses")
 		return
 
 	var attack_duration: float = float(bat.call(&"_get_attack_duration"))
@@ -96,9 +129,6 @@ func _run_test() -> void:
 		_fail("Night bat dive did not select the authored attack pose")
 		return
 
-	var target := DamageTarget.new()
-	target.position = Vector2(340.0, 355.0)
-	root.add_child(target)
 	bat.position = Vector2(260.0, 170.0)
 	bat.velocity = Vector2.ZERO
 	bat.set("_attack_remaining", 0.0)
@@ -142,6 +172,24 @@ func _run_test() -> void:
 			"Night bat dive damage was invalid (hits %d, damage %d, cause %s)"
 			% [target.hit_count, target.last_damage, target.last_cause]
 		)
+		return
+
+	target.position = Vector2(3200.0, 2400.0)
+	for _frame_index in range(300):
+		await physics_frame
+		if not is_instance_valid(bat):
+			_fail("Night bat left the world while returning to its roost")
+			return
+		if bat.is_night_bat_hanging():
+			break
+	if not bat.is_night_bat_hanging():
+		_fail("Night bat did not return to its fixed upside-down roost after losing the player")
+		return
+	if bat.global_position.distance_to(hang_position) > 0.1:
+		_fail("Night bat re-hung at a different position from its authored roost")
+		return
+	if not sprite.texture.resource_path.ends_with("night_bat_hang.png"):
+		_fail("Night bat did not restore the upside-down pose after returning")
 		return
 
 	var main_script := load("res://scripts/main.gd") as Script

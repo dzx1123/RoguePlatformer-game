@@ -158,21 +158,66 @@ def remove_edge_backdrop(image: Image.Image) -> Image.Image:
             else:
                 pixels[x, y] = (red, green, blue, 255)
 
-    # Generated sheets sometimes leave near-white antialias pixels around pale
-    # hair or steel.  At pixel scale those pixels read as a flashing white halo.
-    # Convert only exposed neutral boundary pixels into the same dark navy ink
-    # used by the canonical hero; internal white hair highlights stay untouched.
-    boundary_pixels: list[tuple[int, int]] = []
-    for y in range(1, height - 1):
-        for x in range(1, width - 1):
-            red, green, blue, alpha = pixels[x, y]
-            if not alpha or min(red, green, blue) < 205 or max(red, green, blue) - min(red, green, blue) > 22:
-                continue
-            if any(pixels[nx, ny][3] == 0 for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1))):
-                boundary_pixels.append((x, y))
-    for x, y in boundary_pixels:
-        pixels[x, y] = (20, 28, 43, 255)
     return cleaned
+
+
+def darken_exposed_light_outline(image: Image.Image, depth: int = 12) -> None:
+    """Replace generated pale matte pixels near transparency with dark ink."""
+    pixels = image.load()
+    width, height = image.size
+    opaque = {
+        (x, y)
+        for y in range(height)
+        for x in range(width)
+        if pixels[x, y][3]
+    }
+    frontier = {
+        (x, y)
+        for x, y in opaque
+        if any(
+            (nx, ny) not in opaque
+            for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1))
+        )
+    }
+    visited = set(frontier)
+    for _layer in range(max(1, depth)):
+        next_frontier: set[tuple[int, int]] = set()
+        for x, y in frontier:
+            red, green, blue, alpha = pixels[x, y]
+            channel_spread = max(red, green, blue) - min(red, green, blue)
+            brightness = (red + green + blue) / 3.0
+            if alpha and brightness >= 115.0 and channel_spread <= 120:
+                pixels[x, y] = (18, 27, 43, 255)
+            for neighbor in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if neighbor in opaque and neighbor not in visited:
+                    visited.add(neighbor)
+                    next_frontier.add(neighbor)
+        frontier = next_frontier
+
+
+def remove_tiny_opaque_islands(image: Image.Image, maximum_area: int = 160) -> None:
+    pixels = image.load()
+    width, height = image.size
+    remaining = {
+        (x, y)
+        for y in range(height)
+        for x in range(width)
+        if pixels[x, y][3]
+    }
+    while remaining:
+        start = remaining.pop()
+        queue = [start]
+        component = [start]
+        while queue:
+            x, y = queue.pop()
+            for neighbor in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if neighbor in remaining:
+                    remaining.remove(neighbor)
+                    queue.append(neighbor)
+                    component.append(neighbor)
+        if len(component) <= maximum_area:
+            for x, y in component:
+                pixels[x, y] = (0, 0, 0, 0)
 
 
 def cell_bounds(length: int, count: int, index: int) -> tuple[int, int]:
@@ -339,7 +384,26 @@ def character_scale_anchors(image: Image.Image) -> tuple[float, float, float] | 
     if not neutral_components:
         return None
 
-    hair = max(neutral_components, key=len)
+    # Slash arcs and pale weapon blades can be larger than the hair mass.
+    # Hair is compact; effects and blades are long, sparse components.
+    compact_hair_components: list[list[tuple[int, int]]] = []
+    silhouette_height = float(bottom - top)
+    for component in neutral_components:
+        component_left = min(point[0] for point in component)
+        component_right = max(point[0] for point in component) + 1
+        component_top = min(point[1] for point in component)
+        component_bottom = max(point[1] for point in component) + 1
+        component_width = component_right - component_left
+        component_height = component_bottom - component_top
+        component_density = len(component) / float(component_width * component_height)
+        if (
+            20 <= component_width <= max(48.0, silhouette_height * 0.45)
+            and 16 <= component_height <= max(42.0, silhouette_height * 0.40)
+            and component_density >= 0.30
+        ):
+            compact_hair_components.append(component)
+
+    hair = max(compact_hair_components or neutral_components, key=len)
     hair_left = min(point[0] for point in hair)
     hair_right = max(point[0] for point in hair) + 1
     hair_top = min(point[1] for point in hair)
@@ -434,21 +498,29 @@ def normalize_complete_pose(
         Image.Resampling.NEAREST,
     )
 
-    if match_character_scale and source_anchors is not None and reference_anchors is not None:
+    resized_anchors = None
+    if match_character_scale:
+        darken_exposed_light_outline(resized, 12)
+        remove_tiny_opaque_islands(resized)
+        resized_anchors = character_scale_anchors(resized)
+
+    if match_character_scale and resized_anchors is not None and reference_anchors is not None:
         reference_hair_x = reference_anchors[0] + (canvas_width - reference.width) * 0.5
-        source_hair_x = source_anchors[0] * scale
+        source_hair_x = resized_anchors[0]
     else:
         reference_hair_x = hair_anchor_x(reference) + (canvas_width - reference.width) * 0.5
         source_hair_x = hair_anchor_x(resized)
     target_x = round(reference_hair_x - source_hair_x)
     target_x = max(4, min(target_x, canvas_width - resized.width - 4))
     target_y = reference_bounds[3] - resized.height
-    if match_character_scale and source_anchors is not None and reference_anchors is not None:
-        target_y = round(reference_anchors[2] - source_anchors[2] * scale)
+    if match_character_scale and resized_anchors is not None and reference_anchors is not None:
+        target_y = round(reference_anchors[2] - resized_anchors[2])
     target_y = max(4, min(target_y, 412 - resized.height))
 
     canvas = Image.new("RGBA", (canvas_width, 416), (0, 0, 0, 0))
     canvas.alpha_composite(resized, (target_x, target_y))
+    darken_exposed_light_outline(canvas, 12)
+    remove_tiny_opaque_islands(canvas)
     return canvas
 
 
@@ -459,7 +531,7 @@ def boundary_fringe_count(image: Image.Image) -> int:
     for y in range(1, height - 1):
         for x in range(1, width - 1):
             red, green, blue, alpha = pixels[x, y]
-            if not alpha or min(red, green, blue) < 220 or max(red, green, blue) - min(red, green, blue) > 14:
+            if not alpha or min(red, green, blue) < 125 or max(red, green, blue) - min(red, green, blue) > 92:
                 continue
             if any(pixels[nx, ny][3] == 0 for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1))):
                 count += 1
@@ -475,7 +547,7 @@ def validate_frame(path: Path, image: Image.Image) -> None:
     if any(image.getpixel(point)[3] for point in ((0, 0), (image.width - 1, 0), (0, 415), (image.width - 1, 415))):
         raise RuntimeError(f"Opaque canvas corner: {path}")
     fringe = boundary_fringe_count(image)
-    if fringe > 24:
+    if fringe > 0:
         raise RuntimeError(f"Possible pale fringe: {path} count={fringe}")
 
 
@@ -492,6 +564,9 @@ def validate_locomotion_alignment(
     hair_drift = abs(image_anchors[0] - expected_hair_x)
     foot_drift = abs(image_anchors[2] - reference_anchors[2])
     body_height_drift = abs(image_anchors[1] - reference_anchors[1])
+    # Deep matte cleanup can shorten the silhouette detector by a few source
+    # pixels even though the actual hair and foot anchors remain locked. Keep
+    # those two anchors strict and allow a small tolerance for measured height.
     if hair_drift > 1.5 or foot_drift > 2.0 or body_height_drift > 22.0:
         raise RuntimeError(
             f"Locomotion anchor drift: {path} "
