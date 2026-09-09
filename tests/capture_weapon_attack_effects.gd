@@ -2,7 +2,7 @@ extends SceneTree
 
 const PREVIEW_SIZE := Vector2i(1200, 780)
 const BACKGROUND := Color("#08111d")
-const OUTPUT_PATH := "res://tests/artifacts/weapon_actions/attack_effects_v6.png"
+const OUTPUT_PATH := "res://tests/artifacts/weapon_actions/attack_effects_baked_v7.png"
 const ATTACK_NAMES := ["FORWARD", "UP", "DOWN"]
 const SWORD_TEXTURES := [
 	"res://assets/characters/frames_polished/hero_slash.png",
@@ -41,26 +41,10 @@ func _capture() -> void:
 			"res://assets/characters/weapon_sets/twin_blades/%s" % WEAPON_POSES[attack_type],
 			Vector2(column_x[attack_type], row_y[1])
 		)
-		_add_effect(
-			Vector2(column_x[attack_type], row_y[1]),
-			WeaponCatalog.TWIN_BLADES,
-			0.43,
-			0.88,
-			Color("#b48cff"),
-			attack_type
-		)
 
 		_add_sprite(
 			"res://assets/characters/weapon_sets/greatsword/%s" % WEAPON_POSES[attack_type],
 			Vector2(column_x[attack_type], row_y[2])
-		)
-		_add_effect(
-			Vector2(column_x[attack_type], row_y[2]),
-			WeaponCatalog.GREATSWORD,
-			0.47,
-			1.28,
-			Color("#ff9b62"),
-			attack_type
 		)
 
 	_add_label("ONE-HAND", Vector2(18.0, row_y[0] - 104.0))
@@ -83,8 +67,8 @@ func _capture() -> void:
 
 func _add_sprite(texture_path: String, position: Vector2) -> void:
 	var sprite := Sprite2D.new()
-	# Match Player.tscn: the character is rendered above the procedural sweep,
-	# preserving the same foreground/background read as the baked sword frames.
+	# The crescent and character now share one texture, exactly like the
+	# one-hand reference, so no procedural Node2D is added to this preview.
 	sprite.z_index = 1
 	sprite.texture = load(texture_path) as Texture2D
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -92,30 +76,6 @@ func _add_sprite(texture_path: String, position: Vector2) -> void:
 	sprite.position = position + Vector2(0.0, -15.0)
 	sprite.scale = Vector2(0.22, 0.22)
 	root.add_child(sprite)
-
-
-func _add_effect(
-	position: Vector2,
-	weapon_id: StringName,
-	progress: float,
-	reach_scale: float,
-	accent: Color,
-	attack_type: int
-) -> void:
-	var effect := WeaponSkillEffect.new()
-	effect.position = position
-	root.add_child(effect)
-	effect.call_deferred(
-		&"set_attack_state",
-		true,
-		progress,
-		1.0,
-		weapon_id,
-		reach_scale,
-		accent,
-		attack_type
-	)
-
 
 func _add_label(text: String, position: Vector2) -> void:
 	var label := Label.new()

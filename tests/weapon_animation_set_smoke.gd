@@ -136,8 +136,11 @@ func _run_test() -> void:
 					"%s %s" % [direction_name, phase_name]
 				)
 			player.call(&"_update_skill_effect")
-			if not weapon_effect.is_attack_effect_active() or weapon_effect.get_weapon_id() != weapon_id:
-				_failures.append("%s %s did not activate its own attack qi" % [weapon_id, direction_name])
+			if weapon_effect.is_attack_effect_active():
+				_failures.append(
+					"%s %s re-enabled the removed procedural attack effect"
+					% [weapon_id, direction_name]
+				)
 		player.set("_attack_remaining", 0.0)
 		player.call(&"_update_skill_effect")
 		if weapon_effect.is_attack_effect_active():
@@ -187,6 +190,28 @@ func _run_test() -> void:
 				_failures.append("twin_blades skill scale changed when mirrored")
 			player.set("_facing", 1.0)
 			player.set("_skill_remaining", 0.0)
+		elif weapon_id == &"star_greatsword":
+			var skill_duration: float = float(player.get("_skill_duration"))
+			var greatsword_skill_cases := [
+				[0.10, "hero_attack_forward_windup"],
+				[0.30, "hero_attack_up_windup"],
+				[0.50, "hero_skill_a"],
+				[0.67, "hero_skill_b"],
+				[0.80, "hero_attack_down_follow"],
+				[0.94, "hero_attack_recovery"],
+			]
+			for skill_case: Array in greatsword_skill_cases:
+				var progress: float = float(skill_case[0])
+				var pose_name: String = String(skill_case[1])
+				player.set("_skill_remaining", skill_duration * (1.0 - progress))
+				player.call(&"_reset_sprite_pose")
+				player.call(&"_animate_skill")
+				_expect_path(
+					hero_sprite,
+					"%s/%s.png" % [directory, pose_name],
+					"greatsword skill %.2f" % progress
+				)
+			player.set("_skill_remaining", 0.0)
 
 	player.configure_weapon(&"moon_sword")
 	player.call(&"_reset_sprite_pose")
@@ -219,14 +244,14 @@ func _validate_asset_set(weapon_id: StringName) -> void:
 		if image == null or image.is_empty():
 			_failures.append("missing or empty: %s" % path)
 			continue
-		if image.get_size() != Vector2i(CANVAS_WIDTHS[weapon_id], 416):
+		if image.get_size() != Vector2i(CANVAS_WIDTHS[weapon_id], 512):
 			_failures.append("wrong canvas: %s %s" % [path, image.get_size()])
 		if image.get_format() not in [Image.FORMAT_RGBA8, Image.FORMAT_RGBAF, Image.FORMAT_RGBAH]:
 			_failures.append("not RGBA: %s" % path)
 		var used := image.get_used_rect()
-		if used.position.x < 2 or used.end.x > image.get_width() - 2 or used.position.y < 2 or used.end.y > 414:
+		if used.position.x < 2 or used.end.x > image.get_width() - 2 or used.position.y < 2 or used.end.y > image.get_height() - 2:
 			_failures.append("unsafe crop: %s %s" % [path, used])
-		for corner: Vector2i in [Vector2i.ZERO, Vector2i(image.get_width() - 1, 0), Vector2i(0, 415), Vector2i(image.get_width() - 1, 415)]:
+		for corner: Vector2i in [Vector2i.ZERO, Vector2i(image.get_width() - 1, 0), Vector2i(0, image.get_height() - 1), Vector2i(image.get_width() - 1, image.get_height() - 1)]:
 			if image.get_pixelv(corner).a > 0.0:
 				_failures.append("opaque corner: %s %s" % [path, corner])
 

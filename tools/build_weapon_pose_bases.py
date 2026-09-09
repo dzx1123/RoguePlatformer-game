@@ -3,7 +3,7 @@
 The concepts are composition references, not runtime textures.  This tool
 removes generated backdrop pixels, preserves the approved silhouette, scales
 the visible hero to the current 345 px body height, and maps the character's
-foot anchor to the same Y=403 baseline used by the polished longsword frames.
+foot anchor to Y=450 on the centered 512 px weapon canvas.
 """
 
 from __future__ import annotations
@@ -14,12 +14,15 @@ from pathlib import Path
 
 from PIL import Image
 
+from build_weapon_fullbody_frames import apply_canonical_head
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONCEPT_DIR = PROJECT_ROOT / "docs" / "weapon_concepts"
 OUTPUT_ROOT = PROJECT_ROOT / "assets" / "characters" / "weapon_sets"
-FOOT_BASELINE_Y = 403
+FOOT_BASELINE_Y = 450
 TARGET_VISIBLE_HEIGHT = 345
+CANONICAL_IDLE_PATH = PROJECT_ROOT / "assets" / "characters" / "frames_polished" / "hero_idle.png"
 
 
 @dataclass(frozen=True)
@@ -35,14 +38,14 @@ POSES = (
     PoseSpec(
         source=CONCEPT_DIR / "shadow_twin_blades_idle_concept_v1.png",
         output=OUTPUT_ROOT / "twin_blades" / "hero_idle.png",
-        canvas_size=(640, 416),
+        canvas_size=(640, 512),
         source_body_anchor_x=810,
         background_mode="alpha",
     ),
     PoseSpec(
         source=CONCEPT_DIR / "falling_star_greatblade_rear_carry_concept_v2.png",
         output=OUTPUT_ROOT / "greatsword" / "hero_idle.png",
-        canvas_size=(768, 416),
+        canvas_size=(768, 512),
         source_body_anchor_x=920,
         background_mode="flood_white",
     ),
@@ -124,6 +127,8 @@ def normalize_pose(spec: PoseSpec) -> Image.Image:
     target_y = FOOT_BASELINE_Y + 1 - resized_bounds[3]
     canvas = Image.new("RGBA", spec.canvas_size, (0, 0, 0, 0))
     canvas.alpha_composite(resized, (target_x, target_y))
+    canonical_idle = Image.open(CANONICAL_IDLE_PATH).convert("RGBA")
+    canvas = apply_canonical_head(canvas, canonical_idle)
 
     output_bounds = canvas.getchannel("A").getbbox()
     if output_bounds is None:

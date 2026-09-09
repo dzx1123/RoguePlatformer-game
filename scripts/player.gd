@@ -2359,17 +2359,12 @@ func _update_skill_pose_echo(delta: float) -> void:
 
 
 func _update_skill_effect() -> void:
-	var attack_active: bool = _attack_remaining > 0.0 and not _is_dead
-	var attack_progress: float = 0.0
-	if attack_active:
-		attack_progress = clampf(
-			1.0 - _attack_remaining / maxf(attack_duration, 0.001),
-			0.0,
-			1.0
-		)
+	# Directional attack crescents are painted into each weapon's strike frame,
+	# matching the one-hand sword. Keep the procedural attack layer hard-off so
+	# it cannot double the baked art or replace it with polygonal sweeps.
 	weapon_skill_effect.set_attack_state(
-		attack_active,
-		attack_progress,
+		false,
+		0.0,
 		_facing,
 		_weapon_id,
 		_weapon_reach,

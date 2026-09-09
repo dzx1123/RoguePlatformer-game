@@ -1,10 +1,10 @@
 extends SceneTree
 
 const EXPECTED := {
-	"res://assets/characters/weapon_sets/twin_blades/hero_idle.png": Vector2i(640, 416),
-	"res://assets/characters/weapon_sets/greatsword/hero_idle.png": Vector2i(768, 416),
+	"res://assets/characters/weapon_sets/twin_blades/hero_idle.png": Vector2i(640, 512),
+	"res://assets/characters/weapon_sets/greatsword/hero_idle.png": Vector2i(768, 512),
 }
-const EXPECTED_BOTTOM := 404
+const EXPECTED_BOTTOM := 451
 const MIN_MARGIN := 4
 
 
