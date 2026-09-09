@@ -24,11 +24,7 @@ const GOBLIN_CLUB_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_clu
 const GOBLIN_ELITE_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_walk_sheet_v4.png")
 const GOBLIN_ARCHER_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_walk_sheet_v4.png")
 const NIGHT_BAT_FLAP_MID := preload("res://assets/enemies/night_bat_flap_mid.png")
-const NIGHT_BAT_FLAP_DOWN := preload("res://assets/enemies/night_bat_flap_down.png")
-const NIGHT_BAT_FLAP_UP := preload("res://assets/enemies/night_bat_flap_up.png")
-const NIGHT_BAT_TUCK := preload("res://assets/enemies/night_bat_tuck.png")
 const NIGHT_BAT_DIVE := preload("res://assets/enemies/night_bat_dive.png")
-const NIGHT_BAT_HANG := preload("res://assets/enemies/night_bat_hang.png")
 const MOON_WHEEL_GEOMETRY := preload("res://scripts/moon_wheel_geometry.gd")
 const WEAPON_SKILL_GEOMETRY := preload("res://scripts/weapon_skill_geometry.gd")
 const GOBLIN_EDGE_MATERIAL := preload("res://assets/shaders/goblin_edge_cleanup.tres")
@@ -72,14 +68,6 @@ enum BossAttackPattern {
 enum BossIdentity {
 	CRYSTAL_KING,
 	WAR_CHIEF,
-}
-
-enum NightBatState {
-	HANGING,
-	TAKING_OFF,
-	FLYING,
-	RETURNING,
-	ATTACHING,
 }
 
 const GRAVITY := 1800.0
@@ -155,11 +143,6 @@ const NIGHT_BAT_DIVE_ACCELERATION := 1680.0
 const NIGHT_BAT_STRIKE_RANGE := Vector2(74.0, 66.0)
 const NIGHT_BAT_FLAP_FPS := 9.0
 const NIGHT_BAT_SPRITE_SCALE := 2.15
-const NIGHT_BAT_TAKEOFF_DURATION := 0.34
-const NIGHT_BAT_RETURN_DELAY := 1.25
-const NIGHT_BAT_RETURN_SPEED := 220.0
-const NIGHT_BAT_REHANG_DISTANCE := 8.0
-const NIGHT_BAT_ATTACH_DURATION := 0.16
 
 var _variant: int = 0
 var _role: int = EnemyRole.MELEE
@@ -220,11 +203,6 @@ var _night_bat_dive_target: Vector2 = Vector2.ZERO
 var _night_bat_recovery_y: float = 0.0
 var _night_bat_dive_direction: Vector2 = Vector2.DOWN
 var _night_bat_dive_committed: bool = false
-var _night_bat_state: int = NightBatState.HANGING
-var _night_bat_hang_position: Vector2 = Vector2.ZERO
-var _night_bat_takeoff_remaining: float = 0.0
-var _night_bat_lost_target_remaining: float = NIGHT_BAT_RETURN_DELAY
-var _night_bat_attach_remaining: float = 0.0
 
 
 func _ready() -> void:
@@ -289,7 +267,7 @@ func setup(
 	difficulty_aggression_multiplier: float = 1.0,
 	behavior_profile: Dictionary = {},
 	archetype: int = EnemyArchetype.STANDARD,
-	night_bat_starts_attached: bool = false
+	_legacy_night_bat_starts_attached: bool = false
 ) -> void:
 	_role = clampi(role, EnemyRole.MELEE, EnemyRole.RANGED)
 	_rank = clampi(rank, EnemyRank.NORMAL, EnemyRank.BOSS)
@@ -319,16 +297,6 @@ func setup(
 		_variant = 0
 	_phase = phase
 	_flight_anchor_y = global_position.y
-	if is_night_bat():
-		_night_bat_state = (
-			NightBatState.HANGING
-			if night_bat_starts_attached
-			else NightBatState.FLYING
-		)
-		_night_bat_hang_position = global_position
-		_night_bat_takeoff_remaining = 0.0
-		_night_bat_lost_target_remaining = NIGHT_BAT_RETURN_DELAY
-		_night_bat_attach_remaining = 0.0
 	_locomotion_cycle = 0.0 if sin(phase) < 0.0 else 4.0
 	_locomotion_blend = 0.0
 	_locomotion_active = false
@@ -427,7 +395,7 @@ func is_night_bat() -> bool:
 
 
 func is_night_bat_hanging() -> bool:
-	return is_night_bat() and _night_bat_state == NightBatState.HANGING
+	return false # Compatibility for callers; bats now always patrol in flight.
 
 
 func get_boss_identity() -> int:
@@ -722,8 +690,6 @@ func _apply_player_hit(
 	_current_health = maxi(0, _current_health - applied_damage)
 	_hurt_remaining = 0.18
 	_hurt_invulnerability_remaining = maxf(0.0, hurt_invulnerability)
-	if is_night_bat() and _night_bat_state == NightBatState.HANGING:
-		_begin_night_bat_takeoff()
 	if not is_boss():
 		_attack_remaining = 0.0
 		_attack_action_performed = false
@@ -792,14 +758,6 @@ func _physics_process(delta: float) -> void:
 	_turn_remaining = maxf(0.0, _turn_remaining - delta)
 	_hurt_remaining = maxf(0.0, _hurt_remaining - delta)
 	_hurt_invulnerability_remaining = maxf(0.0, _hurt_invulnerability_remaining - delta)
-	if is_night_bat():
-		_update_night_bat_awareness(delta)
-		if _night_bat_state == NightBatState.HANGING:
-			velocity = Vector2.ZERO
-			global_position = _night_bat_hang_position
-			_update_sprite_animation(delta)
-			queue_redraw()
-			return
 
 	var desired_speed: float = 0.0
 	var night_bat_attack_progress: float = -1.0
@@ -847,8 +805,6 @@ func _physics_process(delta: float) -> void:
 					sound_requested.emit(&"bite", is_boss())
 		if _attack_remaining <= 0.0:
 			_try_schedule_melee_combo()
-	elif is_night_bat() and _night_bat_state != NightBatState.FLYING:
-		desired_speed = _get_desired_speed()
 	else:
 		if _target_in_attack_range() and _attack_cooldown_remaining <= 0.0:
 			_start_attack()
@@ -871,9 +827,7 @@ func _physics_process(delta: float) -> void:
 			desired_speed,
 			ACCELERATION * _difficulty_speed_multiplier * acceleration_scale * delta
 		)
-		if is_night_bat() and _night_bat_state != NightBatState.FLYING:
-			_update_night_bat_transition_velocity(delta)
-		elif is_flying_enemy():
+		if is_flying_enemy():
 			_update_flight_vertical_velocity(delta)
 		elif not is_on_floor():
 			velocity.y += GRAVITY * delta
@@ -900,87 +854,6 @@ func _physics_process(delta: float) -> void:
 		return
 	_update_sprite_animation(delta)
 	queue_redraw()
-
-
-func _begin_night_bat_takeoff() -> void:
-	if not is_night_bat() or _night_bat_state != NightBatState.HANGING:
-		return
-	_night_bat_state = NightBatState.TAKING_OFF
-	_night_bat_takeoff_remaining = NIGHT_BAT_TAKEOFF_DURATION
-	_night_bat_lost_target_remaining = NIGHT_BAT_RETURN_DELAY
-	_sprite_pose_initialized = false
-
-
-func _update_night_bat_awareness(delta: float) -> void:
-	var target_visible: bool = _target_is_visible()
-	match _night_bat_state:
-		NightBatState.HANGING:
-			if target_visible:
-				_begin_night_bat_takeoff()
-		NightBatState.TAKING_OFF:
-			_night_bat_takeoff_remaining = maxf(0.0, _night_bat_takeoff_remaining - delta)
-			if _night_bat_takeoff_remaining <= 0.0:
-				_night_bat_state = NightBatState.FLYING
-				_flight_anchor_y = global_position.y
-				_night_bat_lost_target_remaining = NIGHT_BAT_RETURN_DELAY
-		NightBatState.FLYING:
-			if target_visible or _attack_remaining > 0.0 or _hurt_remaining > 0.0:
-				_night_bat_lost_target_remaining = NIGHT_BAT_RETURN_DELAY
-			else:
-				_night_bat_lost_target_remaining = maxf(
-					0.0,
-					_night_bat_lost_target_remaining - delta
-				)
-				if _night_bat_lost_target_remaining <= 0.0:
-					_night_bat_state = NightBatState.RETURNING
-					_attack_remaining = 0.0
-					_attack_action_performed = false
-		NightBatState.RETURNING:
-			if target_visible:
-				_night_bat_state = NightBatState.FLYING
-				_night_bat_lost_target_remaining = NIGHT_BAT_RETURN_DELAY
-			elif global_position.distance_to(_night_bat_hang_position) <= NIGHT_BAT_REHANG_DISTANCE:
-				global_position = _night_bat_hang_position
-				velocity = Vector2.ZERO
-				_night_bat_state = NightBatState.ATTACHING
-				_night_bat_attach_remaining = NIGHT_BAT_ATTACH_DURATION
-				_sprite_pose_initialized = false
-		NightBatState.ATTACHING:
-			if target_visible:
-				_night_bat_state = NightBatState.FLYING
-				_night_bat_lost_target_remaining = NIGHT_BAT_RETURN_DELAY
-			else:
-				_night_bat_attach_remaining = maxf(0.0, _night_bat_attach_remaining - delta)
-				if _night_bat_attach_remaining <= 0.0:
-					_night_bat_state = NightBatState.HANGING
-				_sprite_pose_initialized = false
-
-
-func _update_night_bat_transition_velocity(delta: float) -> void:
-	if _night_bat_state == NightBatState.TAKING_OFF:
-		var progress: float = clampf(
-			1.0 - _night_bat_takeoff_remaining / NIGHT_BAT_TAKEOFF_DURATION,
-			0.0,
-			1.0
-		)
-		var target_direction: float = _facing
-		if is_instance_valid(_target) and absf(_target.global_position.x - global_position.x) > 4.0:
-			target_direction = signf(_target.global_position.x - global_position.x)
-		var takeoff_velocity := Vector2(
-			target_direction * lerpf(36.0, 112.0, progress),
-			lerpf(116.0, -164.0, smoothstep(0.18, 1.0, progress))
-		)
-		velocity = velocity.move_toward(takeoff_velocity, NIGHT_BAT_DIVE_ACCELERATION * delta)
-		return
-	if _night_bat_state == NightBatState.RETURNING:
-		var return_offset: Vector2 = _night_bat_hang_position - global_position
-		if return_offset.length() <= NIGHT_BAT_REHANG_DISTANCE:
-			velocity = Vector2.ZERO
-			return
-		velocity = velocity.move_toward(
-			return_offset.normalized() * NIGHT_BAT_RETURN_SPEED,
-			FLYER_HOVER_ACCELERATION * 1.8 * delta
-		)
 
 
 func _is_shield_blocking(attack_origin: Vector2) -> bool:
@@ -1056,14 +929,6 @@ func _update_night_bat_dive_velocity(attack_progress: float, delta: float) -> vo
 
 
 func _get_desired_speed() -> float:
-	if is_night_bat():
-		if _night_bat_state in [NightBatState.HANGING, NightBatState.ATTACHING]:
-			return 0.0
-		if _night_bat_state == NightBatState.RETURNING:
-			var return_delta_x: float = _night_bat_hang_position.x - global_position.x
-			if absf(return_delta_x) <= NIGHT_BAT_REHANG_DISTANCE:
-				return 0.0
-			return signf(return_delta_x) * NIGHT_BAT_RETURN_SPEED
 	if _target_is_visible():
 		var target_delta: float = _target.global_position.x - global_position.x
 		var target_direction: float = _facing
@@ -1161,8 +1026,6 @@ func _try_pursuit_jump() -> void:
 
 
 func _target_in_attack_range() -> bool:
-	if is_night_bat() and _night_bat_state != NightBatState.FLYING:
-		return false
 	if not _target_is_visible():
 		return false
 
@@ -2030,18 +1893,14 @@ func _get_night_bat_flap_texture() -> Texture2D:
 		int(floor(_elapsed * NIGHT_BAT_FLAP_FPS + _phase)),
 		2
 	)
-	return NIGHT_BAT_FLAP_UP if flap_frame == 0 else NIGHT_BAT_FLAP_MID
+	return NIGHT_BAT_DIVE if flap_frame == 0 else NIGHT_BAT_FLAP_MID
 
 
 func _update_night_bat_sprite_animation(delta: float) -> void:
 	var previous_position: Vector2 = _enemy_sprite.position
 	var previous_scale: Vector2 = _enemy_sprite.scale
 	var previous_rotation: float = _enemy_sprite.rotation
-	var selected_texture: Texture2D = (
-		NIGHT_BAT_HANG
-		if _night_bat_state == NightBatState.HANGING
-		else _get_night_bat_flap_texture()
-	)
+	var selected_texture: Texture2D = _get_night_bat_flap_texture()
 	var attack_progress: float = 0.0
 	var hurt_progress: float = 0.0
 	var death_progress: float = 0.0
@@ -2052,14 +1911,14 @@ func _update_night_bat_sprite_animation(delta: float) -> void:
 			0.0,
 			1.0
 		)
-		selected_texture = NIGHT_BAT_FLAP_DOWN if death_progress < 0.36 else NIGHT_BAT_TUCK
+		selected_texture = NIGHT_BAT_FLAP_MID
 	elif _hurt_remaining > 0.0:
 		hurt_progress = clampf(
 			1.0 - _hurt_remaining / HURT_ANIMATION_DURATION,
 			0.0,
 			1.0
 		)
-		selected_texture = NIGHT_BAT_TUCK
+		selected_texture = NIGHT_BAT_FLAP_MID
 	elif _attack_remaining > 0.0:
 		attack_progress = clampf(
 			1.0 - _attack_remaining / maxf(_get_attack_duration(), 0.001),
@@ -2067,12 +1926,12 @@ func _update_night_bat_sprite_animation(delta: float) -> void:
 			1.0
 		)
 		if attack_progress < NIGHT_BAT_DIVE_START_PROGRESS:
-			selected_texture = NIGHT_BAT_TUCK
+			selected_texture = NIGHT_BAT_FLAP_MID
 		elif attack_progress < NIGHT_BAT_DIVE_END_PROGRESS:
 			selected_texture = NIGHT_BAT_DIVE
 		else:
 			selected_texture = (
-				NIGHT_BAT_FLAP_UP
+				NIGHT_BAT_DIVE
 				if posmod(int(floor(attack_progress * 16.0)), 2) == 0
 				else NIGHT_BAT_FLAP_MID
 			)
@@ -2083,7 +1942,7 @@ func _update_night_bat_sprite_animation(delta: float) -> void:
 	_enemy_sprite.flip_h = _get_display_facing() > 0.0
 	var sprite_scale: float = NIGHT_BAT_SPRITE_SCALE * (1.18 if is_elite() else 1.0)
 	_enemy_sprite.scale = Vector2.ONE * sprite_scale
-	_enemy_sprite.position = Vector2(0.0, 7.0 if _night_bat_state == NightBatState.HANGING else -3.0)
+	_enemy_sprite.position = Vector2(0.0, -3.0)
 	_enemy_sprite.rotation = 0.0
 	_enemy_sprite.modulate = Color.WHITE
 
@@ -2120,7 +1979,7 @@ func _update_night_bat_sprite_animation(delta: float) -> void:
 			)
 			_enemy_sprite.rotation = -_facing * sin(recovery_progress * PI) * 0.18
 			_enemy_sprite.position.y -= sin(recovery_progress * PI) * 4.0
-	elif _night_bat_state != NightBatState.HANGING:
+	else:
 		_enemy_sprite.position.y += sin(_elapsed * 5.2 + _phase) * 1.4
 
 	var target_position: Vector2 = _enemy_sprite.position

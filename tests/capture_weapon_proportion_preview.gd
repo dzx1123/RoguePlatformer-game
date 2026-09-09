@@ -93,6 +93,9 @@ func _initialize() -> void:
 
 
 func _capture_preview() -> void:
+	for action: StringName in [&"restart", &"move_left", &"move_right", &"jump", &"dash", &"attack", &"skill"]:
+		if not InputMap.has_action(action):
+			InputMap.add_action(action)
 	root.content_scale_size = PREVIEW_SIZE
 	root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_IGNORE
 	root.size = PREVIEW_SIZE
@@ -185,19 +188,21 @@ func _capture_preview() -> void:
 
 
 func _add_pose(texture_path: String, center: Vector2) -> void:
-	var texture := load(texture_path) as Texture2D
-	if texture == null:
-		push_error("Missing proportion-preview texture: %s" % texture_path)
-		quit(1)
-		return
-	var sprite := Sprite2D.new()
-	sprite.texture = texture
-	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	sprite.position = center + Vector2(0.0, -15.0)
-	sprite.scale = Vector2.ONE * HERO_SCALE
-	sprite.z_index = 2
-	root.add_child(sprite)
-
+	var player := (load("res://scenes/Player.tscn") as PackedScene).instantiate() as RoguePlayer
+	(player.get_node("Camera2D") as Camera2D).enabled = false
+	root.add_child(player)
+	player.set_physics_process(false)
+	player.position = center
+	var weapon: StringName = WeaponCatalog.SWORD
+	if texture_path.contains("/twin_blades/"):
+		weapon = WeaponCatalog.TWIN_BLADES
+	elif texture_path.contains("/greatsword/"):
+		weapon = WeaponCatalog.GREATSWORD
+	player.configure_weapon(weapon)
+	player.call(&"_reset_sprite_pose")
+	player.call(&"_set_texture", load(texture_path))
+	player.call(&"_apply_weapon_pose_calibration")
+	player.get_node("HeroSprite").z_index = 2
 
 func _sword_path(filename: String) -> String:
 	return "res://assets/characters/frames_polished/%s" % filename

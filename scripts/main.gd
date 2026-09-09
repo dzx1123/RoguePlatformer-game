@@ -1,4 +1,4 @@
-﻿extends Node2D
+extends Node2D
 
 const WORLD_SIZE := Vector2(1280.0, 720.0)
 const DISPLAY_SIZE := Vector2(1280.0, 720.0)
@@ -3009,10 +3009,6 @@ func _spawn_room_enemies() -> void:
 		var role: int = int(descriptor.get("role", ENEMY_ROLE_MELEE))
 		var rank: int = int(descriptor.get("rank", ENEMY_RANK_NORMAL))
 		var family: int = _get_enemy_family_for_spawn(_current_room_index, spawn_index)
-		if family == ENEMY_FAMILY_NIGHT_BAT:
-			surface = _get_night_bat_roost_surface(surface)
-			minimum_x = surface.position.x + 42.0
-			maximum_x = surface.end.x - 42.0
 		var archetype: int = _get_enemy_archetype_for_spawn(
 			_current_room_index,
 			spawn_index,
@@ -3021,7 +3017,7 @@ func _spawn_room_enemies() -> void:
 			family
 		)
 		var spawn_y: float = (
-			surface.end.y + 45.0
+			surface.position.y - RogueEnemy.NIGHT_BAT_HOVER_HEIGHT
 			if family == ENEMY_FAMILY_NIGHT_BAT
 			else surface.position.y - (28.0 if rank == ENEMY_RANK_ELITE else 22.0)
 		)
@@ -3035,20 +3031,6 @@ func _spawn_room_enemies() -> void:
 			spawn_index,
 			archetype
 		)
-
-
-func _get_night_bat_roost_surface(preferred_surface: Rect2) -> Rect2:
-	var best_surface: Rect2 = preferred_surface
-	var best_score: float = INF
-	for candidate: Rect2 in platform_rects:
-		if candidate.size.y > 40.0 or candidate.position.y > 500.0:
-			continue
-		var score: float = absf(candidate.get_center().x - preferred_surface.get_center().x)
-		score += absf(candidate.position.y - preferred_surface.position.y) * 0.20
-		if score < best_score:
-			best_score = score
-			best_surface = candidate
-	return best_surface
 
 
 func _spawn_enemy(
@@ -3115,8 +3097,7 @@ func _spawn_enemy(
 		_get_difficulty_speed_multiplier(),
 		_get_difficulty_aggression_multiplier(),
 		behavior_profile,
-		archetype,
-		family == ENEMY_FAMILY_NIGHT_BAT
+		archetype
 	)
 	if (
 		_current_objective == RoomObjective.ELITE_HUNT
@@ -3986,13 +3967,9 @@ func _spawn_risk_ambush() -> void:
 		var role: int = ENEMY_ROLE_RANGED if ambush_index % 3 == 2 else ENEMY_ROLE_MELEE
 		var rank: int = ENEMY_RANK_ELITE if ambush_index < elite_slots else ENEMY_RANK_NORMAL
 		var family: int = _get_enemy_family_for_spawn(_current_room_index, ambush_index)
-		if family == ENEMY_FAMILY_NIGHT_BAT:
-			surface = _get_night_bat_roost_surface(surface)
-			minimum_x = surface.position.x + 42.0
-			maximum_x = surface.end.x - 42.0
 		var ratio: float = 0.22 + float(posmod(ambush_index * 37, 57)) / 100.0
 		var spawn_y: float = (
-			surface.end.y + 45.0
+			surface.position.y - RogueEnemy.NIGHT_BAT_HOVER_HEIGHT
 			if family == ENEMY_FAMILY_NIGHT_BAT
 			else surface.position.y - (28.0 if rank == ENEMY_RANK_ELITE else 22.0)
 		)

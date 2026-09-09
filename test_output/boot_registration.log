@@ -1,0 +1,315 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_idle.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_0.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_1.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_2.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_3.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_4.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_5.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_6.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_7.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_8.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_9.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_10.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_11.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_idle.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_0.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_1.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_2.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_3.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_4.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_5.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_6.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_7.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_8.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_9.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_10.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/frames_polished/hero_run_11.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_idle.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_0.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_1.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_2.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_3.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_4.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_5.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_6.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_7.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_8.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_9.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_10.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_11.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_idle.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_0.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_1.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_2.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_3.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_4.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_5.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_6.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_7.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_8.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_9.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_10.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/twin_blades/hero_run_11.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_idle.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_0.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_1.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_2.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_3.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_4.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_5.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_6.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_7.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_8.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_9.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_10.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_11.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_idle.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_0.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_1.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_2.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_3.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_4.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_5.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_6.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_7.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_8.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_9.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_10.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+WARNING: Loaded resource as image file, this will not work on export: 'res://assets/characters/weapon_sets/greatsword/hero_run_11.png'. Instead, import the image file as an Image resource and load it normally as a resource.
+   at: load_from_file (core/io/image.cpp:2780)
+   GDScript backtrace (most recent call first):
+       [0] _run (res://tests/weapon_boot_registration_smoke.gd:27)
+weapon_boot_registration_smoke: PASS both facings, idle and all 12 run frames

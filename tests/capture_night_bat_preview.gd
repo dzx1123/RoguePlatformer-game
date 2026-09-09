@@ -2,10 +2,10 @@ extends SceneTree
 
 const PREVIEW_SIZE := Vector2i(1180, 420)
 const SAMPLE_LABELS: Array[String] = [
-	"FLAP UP",
-	"FLAP MID",
-	"FLAP DOWN",
-	"TUCK / WARN",
+	"FLIGHT A",
+	"FLIGHT B",
+	"FLIGHT A",
+	"WARN",
 	"DIVE ATTACK",
 	"RECOVER",
 ]
@@ -42,7 +42,7 @@ func _capture_preview() -> void:
 	title.add_theme_color_override("font_color", Color("#d9e8ff"))
 	backdrop_layer.add_child(title)
 	var subtitle := Label.new()
-	subtitle.text = "3-frame flight cycle  →  tucked warning  →  locked dive  →  climb recovery"
+	subtitle.text = "2-frame upright flight cycle  →  flight warning  →  locked dive  →  climb recovery"
 	subtitle.position = Vector2(28.0, 60.0)
 	subtitle.size = Vector2(float(PREVIEW_SIZE.x) - 56.0, 26.0)
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

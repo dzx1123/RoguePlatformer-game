@@ -34,6 +34,9 @@ enum AttackType {
 	DOWNWARD,
 }
 
+const HERO_EDGE_SHADER := preload("res://assets/shaders/hero_edge_cleanup.gdshader")
+const HERO_RUN_CUTOUT_SHADER := preload("res://assets/shaders/hero_run_cutout.gdshader")
+
 const HERO_IDLE: Texture2D = preload("res://assets/characters/frames_polished/hero_idle.png")
 const HERO_RUN_0: Texture2D = preload("res://assets/characters/frames_polished/hero_run_0.png")
 const HERO_RUN_1: Texture2D = preload("res://assets/characters/frames_polished/hero_run_1.png")
@@ -241,9 +244,19 @@ var _visual_state_elapsed: float = 0.0
 var _sprite_pose_initialized: bool = false
 var _current_texture: Texture2D
 var _weapon_pose_cache: Dictionary = {}
+var _sole_cache: Dictionary = {}
+var _hero_edge_material: ShaderMaterial
+var _hero_run_material: ShaderMaterial
 
 
 func _ready() -> void:
+	var edge_material := ShaderMaterial.new()
+	edge_material.shader = HERO_EDGE_SHADER
+	_hero_edge_material = edge_material
+	_hero_run_material = ShaderMaterial.new()
+	_hero_run_material.shader = HERO_RUN_CUTOUT_SHADER
+	hero_sprite.material = edge_material
+	skill_pose_echo.material = edge_material
 	_spawn_point = global_position
 	_base_max_health = maxi(1, max_health)
 	_base_attack_damage = maxi(1, attack_damage)
@@ -1315,6 +1328,7 @@ func _update_dash_echoes(delta: float) -> void:
 	var echo: Sprite2D = DASH_ECHO_SCRIPT.new() as Sprite2D
 	get_parent().add_child(echo)
 	echo.global_position = hero_sprite.global_position
+	echo.material = hero_sprite.material
 	echo.z_index = hero_sprite.z_index - 1
 	echo.call(&"setup", hero_sprite.texture, _facing, hero_sprite.global_scale)
 
@@ -1467,6 +1481,9 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 		hero_sprite.position = previous_position.lerp(target_position, pose_blend)
 		hero_sprite.scale = previous_scale.lerp(target_scale, pose_blend)
 		hero_sprite.rotation = lerp_angle(previous_rotation, target_rotation, pose_blend)
+		if _weapon_id != WeaponCatalog.SWORD and _current_texture != null and _visual_state in [VisualState.IDLE, VisualState.LAND]:
+			# A new texture's sole correction must not lag behind the texture swap.
+			hero_sprite.position.y = target_position.y + _get_boot_baseline(_current_texture) * (target_scale.y - hero_sprite.scale.y)
 	else:
 		_sprite_pose_initialized = true
 
@@ -1513,37 +1530,45 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 
 func _apply_weapon_pose_calibration() -> void:
 	hero_sprite.self_modulate = Color.WHITE
+	if hero_sprite.material == _hero_edge_material:
+		# Use the same edge treatment in idle and every swing; weapon colours must not switch.
+		(hero_sprite.material as ShaderMaterial).set_shader_parameter(&"matte_radius", 1.0)
 	if _current_texture == null or _weapon_id == WeaponCatalog.SWORD:
 		return
 	var texture_path: String = _current_texture.resource_path
-	var scale_factor: float = 1.0
-	if _weapon_id == WeaponCatalog.TWIN_BLADES:
-		scale_factor = 1.05
-		if texture_path.contains("hero_attack_up") or texture_path.contains("hero_attack_down"):
-			scale_factor = 1.0
-		elif texture_path.contains("hero_attack_forward"):
-			scale_factor = 1.035
-	elif _weapon_id == WeaponCatalog.GREATSWORD:
-		scale_factor = 1.06
-		if texture_path.ends_with("hero_idle.png"):
-			scale_factor = 1.075
-			hero_sprite.position.x -= _get_display_facing() * 8.8
-		elif texture_path.contains("hero_attack_forward_windup"):
-			scale_factor = 1.18
-		elif texture_path.contains("hero_attack_up_windup"):
-			scale_factor = 1.16
-		elif texture_path.contains("hero_attack_up_strike"):
-			scale_factor = 1.24
-		elif texture_path.contains("hero_attack_up_follow"):
-			scale_factor = 1.18
-		elif texture_path.contains("hero_attack_down"):
-			scale_factor = 1.05
-		elif texture_path.contains("hero_attack"):
-			scale_factor = 1.07
-		if texture_path.contains("hero_attack") or texture_path.contains("hero_skill"):
-			hero_sprite.self_modulate = Color(0.97, 1.0, 1.035, 1.0)
-	hero_sprite.scale *= scale_factor
-	hero_sprite.position.y -= (scale_factor - 1.0) * 42.0
+	# All weapon frames already carry the exact canonical head at source scale.
+	# Keep one scale across idle, locomotion and all attack directions.
+	var pose_name: String = texture_path.get_file()
+	if pose_name == "hero_idle.png" or pose_name == "hero_land.png":
+		var reference_path: String = "res://assets/characters/frames_polished/" + pose_name
+		if not _weapon_pose_cache.has(reference_path):
+			_weapon_pose_cache[reference_path] = load(reference_path)
+		var reference := _weapon_pose_cache[reference_path] as Texture2D
+		var original_scale_y: float = hero_sprite.scale.y
+		var reference_sole: float = _get_boot_baseline(reference) * original_scale_y
+		var weapon_sole: float = _get_boot_baseline(_current_texture) * hero_sprite.scale.y
+		hero_sprite.position.y += reference_sole - weapon_sole
+
+
+func _get_boot_baseline(texture: Texture2D) -> float:
+	if _sole_cache.has(texture.resource_path):
+		return float(_sole_cache[texture.resource_path])
+	var image: Image = texture.get_image()
+	if image.is_compressed():
+		image.decompress()
+	var center_x: int = image.get_width() / 2
+	# Only the lower body corridor: a trailing blade must never define the floor.
+	var sole: float = 0.0
+	for y in range(image.get_height() - 1, image.get_height() / 2, -1):
+		var visible_count: int = 0
+		for x in range(center_x - 100, center_x + 116):
+			if image.get_pixel(x, y).a >= 0.5:
+				visible_count += 1
+		if visible_count >= 6:
+			sole = float(y + 1) - float(image.get_height()) * 0.5
+			break
+	_sole_cache[texture.resource_path] = sole
+	return sole
 
 
 func _get_pose_smoothing_rate(visual_state: int) -> float:
@@ -1575,6 +1600,8 @@ func _set_texture(texture: Texture2D) -> void:
 		return
 	_current_texture = texture
 	hero_sprite.texture = texture
+	var run_cutout: bool = _weapon_id != WeaponCatalog.SWORD and texture.resource_path.get_file().begins_with("hero_run_")
+	hero_sprite.material = _hero_run_material if run_cutout else _hero_edge_material
 
 
 func _weapon_pose_texture(pose_name: StringName, fallback: Texture2D) -> Texture2D:
@@ -2317,6 +2344,7 @@ func _start_skill_pose_echo(
 	if _reduced_effects_enabled:
 		return
 	skill_pose_echo.texture = texture
+	skill_pose_echo.material = _hero_run_material if texture.resource_path.contains("/weapon_sets/") and texture.resource_path.get_file().begins_with("hero_run_") else _hero_edge_material
 	skill_pose_echo.region_enabled = false
 	skill_pose_echo.position = pose_position
 	skill_pose_echo.scale = pose_scale

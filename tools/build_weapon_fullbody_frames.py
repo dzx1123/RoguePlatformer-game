@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
+from weapon_body_registration import boot_line
 
 from bake_weapon_frame_effects import POSE_EFFECTS, bake_effect_into_frame
 
@@ -113,7 +114,7 @@ SPECS = (
     ),
     SheetSpec(
         "greatsword",
-        "hero_attack_fullbody_sheet_v3.png",
+        "hero_attack_fullbody_sheet_v4.png",
         4,
         3,
         ATTACK_OUTPUTS,
@@ -695,10 +696,10 @@ def normalize_complete_pose(
             reference_hair_center_y = (
                 reference_hair_bounds[1] + reference_hair_bounds[3]
             ) * 0.5
-            source_head_to_ground = source_crop.height - source_hair_center_y
-            reference_head_to_ground = reference_bounds[3] - reference_hair_center_y
-            # The idle source has no airborne offset and both weapon tips share
-            # the foot line, so this second invariant also locks body height.
+            source_head_to_ground = boot_line(source_crop, source_hair_bounds) - source_hair_center_y
+            reference_head_to_ground = boot_line(reference, reference_hair_bounds) - reference_hair_center_y
+            # Measure leather soles: the trailing blade extends below the boots.
+            # Body scale must not depend on weapon length.
             # Attack silhouettes cannot use it because an overhead blade may
             # become the full-pose bottom edge.
             scale = reference_head_to_ground / float(max(1.0, source_head_to_ground))

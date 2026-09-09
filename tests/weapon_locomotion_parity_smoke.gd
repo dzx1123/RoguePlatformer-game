@@ -97,6 +97,7 @@ func _sample_run(
 	player.set("_run_cycle", float(frame_index))
 	player.call(&"_reset_sprite_pose")
 	player.call(&"_animate_run")
+	player.call(&"_apply_weapon_pose_calibration")
 	return _sprite_transform(sprite)
 
 
@@ -134,6 +135,7 @@ func _run_twenty_second_cycle(
 		player.set("_run_cycle", cycle)
 		player.call(&"_reset_sprite_pose")
 		player.call(&"_animate_run")
+		player.call(&"_apply_weapon_pose_calibration")
 		var frame_index := int(floor(cycle))
 		counts[frame_index] += 1
 		_expect_path(
