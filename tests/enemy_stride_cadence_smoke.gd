@@ -19,7 +19,7 @@ func _run_test() -> void:
 		for tick in range(90):
 			enemy.call(&"_update_locomotion_animation", 1.0 / 60.0)
 			frames_seen[int(floor(float(enemy.get("_locomotion_cycle"))))] = true
-		var expected: int = 8 if family == RogueEnemy.EnemyFamily.GOBLIN else 4
+		var expected: int = RogueEnemy.GOBLIN_RUN_FRAME_COUNT if family == RogueEnemy.EnemyFamily.GOBLIN else 4
 		if frames_seen.size() != expected:
 			push_error("Slow patrol did not complete its stride cycle")
 			quit(1)
@@ -29,7 +29,7 @@ func _run_test() -> void:
 		for tick in range(5):
 			enemy.call(&"_update_locomotion_animation", 1.0 / 60.0)
 			var current: float = float(enemy.get("_locomotion_cycle"))
-			if current <= previous:
+			if fposmod(current - previous, float(expected)) <= 0.0001:
 				push_error("Turning froze or reset the moving stride")
 				quit(1)
 				return

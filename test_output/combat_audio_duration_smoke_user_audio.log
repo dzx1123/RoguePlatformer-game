@@ -1,0 +1,14 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+combat_audio_duration: whoosh_1.wav 0.120s
+combat_audio_duration: whoosh_2.wav 0.100s
+combat_audio_duration: whoosh_3.wav 0.130s
+combat_audio_duration: hyah_1.wav 0.130s
+combat_audio_duration: hit_1.wav 0.080s
+combat_audio_duration: flesh_burst.ogg 0.919s
+combat_audio_duration: flesh_burst_2.ogg 0.974s
+combat_audio_duration: crunch.ogg 1.034s
+combat_audio_duration: slime_splat_1.wav 0.560s
+combat_audio_duration: slime_splat_2.wav 0.350s
+combat_audio_mix: voice=-0.7dB hit=-6.9dB whoosh=-14.0dB
+combat_audio_duration_smoke: PASS

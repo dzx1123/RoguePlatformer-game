@@ -203,7 +203,7 @@ func _run_test() -> void:
 			if (
 				not goblin_chief.is_boss()
 				or goblin_chief.get_enemy_family() != RogueEnemy.EnemyFamily.GOBLIN
-				or not chief_texture_path.ends_with("red_fang_goblin_elite_walk_sheet_v4.png")
+				or not chief_texture_path.ends_with("goblin_reference_atlas.png")
 			):
 				_fail("The second chapter boss did not use the current Red Fang war chief design")
 				return

@@ -1,6 +1,6 @@
 extends SceneTree
 
-const OUTPUT_PATH := "res://tests/artifacts/goblin_reference_motion.png"
+const OUTPUT_PATH := "res://test_output/goblin_reference_motion.png"
 const PREVIEW_SCALE := 1.35
 
 
@@ -24,7 +24,7 @@ func _capture() -> void:
 	_add_label(canvas, "IDLE / LOW GUARD", Vector2(34.0, 92.0), 17)
 	_add_label(canvas, "ATTACK / GUARD - WINDUP - LUNGE - RECOVERY", Vector2(34.0, 272.0), 17)
 	_add_label(canvas, "HURT + DEATH / STAGGER - FALL - LAND - PRONE", Vector2(34.0, 452.0), 17)
-	_add_label(canvas, "8-FRAME STALKING WALK", Vector2(34.0, 632.0), 17)
+	_add_label(canvas, "6-FRAME REFERENCE WALK", Vector2(34.0, 632.0), 17)
 
 	for row_y in [238.0, 418.0, 598.0, 836.0]:
 		var ground := Line2D.new()
@@ -60,8 +60,8 @@ func _capture() -> void:
 		(defeated.get_node("EnemySprite") as Sprite2D).modulate.a = 1.0
 		_add_frame_number(canvas, index, Vector2(defeated.position.x, 612.0))
 
-	for index in range(8):
-		var walker := await _make_goblin(canvas, Vector2(108.0 + index * 174.0, 836.0))
+	for index in range(6):
+		var walker := await _make_goblin(canvas, Vector2(150.0 + index * 225.0, 836.0))
 		walker.velocity.x = -145.0
 		walker.set("_locomotion_active", true)
 		walker.set("_locomotion_cycle", float(index) + 0.01)

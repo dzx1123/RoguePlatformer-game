@@ -17,16 +17,19 @@ signal boss_phase_changed(phase: int)
 const MELEE_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_melee_sheet.png")
 const RANGED_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_ranged_sheet.png")
 const BOSS_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_boss_sheet.png")
-const GOBLIN_CLUB_SHEET := preload("res://assets/enemies/red_fang_goblin_club_sheet_v2.png")
-const GOBLIN_ELITE_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_sheet.png")
-const GOBLIN_ARCHER_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_sheet.png")
-const GOBLIN_CLUB_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_club_walk_sheet_v5.png")
-const GOBLIN_ELITE_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_walk_sheet_v4.png")
-const GOBLIN_ARCHER_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_walk_sheet_v4.png")
 const NIGHT_BAT_FLAP_MID := preload("res://assets/enemies/night_bat_flap_mid.png")
 const NIGHT_BAT_DIVE := preload("res://assets/enemies/night_bat_dive.png")
 const MOON_WHEEL_GEOMETRY := preload("res://scripts/moon_wheel_geometry.gd")
 const WEAPON_SKILL_GEOMETRY := preload("res://scripts/weapon_skill_geometry.gd")
+const GOBLIN_REFERENCE_ATLAS := preload("res://assets/enemies/goblin_reference_atlas.png")
+const GOBLIN_CLUB_SHEET = GOBLIN_REFERENCE_ATLAS
+const GOBLIN_ELITE_SHEET = GOBLIN_REFERENCE_ATLAS
+const GOBLIN_ARCHER_SHEET = GOBLIN_REFERENCE_ATLAS
+const GOBLIN_CLUB_RUN_SHEET = GOBLIN_REFERENCE_ATLAS
+const GOBLIN_ELITE_RUN_SHEET = GOBLIN_REFERENCE_ATLAS
+const GOBLIN_ARCHER_RUN_SHEET = GOBLIN_REFERENCE_ATLAS
+const GOBLIN_REFERENCE_PALETTE := preload("res://assets/shaders/goblin_reference_palette.gdshader")
+const GOBLIN_REFERENCE_ADORNMENT := preload("res://scripts/goblin_reference_adornment.gd")
 const GOBLIN_EDGE_MATERIAL := preload("res://assets/shaders/goblin_edge_cleanup.tres")
 
 enum EnemyRole {
@@ -107,9 +110,9 @@ const GOBLIN_IDLE_FPS := 4.5
 const GOBLIN_WALK_MIN_FPS := 10.0
 const GOBLIN_WALK_MAX_FPS := 24.0
 const GOBLIN_STRIDE_PIXELS := 44.0
-const GOBLIN_RUN_COLUMNS := 4.0
-const GOBLIN_RUN_ROWS := 2.0
-const GOBLIN_RUN_FRAME_COUNT := 8
+const GOBLIN_RUN_COLUMNS := 17.0
+const GOBLIN_RUN_ROWS := 1.0
+const GOBLIN_RUN_FRAME_COUNT := 6
 const SLIME_RUN_FRAME_COUNT := 4
 const SLIME_RUN_FPS := 10.0
 const LOCOMOTION_SETTLE_FPS := 18.0
@@ -198,6 +201,8 @@ var _turn_from_facing: float = 1.0
 var _landing_motion_remaining: float = 0.0
 var _sprite_pose_initialized: bool = false
 var _enemy_sprite: Sprite2D
+var _reference_adornment: Node2D
+var _reference_palette: ShaderMaterial
 var _hitstop_remaining: float = 0.0
 var _night_bat_dive_target: Vector2 = Vector2.ZERO
 var _night_bat_recovery_y: float = 0.0
@@ -249,6 +254,12 @@ func _ready() -> void:
 	_enemy_sprite.region_filter_clip_enabled = true
 	_enemy_sprite.z_index = 1
 	add_child(_enemy_sprite)
+	if _family == EnemyFamily.GOBLIN:
+		_reference_palette = ShaderMaterial.new()
+		_reference_palette.shader = GOBLIN_REFERENCE_PALETTE
+		_reference_palette.set_shader_parameter(&"skin_color", Color("#bd5350") if is_ranged_enemy() else (Color("#8c3554") if is_elite() or is_boss() else Color("#c74732")))
+		_reference_adornment = GOBLIN_REFERENCE_ADORNMENT.new()
+		_enemy_sprite.add_child(_reference_adornment)
 	_update_sprite_animation()
 	queue_redraw()
 
@@ -1598,10 +1609,10 @@ func _get_goblin_run_sheet() -> Texture2D:
 func _get_sprite_scale() -> float:
 	if _family == EnemyFamily.GOBLIN:
 		if is_boss():
-			return 0.54
+			return 1.75
 		if is_elite():
-			return 0.30
-		return 0.25 if is_ranged_enemy() else 0.26
+			return 1.03
+		return 0.85
 	if is_boss():
 		return 0.60
 	if is_elite():
@@ -1610,7 +1621,7 @@ func _get_sprite_scale() -> float:
 
 
 func _get_goblin_run_scale() -> float:
-	# Authored walk sheets are registered to the same 313px canvas as idle art.
+	# All reference actions share one 144 x 138 pixel canvas.
 	return _get_sprite_scale()
 
 
@@ -1621,20 +1632,14 @@ func _get_goblin_run_registration(_frame_index: int) -> Vector2:
 
 
 func _get_sprite_baseline_offset() -> float:
-	# The generated sheets have a 313.5px cell. Align their opaque idle bottoms with
-	# the collision body's floor contact so every platform uses the same visual baseline.
 	if _family == EnemyFamily.GOBLIN:
-		if is_boss():
-			return -28.0
-		if is_elite():
-			return -14.0
-		return -14.0 if is_ranged_enemy() else -15.0
+		var contact_y := 52.0 if is_boss() else (29.0 if is_elite() else 22.0)
+		return contact_y - 53.0 * _get_sprite_scale()
 	if is_boss():
 		return -30.0
 	if is_elite():
 		return -19.0 if is_ranged_enemy() else -17.0
 	return -17.0 if is_ranged_enemy() else -15.0
-
 
 func _set_sprite_cell(column: int, row: int) -> void:
 	var sheet := _get_sprite_sheet()
@@ -1658,7 +1663,7 @@ func _set_goblin_run_frame(frame_index: int) -> void:
 		float(sheet.get_width()) / GOBLIN_RUN_COLUMNS,
 		float(sheet.get_height()) / GOBLIN_RUN_ROWS
 	)
-	var resolved_frame: int = posmod(frame_index, GOBLIN_RUN_FRAME_COUNT)
+	var resolved_frame: int = 11 + posmod(frame_index, GOBLIN_RUN_FRAME_COUNT)
 	var column: int = resolved_frame % int(GOBLIN_RUN_COLUMNS)
 	var row: int = floori(float(resolved_frame) / GOBLIN_RUN_COLUMNS)
 	_enemy_sprite.region_rect = Rect2(Vector2(column, row) * cell_size, cell_size)
@@ -2005,6 +2010,9 @@ func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 		return
 	if is_night_bat():
 		_update_night_bat_sprite_animation(delta)
+		return
+	if _family == EnemyFamily.GOBLIN:
+		_update_reference_goblin_animation()
 		return
 	_enemy_sprite.material = GOBLIN_EDGE_MATERIAL if _family == EnemyFamily.GOBLIN else null
 
@@ -2426,3 +2434,49 @@ func _draw_boss_attack_telegraph(attack_progress: float) -> void:
 				]),
 				Color(1.0, 0.30, 0.34, warning_alpha)
 			)
+
+
+func _update_reference_goblin_animation() -> void:
+	var frame := 0
+	var attack_progress := 0.0
+	var death_progress := 0.0
+	if _is_defeated:
+		death_progress = clampf(1.0 - _death_remaining / DEATH_ANIMATION_DURATION, 0.0, 1.0)
+		frame = 7 + mini(2, int(death_progress * 3.0))
+	elif _hurt_remaining > 0.0:
+		frame = 5 if _hurt_remaining > HURT_ANIMATION_DURATION * 0.5 else 6
+	elif _attack_remaining > 0.0:
+		attack_progress = clampf(1.0 - _attack_remaining / _get_attack_duration(), 0.0, 1.0)
+		if is_ranged_enemy():
+			# Hold the reference's front-hand stance while the attached bow draws/releases.
+			frame = 0 if attack_progress < 0.70 else 5
+		elif attack_progress < 0.18:
+			frame = 1
+		elif attack_progress < 0.40:
+			frame = 2
+		elif attack_progress < 0.68:
+			frame = 3
+		elif attack_progress < 0.90:
+			frame = 4
+	elif not is_on_floor() and absf(velocity.y) >= 30.0:
+		frame = 10
+	elif _locomotion_active or absf(velocity.x) > 8.0:
+		frame = 11 + posmod(int(floor(_locomotion_cycle)), 6)
+	var pixel_scale := _get_sprite_scale()
+	_enemy_sprite.texture = GOBLIN_REFERENCE_ATLAS
+	_enemy_sprite.material = _reference_palette
+	_enemy_sprite.region_enabled = true
+	_enemy_sprite.region_rect = Rect2(frame * 144.0, 0.0, 144.0, 138.0)
+	_enemy_sprite.flip_h = _get_display_facing() < 0.0
+	_enemy_sprite.scale = Vector2.ONE * pixel_scale
+	_enemy_sprite.position = Vector2(0, _get_sprite_baseline_offset())
+	_enemy_sprite.rotation = 0.0
+	_enemy_sprite.modulate = Color.WHITE
+	if _is_defeated:
+		_enemy_sprite.modulate.a = 1.0 - smoothstep(0.75, 1.0, death_progress)
+	elif _hurt_remaining > 0.0:
+		_enemy_sprite.modulate = Color(1.0, 0.70, 0.70)
+	if is_instance_valid(_reference_adornment):
+		_reference_adornment.call(&"set_pose", frame, not _enemy_sprite.flip_h, is_elite() or is_boss(), is_ranged_enemy(), attack_progress)
+	_sprite_pose_initialized = true
+	# All translation is the body's movement. Keep original pose timing/bob intact.

@@ -181,6 +181,12 @@ var _player_skill_voices: Array[AudioStream] = []
 var _player_hurt_voices: Array[AudioStream] = []
 var _player_defeat_voices: Array[AudioStream] = []
 var _player_jump_voices: Array[AudioStream] = []
+const USER_GREAT_SWING_PATH := "res://assets/audio/designed/greatsword_swing_user.wav"
+const USER_FLESH_CUT_PATH := "res://assets/audio/designed/flesh_cut_user.wav"
+const IMPACT_MIN_INTERVAL_MSEC := 80
+var _greatsword_swing_sfx: Array[AudioStream] = []
+var _flesh_cut_sfx: Array[AudioStream] = []
+var _last_impact_msec: int = -1000
 var _sword_swing_sfx: Array[AudioStream] = []
 var _hit_sfx: Array[AudioStream] = []
 var _skill_sfx: Array[AudioStream] = []
@@ -255,6 +261,8 @@ func _ready() -> void:
 	_player_defeat_voices = _load_designed_list(PLAYER_DEFEAT_VOICE_PATHS)
 	_player_jump_voices = _load_designed_list(PLAYER_JUMP_VOICE_PATHS)
 	_sword_swing_sfx = _load_designed_list(SWORD_SWING_SFX_PATHS)
+	_greatsword_swing_sfx = _load_designed_list(PackedStringArray([USER_GREAT_SWING_PATH]))
+	_flesh_cut_sfx = _load_designed_list(PackedStringArray([USER_FLESH_CUT_PATH]))
 	_hit_sfx = _load_designed_list(HIT_SFX_PATHS)
 	_skill_sfx = _load_designed_list(SKILL_SFX_PATHS)
 	_skill_twin_sfx = _load_designed_list(SKILL_TWIN_SFX_PATHS)
@@ -330,22 +338,29 @@ func _ready() -> void:
 	_play_bgm_track(0, true)
 
 
-func play_sword_swing() -> void:
-	_add_voice(VoiceType.SWORD_SWING, 0.08, 0.04)
-	_play_on_player(_swing_player, _sword_swing_sfx, MIX_SWING_DB, 1.0)
+func play_sword_swing(weapon_id: StringName = &"") -> void:
+	if weapon_id == WeaponCatalog.GREATSWORD and not _greatsword_swing_sfx.is_empty():
+		_play_on_player(_swing_player, _greatsword_swing_sfx, MIX_SWING_DB, 1.0)
+	else:
+		_add_voice(VoiceType.SWORD_SWING, 0.08, 0.04)
+		_play_on_player(_swing_player, _sword_swing_sfx, MIX_SWING_DB, 1.0)
 
 
 func play_impact(is_slime: bool = false, is_boss: bool = false) -> void:
-	# Whoosh yields to the ding so the hit can be heard as its own layer.
-	if is_instance_valid(_swing_player):
-		_swing_player.stop()
-	_add_voice(VoiceType.IMPACT, 0.05, 0.03)
-	_play_on_player(_hit_player, _hit_sfx, MIX_HIT_DB, 1.0)
+	# One slash can damage several targets in the same frame. Keep one clear impact.
+	var now := Time.get_ticks_msec()
+	if now - _last_impact_msec < IMPACT_MIN_INTERVAL_MSEC:
+		return
+	_last_impact_msec = now
+	# Let the swing finish underneath the contact sound instead of cutting its tail.
+	var bank: Array[AudioStream] = _hit_sfx if is_slime else _flesh_cut_sfx
+	if bank.is_empty():
+		bank = _hit_sfx
+	_play_on_player(_hit_player, bank, MIX_HIT_DB, 0.94 if is_boss else 1.0)
 	_pending_hurt_clips = _slime_hurt_voices if is_slime else _goblin_hurt_voices
 	_pending_hurt_pitch = 0.88 if is_boss else 1.0
 	_pending_hurt_db = MIX_ENEMY_HURT_VOICE_DB if not is_boss else MIX_ENEMY_HURT_VOICE_DB + 1.5
 	_hurt_delay_remaining = HIT_CRY_DELAY
-
 
 func play_dash() -> void:
 	_add_voice(VoiceType.DASH, 0.20, 0.22)
@@ -366,7 +381,9 @@ func play_skill(weapon_id: StringName = &"") -> void:
 			pitch = 0.88
 		_:
 			pitch = 1.0
-	_play_combat_sample(bank, MIX_SKILL_SFX_DB, pitch)
+	if weapon_id == WeaponCatalog.GREATSWORD:
+		_play_on_player(_swing_player, _greatsword_swing_sfx, MIX_SWING_DB, 0.94)
+	_play_combat_sample(bank, MIX_SKILL_SFX_DB - (3.0 if weapon_id == WeaponCatalog.GREATSWORD else 0.0), pitch)
 
 
 func play_jump() -> void:
@@ -519,6 +536,8 @@ func get_player_voice_sample_count() -> int:
 func get_loaded_combat_sample_count() -> int:
 	return (
 		_sword_swing_sfx.size()
+		+ _greatsword_swing_sfx.size()
+		+ _flesh_cut_sfx.size()
 		+ _hit_sfx.size()
 		+ _skill_sfx.size()
 		+ _skill_twin_sfx.size()

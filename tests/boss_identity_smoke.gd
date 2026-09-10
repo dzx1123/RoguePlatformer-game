@@ -32,7 +32,7 @@ func _run_test() -> void:
 		crystal_sprite.texture == null
 		or warchief_sprite.texture == null
 		or not crystal_sprite.texture.resource_path.contains("red_crystal_slime_boss")
-		or not warchief_sprite.texture.resource_path.contains("red_fang_goblin_elite")
+		or not warchief_sprite.texture.resource_path.contains("goblin_reference_atlas")
 	):
 		_fail("Boss identities did not keep their separate authored silhouettes")
 		return

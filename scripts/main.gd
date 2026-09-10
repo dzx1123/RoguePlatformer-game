@@ -345,7 +345,7 @@ func _on_player_action_started(action: StringName) -> void:
 		return
 	match action:
 		&"attack":
-			_soundscape.play_sword_swing()
+			_soundscape.play_sword_swing(player.get_weapon_id())
 			_soundscape.play_player_attack_voice()
 		&"dash":
 			_soundscape.play_dash()

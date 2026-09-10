@@ -29,7 +29,7 @@ func _run_test() -> void:
 	enemy.set("_sprite_pose_initialized", false)
 	enemy.call(&"_update_sprite_animation")
 	var outgoing_foot_y: float = _get_club_foot_y(sprite)
-	if not sprite.flip_h:
+	if sprite.flip_h:
 		_fail("Enemy turn anticipation did not retain the outgoing-facing sprite")
 		return
 
@@ -37,7 +37,7 @@ func _run_test() -> void:
 	enemy.set("_sprite_pose_initialized", false)
 	enemy.call(&"_update_sprite_animation")
 	var incoming_foot_y: float = _get_club_foot_y(sprite)
-	if sprite.flip_h:
+	if not sprite.flip_h:
 		_fail("Enemy turn completion did not switch to the incoming-facing sprite")
 		return
 	if absf(incoming_foot_y - outgoing_foot_y) > 0.80:
@@ -54,8 +54,8 @@ func _run_test() -> void:
 
 
 func _get_club_foot_y(sprite: Sprite2D) -> float:
-	var cell_height: float = float(sprite.texture.get_height()) / 2.0
-	return sprite.position.y + (300.0 - cell_height * 0.5) * absf(sprite.scale.y)
+	var cell_height: float = sprite.region_rect.size.y
+	return sprite.position.y + (122.0 - cell_height * 0.5) * absf(sprite.scale.y)
 
 
 func _fail(message: String) -> void:
