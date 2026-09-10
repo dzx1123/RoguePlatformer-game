@@ -12,7 +12,7 @@ func _run_audit() -> void:
 			"role": RogueEnemy.EnemyRole.MELEE,
 			"rank": RogueEnemy.EnemyRank.NORMAL,
 			"bottoms": [300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0],
-			"heads": [163.213, 164.641, 164.029, 163.882, 164.661, 163.840, 163.502, 163.677],
+			"heads": [146.0, 146.0, 146.0, 146.0, 146.0, 146.0, 146.0, 146.0],
 		},
 		{
 			"name": "elite",

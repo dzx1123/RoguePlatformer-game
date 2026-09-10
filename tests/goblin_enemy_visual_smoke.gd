@@ -9,7 +9,7 @@ func _initialize() -> void:
 
 func _run_test() -> void:
 	var asset_paths: Array[String] = [
-		"res://assets/enemies/red_fang_goblin_club_sheet.png",
+		"res://assets/enemies/red_fang_goblin_club_sheet_v2.png",
 		"res://assets/enemies/red_fang_goblin_elite_sheet.png",
 		"res://assets/enemies/red_fang_goblin_archer_sheet.png",
 	]
@@ -28,7 +28,7 @@ func _run_test() -> void:
 			return
 
 	var run_asset_paths: Array[String] = [
-		"res://assets/enemies/red_fang_goblin_club_walk_sheet_v4.png",
+		"res://assets/enemies/red_fang_goblin_club_walk_sheet_v5.png",
 		"res://assets/enemies/red_fang_goblin_elite_walk_sheet_v4.png",
 		"res://assets/enemies/red_fang_goblin_archer_walk_sheet_v4.png",
 	]
@@ -61,7 +61,7 @@ func _run_test() -> void:
 	var club_sprite := club.get_node("EnemySprite") as Sprite2D
 	var elite_sprite := elite.get_node("EnemySprite") as Sprite2D
 	var archer_sprite := archer.get_node("EnemySprite") as Sprite2D
-	if not club_sprite.texture.resource_path.ends_with("red_fang_goblin_club_sheet.png"):
+	if not club_sprite.texture.resource_path.ends_with("red_fang_goblin_club_sheet_v2.png"):
 		_fail("Ordinary goblin did not use the club soldier sheet")
 		return
 	if not elite_sprite.texture.resource_path.ends_with("red_fang_goblin_elite_sheet.png"):
@@ -81,7 +81,7 @@ func _run_test() -> void:
 		club.set("_locomotion_cycle", float(frame_index) + 0.01)
 		club.set("_sprite_pose_initialized", false)
 		club.call(&"_update_sprite_animation")
-		if not club_sprite.texture.resource_path.ends_with("red_fang_goblin_club_walk_sheet_v4.png"):
+		if not club_sprite.texture.resource_path.ends_with("red_fang_goblin_club_walk_sheet_v5.png"):
 			_fail("Ordinary goblin did not switch to its authored run sheet")
 			return
 		var run_cell_width: float = float(club_sprite.texture.get_width()) / 4.0
@@ -119,7 +119,7 @@ func _run_test() -> void:
 	club.call(&"_update_sprite_animation")
 	var cell_width: float = float(club_sprite.texture.get_width()) / 4.0
 	var cell_height: float = float(club_sprite.texture.get_height()) / 4.0
-	var expected_idle_columns: Array[int] = [0, 1, 2, 1]
+	var expected_idle_columns: Array[int] = [0, 1, 2, 3, 2, 1]
 	for frame_index in range(expected_idle_columns.size()):
 		club.set("_elapsed", (float(frame_index) + 0.01) / 4.5)
 		club.call(&"_update_sprite_animation")
@@ -149,6 +149,24 @@ func _run_test() -> void:
 	if not is_equal_approx(club_sprite.region_rect.position.y, cell_height * 3.0):
 		_fail("Goblin hurt did not select the reaction row")
 		return
+	club.set("_hurt_remaining", 0.0)
+	club.set("_is_defeated", true)
+	for death_column in range(4):
+		var death_progress: float = (float(death_column) + 0.01) / 4.0
+		club.set(
+			"_death_remaining",
+			RogueEnemy.DEATH_ANIMATION_DURATION * (1.0 - death_progress)
+		)
+		club.call(&"_update_sprite_animation")
+		var selected_death_column: int = int(round(
+			club_sprite.region_rect.position.x / cell_width
+		))
+		if selected_death_column != death_column:
+			_fail(
+				"Goblin death selected frame %d instead of %d"
+				% [selected_death_column, death_column]
+			)
+			return
 
 	var target := Node2D.new()
 	target.position = Vector2(-180.0, 0.0)

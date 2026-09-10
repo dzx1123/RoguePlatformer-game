@@ -17,10 +17,10 @@ signal boss_phase_changed(phase: int)
 const MELEE_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_melee_sheet.png")
 const RANGED_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_ranged_sheet.png")
 const BOSS_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_boss_sheet.png")
-const GOBLIN_CLUB_SHEET := preload("res://assets/enemies/red_fang_goblin_club_sheet.png")
+const GOBLIN_CLUB_SHEET := preload("res://assets/enemies/red_fang_goblin_club_sheet_v2.png")
 const GOBLIN_ELITE_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_sheet.png")
 const GOBLIN_ARCHER_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_sheet.png")
-const GOBLIN_CLUB_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_club_walk_sheet_v4.png")
+const GOBLIN_CLUB_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_club_walk_sheet_v5.png")
 const GOBLIN_ELITE_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_elite_walk_sheet_v4.png")
 const GOBLIN_ARCHER_RUN_SHEET := preload("res://assets/enemies/red_fang_goblin_archer_walk_sheet_v4.png")
 const NIGHT_BAT_FLAP_MID := preload("res://assets/enemies/night_bat_flap_mid.png")
@@ -1610,7 +1610,7 @@ func _get_sprite_scale() -> float:
 
 
 func _get_goblin_run_scale() -> float:
-	# Walk v4 is registered to the same 313px canvas and size as the idle art.
+	# Authored walk sheets are registered to the same 313px canvas as idle art.
 	return _get_sprite_scale()
 
 
@@ -1669,14 +1669,19 @@ func _get_goblin_loop_column(is_running: bool) -> int:
 		return posmod(int(floor(_locomotion_cycle)), GOBLIN_RUN_FRAME_COUNT)
 	var frame_number: int = int(floor(_elapsed * GOBLIN_IDLE_FPS + _phase))
 
-	# Idle breathes through the neutral pose instead of snapping from frame 3 to 0.
-	var idle_cycle_index: int = posmod(frame_number, 4)
+	# Ping-pong through all four authored breathing poses so the shoulders and
+	# planted legs return through the same silhouettes instead of snapping.
+	var idle_cycle_index: int = posmod(frame_number, 6)
 	match idle_cycle_index:
 		0:
 			return 0
 		1:
 			return 1
 		2:
+			return 2
+		3:
+			return 3
+		4:
 			return 2
 		_:
 			return 1
@@ -2025,7 +2030,11 @@ func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 	if _is_defeated:
 		animation_row = 3
 		death_progress = 1.0 - _death_remaining / DEATH_ANIMATION_DURATION
-		animation_column = 2 + mini(1, int(floor(death_progress * 2.0)))
+		animation_column = (
+			mini(3, int(floor(death_progress * 4.0)))
+			if _family == EnemyFamily.GOBLIN
+			else 2 + mini(1, int(floor(death_progress * 2.0)))
+		)
 	elif _hurt_remaining > 0.0:
 		animation_row = 3
 		hurt_progress = 1.0 - _hurt_remaining / HURT_ANIMATION_DURATION
