@@ -24,7 +24,11 @@ The main output is a 4x4 sheet: idle, walk, attack, and hurt/death rows. The wal
 output is a separate 4x2 eight-frame cycle. Every cell is normalized to 313x313,
 its floor contact is baked to local y=300, and standing torso anchors are aligned.
 
-## Runtime outputs
+## Legacy rebuild outputs
+
+The current game loads `goblin_reference_atlas.png` directly, so these old Red
+Fang sheets are no longer retained in the repository. The legacy tools below can
+recreate them when an art comparison is needed:
 
 - `../red_fang_goblin_club_sheet_v2.png`
 - `../red_fang_goblin_club_walk_sheet_v5.png`

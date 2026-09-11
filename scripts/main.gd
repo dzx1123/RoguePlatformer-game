@@ -25,6 +25,7 @@ const CONTINUE_STORE_SCRIPT := preload("res://scripts/run_continue_store.gd")
 const DEATH_RECAP_SCRIPT := preload("res://scripts/death_recap.gd")
 const TUTORIAL_SCRIPT := preload("res://scripts/run_tutorial.gd")
 const REWARD_FEEDBACK_SCRIPT := preload("res://scripts/reward_feedback.gd")
+const OPENING_INTRO_SCRIPT := preload("res://scripts/opening_intro.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
 const MENU_MOONLIT_SANCTUM_BACKGROUND := preload("res://assets/backgrounds/menu_moonlit_sanctum_v1.png")
 const BUILD_LABEL := "月蚀混战测试版 0.4.1 · 2026.09.03"
@@ -165,6 +166,7 @@ var _tutorial
 var _continue_store
 var _entry_flow_active: bool = false
 var _entry_tween: Tween
+var _opening_intro: Control
 var _selected_difficulty: int = Difficulty.MEDIUM
 var _camera_base_position := Vector2.ZERO
 var _camera_shake_remaining: float = 0.0
@@ -247,6 +249,7 @@ func _ready() -> void:
 	_update_ability_hud()
 	_create_upgrade_ui()
 	_create_entry_ui()
+	_create_opening_intro()
 	_create_pause_ui()
 	_create_settings_ui()
 	_create_build_overview()
@@ -293,7 +296,7 @@ func _ready() -> void:
 	_room_pool = ROOM_CATALOG_SCRIPT.create_room_pool()
 	_lives_remaining = MAX_RUN_LIVES
 	if save_enabled:
-		_show_start_screen()
+		_show_start_screen(_should_play_opening_intro())
 	else:
 		_start_new_run()
 
@@ -557,6 +560,10 @@ func _ensure_context_focus() -> void:
 		_death_recap.ensure_focus()
 		return
 	var focus_owner: Control = get_viewport().gui_get_focus_owner()
+	if is_instance_valid(_opening_intro) and bool(_opening_intro.call(&"is_playing")):
+		if focus_owner != _opening_intro:
+			_opening_intro.grab_focus()
+		return
 	if is_instance_valid(_settings_overlay) and _settings_overlay.visible:
 		if focus_owner == null or not _settings_overlay.is_ancestor_of(focus_owner):
 			_settings_resolution_selector.grab_focus()
@@ -675,7 +682,7 @@ func _fit_to_viewport() -> void:
 			fill_art.texture = MENU_MOONLIT_SANCTUM_BACKGROUND
 	var overlays: Array = [
 		_entry_overlay, _upgrade_overlay, _pause_overlay, _settings_overlay,
-		_build_overview, _death_recap, _reward_feedback,
+		_build_overview, _death_recap, _reward_feedback, _opening_intro,
 	]
 	for overlay_value in overlays:
 		var overlay: Control = overlay_value as Control
@@ -2435,7 +2442,7 @@ func _quit_game() -> void:
 	get_tree().quit()
 
 
-func _show_start_screen() -> void:
+func _show_start_screen(play_opening: bool = false) -> void:
 	_entry_flow_active = true
 	_set_entry_gameplay_suspended(true)
 	if is_instance_valid(_reward_feedback):
@@ -2465,10 +2472,62 @@ func _show_start_screen() -> void:
 	_refresh_entry_progress_summary()
 	for button in _difficulty_buttons:
 		button.visible = false
+	if play_opening and is_instance_valid(_opening_intro):
+		_hold_entry_chrome()
+		var reduced: bool = _settings != null and _settings.get_reduced_effects_enabled()
+		_opening_intro.call(&"play", reduced)
+		_opening_intro.grab_focus()
+	else:
+		_play_entry_transition(false)
+		(_continue_button if _continue_button.visible else _start_button).grab_focus()
+	_ensure_context_focus()
+	_update_music_state()
+
+
+func _should_play_opening_intro() -> bool:
+	return DisplayServer.get_name() != "headless"
+
+
+func _create_opening_intro() -> void:
+	_opening_intro = OPENING_INTRO_SCRIPT.new() as Control
+	hud.add_child(_opening_intro)
+	_opening_intro.connect("finished", Callable(self, "_on_opening_intro_finished"))
+	_opening_intro.connect("slash_struck", Callable(self, "_on_opening_slash_struck"))
+
+
+func _hold_entry_chrome() -> void:
+	var chrome: Array[Control] = [
+		_entry_title,
+		_entry_subtitle,
+		_entry_overlay.get_node("EntryKicker") as Control,
+		_entry_overlay.get_node("EntryFooter") as Control,
+		_start_button,
+		_entry_overlay.get_node("EntrySettings") as Control,
+		_entry_overlay.get_node("EntryQuit") as Control,
+		_entry_progress_panel,
+	]
+	if is_instance_valid(_continue_button) and _continue_button.visible:
+		chrome.append(_continue_button)
+	for control: Control in chrome:
+		if control == null:
+			continue
+		control.modulate = Color(1, 1, 1, 0)
+
+
+func _on_opening_intro_finished() -> void:
+	if not _entry_flow_active:
+		return
 	_play_entry_transition(false)
 	(_continue_button if _continue_button.visible else _start_button).grab_focus()
 	_ensure_context_focus()
-	_update_music_state()
+
+
+func _on_opening_slash_struck() -> void:
+	if _soundscape == null:
+		return
+	if _settings != null and _settings.get_reduced_effects_enabled():
+		return
+	_soundscape.play_skill(WeaponCatalog.SWORD)
 
 
 func _show_difficulty_selection() -> void:

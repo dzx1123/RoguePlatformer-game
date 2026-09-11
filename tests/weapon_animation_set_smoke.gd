@@ -8,6 +8,10 @@ const CANVAS_WIDTHS := {
 	&"twin_blades": 640,
 	&"star_greatsword": 768,
 }
+const CANVAS_HEIGHTS := {
+	&"twin_blades": 512,
+	&"star_greatsword": 768,
+}
 const POSE_NAMES := [
 	"hero_idle",
 	"hero_jump_takeoff", "hero_jump_rise", "hero_jump_apex", "hero_jump_fall", "hero_land",
@@ -244,7 +248,8 @@ func _validate_asset_set(weapon_id: StringName) -> void:
 		if image == null or image.is_empty():
 			_failures.append("missing or empty: %s" % path)
 			continue
-		if image.get_size() != Vector2i(CANVAS_WIDTHS[weapon_id], 512):
+		var expected_canvas := Vector2i(CANVAS_WIDTHS[weapon_id], CANVAS_HEIGHTS[weapon_id])
+		if image.get_size() != expected_canvas:
 			_failures.append("wrong canvas: %s %s" % [path, image.get_size()])
 		if image.get_format() not in [Image.FORMAT_RGBA8, Image.FORMAT_RGBAF, Image.FORMAT_RGBAH]:
 			_failures.append("not RGBA: %s" % path)

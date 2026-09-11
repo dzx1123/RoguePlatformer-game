@@ -98,9 +98,9 @@ TWIN_SKILL_REFERENCES = (
 
 SPECS = (
     SheetSpec("twin_blades", "hero_run_fullbody_sheet_v5.png", 4, 3, RUN_OUTPUTS, RUN_REFERENCES, 640, True),
-    SheetSpec("greatsword", "hero_run_fullbody_sheet_v5.png", 4, 3, RUN_OUTPUTS, RUN_REFERENCES, 768, True),
+    SheetSpec("greatsword", "hero_run_fullbody_sheet_v5.png", 4, 3, RUN_OUTPUTS, RUN_REFERENCES, 768, True, 768),
     SheetSpec("twin_blades", "hero_air_fullbody_sheet_v4.png", 5, 1, AIR_OUTPUTS, AIR_REFERENCES, 640, True),
-    SheetSpec("greatsword", "hero_air_fullbody_sheet_v4.png", 5, 1, AIR_OUTPUTS, AIR_REFERENCES, 768, True),
+    SheetSpec("greatsword", "hero_air_fullbody_sheet_v4.png", 5, 1, AIR_OUTPUTS, AIR_REFERENCES, 768, True, 768),
     SheetSpec(
         "twin_blades",
         "hero_attack_fullbody_sheet_v3.png",
@@ -121,7 +121,7 @@ SPECS = (
         ATTACK_REFERENCES,
         768,
         True,
-        512,
+        768,
     ),
     SheetSpec(
         "twin_blades",
@@ -244,6 +244,75 @@ def remove_tiny_opaque_islands(image: Image.Image, maximum_area: int = 160) -> N
         if len(component) <= maximum_area:
             for x, y in component:
                 pixels[x, y] = (0, 0, 0, 0)
+
+
+def remove_uncovered_head_fragments(
+    image: Image.Image,
+    protected_pixels: set[tuple[int, int]],
+    translated_hair: set[tuple[int, int]],
+    maximum_area: int = 320,
+) -> int:
+    """Remove detached generated-head ink left outside the canonical patch.
+
+    Replacing the pale hair can disconnect the old dark outline from the body.
+    Those fragments are too large for generic dust cleanup and appeared as a
+    second, ghosted hairstyle above several greatsword poses.  Limit cleanup to
+    small dark components around the canonical hair so slash droplets, tassels,
+    raised weapons and all pixels belonging to the canonical patch are kept.
+    """
+    if not protected_pixels or not translated_hair:
+        return 0
+    pixels = image.load()
+    hair_left, hair_top, hair_right, hair_bottom = point_bounds(list(translated_hair))
+    hair_width = hair_right - hair_left
+    hair_height = hair_bottom - hair_top
+    cleanup_bounds = (
+        max(0, round(hair_left - hair_width * 0.65)),
+        # A generated head can sit nearly one head-height above the canonical
+        # anchor in deep crouch/overhead poses, so cover that full old silhouette.
+        max(0, round(hair_top - hair_height * 1.15)),
+        min(image.width, round(hair_right + hair_width * 0.45)),
+        min(image.height, round(hair_bottom + hair_height * 0.22)),
+    )
+    remaining = {
+        (x, y)
+        for y in range(image.height)
+        for x in range(image.width)
+        if pixels[x, y][3]
+    }
+    removed_pixels = 0
+    while remaining:
+        start = remaining.pop()
+        queue = [start]
+        component = [start]
+        while queue:
+            x, y = queue.pop()
+            for neighbor in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if neighbor in remaining:
+                    remaining.remove(neighbor)
+                    queue.append(neighbor)
+                    component.append(neighbor)
+        if len(component) > maximum_area or any(point in protected_pixels for point in component):
+            continue
+        center_x = sum(point[0] for point in component) / len(component)
+        center_y = sum(point[1] for point in component) / len(component)
+        if not (
+            cleanup_bounds[0] <= center_x < cleanup_bounds[2]
+            and cleanup_bounds[1] <= center_y < cleanup_bounds[3]
+        ):
+            continue
+        average_brightness = sum(
+            sum(pixels[x, y][:3]) / 3.0 for x, y in component
+        ) / len(component)
+        average_spread = sum(
+            max(pixels[x, y][:3]) - min(pixels[x, y][:3]) for x, y in component
+        ) / len(component)
+        if average_brightness > 92.0 or average_spread > 52.0:
+            continue
+        for x, y in component:
+            pixels[x, y] = (0, 0, 0, 0)
+        removed_pixels += len(component)
+    return removed_pixels
 
 
 def cell_bounds(length: int, count: int, index: int) -> tuple[int, int]:
@@ -511,6 +580,11 @@ def apply_canonical_head(image: Image.Image, reference: Image.Image) -> Image.Im
         for x, y in reference_mask
         if 0 <= x + offset_x < result.width and 0 <= y + offset_y < result.height
     }
+    translated_hair = {
+        (x + offset_x, y + offset_y)
+        for x, y in hair_component_points(reference_rgba)
+        if 0 <= x + offset_x < result.width and 0 <= y + offset_y < result.height
+    }
     for x, y in target_mask - translated_reference:
         red, green, blue, alpha = result_pixels[x, y]
         brightness = (red + green + blue) / 3.0
@@ -524,6 +598,7 @@ def apply_canonical_head(image: Image.Image, reference: Image.Image) -> Image.Im
         target_y = y + offset_y
         if 0 <= target_x < result.width and 0 <= target_y < result.height:
             result_pixels[target_x, target_y] = reference_pixels[x, y]
+    remove_uncovered_head_fragments(result, translated_reference, translated_hair)
     return result
 
 

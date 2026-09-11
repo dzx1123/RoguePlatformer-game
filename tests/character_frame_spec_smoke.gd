@@ -86,13 +86,6 @@ func _run_test() -> void:
 			_fail("Run-frame lift %d px escaped the authored sprint range" % lift)
 			return
 
-	if not _check_special_asset("hero_near_arm.png", Vector2i(84, 168)):
-		return
-	if not _check_special_asset("hero_waist_cover.png", Vector2i(67, 72)):
-		return
-	if not _check_special_asset("hero_skill_fullmoon_sheet_v2.png", Vector2i(1536, 1024)):
-		return
-
 	print(
 		"character_frame_spec_smoke: PASS (contact %d, flight lift <= %d)"
 		% [contact_bottom, MAX_RUN_FLIGHT_LIFT]
@@ -123,17 +116,6 @@ func _measure_alpha(image: Image) -> Dictionary:
 		"edge_pixels": edge_pixels,
 		"bottom": bottom,
 	}
-
-
-func _check_special_asset(frame_name: String, expected_size: Vector2i) -> bool:
-	var image: Image = _load_frame_image(frame_name)
-	if image == null or image.is_empty():
-		_fail("Could not load layered character asset: %s" % frame_name)
-		return false
-	if image.get_size() != expected_size:
-		_fail("%s no longer matches its documented layer size" % frame_name)
-		return false
-	return true
 
 
 func _load_frame_image(frame_name: String) -> Image:

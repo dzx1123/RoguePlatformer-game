@@ -18,7 +18,6 @@ The GIF does not contain bow-shooting or jumping animation. Ranged attacks use
 its guard/recoil poses with a drawn bow attachment, and jumping uses its tucked
 pose. Original attack, hurt and death drawings are used for the other actions.
 
-QA captures: `test_output/goblin_reference_walk.gif` and
-`test_output/goblin_reference_actions.gif`. Tests cover all four variants, source
-frame order, facing, cadence, foot registration, arrows, melee, boss phases and
-20-room progression.
+QA capture scripts write local artifacts under the ignored `test_output/`
+directory. Tests cover all four variants, source frame order, facing, cadence,
+foot registration, arrows, melee, boss phases and 20-room progression.

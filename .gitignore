@@ -17,3 +17,9 @@ build/
 
 # Local automated QA captures and soak-test reports
 tests/artifacts/
+test_output/*
+!test_output/.gdignore
+
+# Python-generated cache files
+__pycache__/
+*.pyc

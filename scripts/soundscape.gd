@@ -947,9 +947,25 @@ func _load_designed_list(paths: PackedStringArray) -> Array[AudioStream]:
 
 
 static func load_wav_file(path: String) -> AudioStreamWAV:
+	# The editor keeps source WAVs available, which lets diagnostics inspect their
+	# exact uncompressed PCM. Exported PCKs normally contain only the imported
+	# .sample representation, so ResourceLoader is the required fallback there.
 	var abs_path := ProjectSettings.globalize_path(path)
 	var file := FileAccess.open(abs_path, FileAccess.READ)
 	if file == null:
+		var imported := ResourceLoader.load(
+			path,
+			"AudioStreamWAV",
+			ResourceLoader.CACHE_MODE_IGNORE
+		) as AudioStreamWAV
+		if imported != null:
+			# Callers change loop metadata for BGM. Keep each instance independent
+			# from ResourceLoader's cache and from other Main instances in tests.
+			var imported_copy := imported.duplicate(true) as AudioStreamWAV
+			var exported_stream := imported_copy if imported_copy != null else imported
+			exported_stream.resource_name = path.get_file()
+			exported_stream.set_meta(&"clip_path", path)
+			return exported_stream
 		push_error("Missing designed clip %s" % path)
 		return null
 	var bytes: PackedByteArray = file.get_buffer(file.get_length())
@@ -986,10 +1002,6 @@ static func load_wav_file(path: String) -> AudioStreamWAV:
 	stream.stereo = channels > 1
 	stream.data = pcm
 	stream.resource_name = path.get_file()
-	# This stream is decoded manually rather than loaded by ResourceLoader. Giving
-	# multiple runtime instances the same resource_path makes Godot report a cyclic
-	# resource/path collision when tests or menus instantiate Main more than once.
-	# clip_path remains the stable source identifier used by voice diagnostics.
 	stream.set_meta(&"clip_path", path)
 	return stream
 

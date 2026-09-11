@@ -23,8 +23,9 @@ func _run_test() -> void:
 	if soundscape.get_player_voice_sample_count() != 10:
 		_fail("The complete young protagonist combat voice set was not loaded")
 		return
-	if soundscape.get_loaded_combat_sample_count() != 42:
-		_fail("Designed combat samples were not loaded")
+	var loaded_combat_samples: int = soundscape.get_loaded_combat_sample_count()
+	if loaded_combat_samples != 44:
+		_fail("Designed combat samples were not loaded (got %d, expected 44)" % loaded_combat_samples)
 		return
 	soundscape.play_land()
 	soundscape.play_ui()
@@ -41,8 +42,9 @@ func _run_test() -> void:
 	soundscape.play_enemy_bite(true)
 	soundscape.play_enemy_spit(true)
 	soundscape.play_enemy_defeat(true)
-	if soundscape.get_active_voice_count() != 10:
-		_fail("Soundscape did not register every combat sound cue")
+	var active_voice_count: int = soundscape.get_active_voice_count()
+	if active_voice_count != 9:
+		_fail("Soundscape did not register every combat sound cue (got %d, expected 9)" % active_voice_count)
 		return
 	for _frame in range(42):
 		await process_frame

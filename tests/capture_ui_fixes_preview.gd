@@ -47,36 +47,6 @@ func _capture() -> void:
 	await _save("portal_near")
 	main.queue_free()
 	await process_frame
-	var canvas := Node2D.new()
-	root.add_child(canvas)
-	var background := ColorRect.new()
-	background.size = Vector2(1280, 720)
-	background.color = Color("#142c40")
-	canvas.add_child(background)
-	var paths := [
-		"res://assets/enemies/red_fang_goblin_club_run_sheet_v2.png",
-		"res://assets/enemies/red_fang_goblin_elite_run_sheet_v2.png",
-		"res://assets/enemies/red_fang_goblin_archer_run_sheet_v2.png",
-	]
-	for row in range(3):
-		var texture := load(paths[row]) as Texture2D
-		for col in range(4):
-			var sprite := Sprite2D.new()
-			sprite.texture = texture
-			sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-			sprite.region_enabled = true
-			sprite.region_rect = Rect2(0, 0, texture.get_width() / 4.0, texture.get_height() / 2.0)
-			sprite.centered = false
-			sprite.position = Vector2(40 + col * 300, 60 + row * 250)
-			sprite.scale = Vector2.ONE * (0.47 if col < 2 else 0.20)
-			if col % 2 == 1:
-				sprite.material = RogueEnemy.GOBLIN_EDGE_MATERIAL
-			canvas.add_child(sprite)
-			var caption := Label.new()
-			caption.position = Vector2(40 + col * 300, 30 + row * 250)
-			caption.text = ("原始边缘" if col % 2 == 0 else "修正边缘") + (" · 放大" if col < 2 else " · 游戏尺寸")
-			canvas.add_child(caption)
-	await _save("goblin_edge_comparison")
 	print("capture_ui_fixes_preview: PASS")
 	quit()
 
