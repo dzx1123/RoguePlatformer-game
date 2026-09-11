@@ -380,7 +380,7 @@ func _on_enemy_sound_requested(cue: StringName, is_boss: bool) -> void:
 		&"goblin_attack":
 			_soundscape.play_enemy_attack_voice(false, is_boss)
 		&"night_bat_attack":
-			_soundscape.play_enemy_attack_voice(false, is_boss)
+			_soundscape.play_enemy_attack_voice(false, is_boss, true)
 		&"slime_attack":
 			_soundscape.play_enemy_attack_voice(true, is_boss)
 		&"bite":
@@ -3346,7 +3346,8 @@ func _spawn_hit_vfx(
 	if is_instance_valid(_soundscape):
 		_soundscape.play_impact(
 			enemy.get_enemy_family() == RogueEnemy.EnemyFamily.SLIME,
-			enemy.is_boss()
+			enemy.is_boss(),
+			enemy.is_night_bat()
 		)
 	if bool(_settings.call(&"get_damage_numbers_enabled")):
 		_spawn_damage_number(hit_position, damage_amount, scale_multiplier, rank_scale)

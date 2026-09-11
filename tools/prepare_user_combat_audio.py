@@ -6,7 +6,7 @@ import wave
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'assets/audio/designed'
-for name, target_db in [('flesh_cut', -9), ('greatsword_swing', -14)]:
+for name, target_db in [('flesh_cut', -9), ('greatsword_swing', -14), ('goblin_attack', -6), ('goblin_hurt', -6)]:
     with wave.open(str(ROOT / 'test_output' / f'{name}_decoded.wav'), 'rb') as src:
         rate, channels = src.getframerate(), src.getnchannels()
         samples = array.array('h', src.readframes(src.getnframes()))

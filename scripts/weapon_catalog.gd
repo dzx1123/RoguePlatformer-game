@@ -66,7 +66,7 @@ static func get_weapon(weapon_id: StringName) -> Dictionary:
 				"skill_lunge": 105.0,
 				"skill_hit_progresses": [0.70],
 				"skill_hit_weights": [1.0],
-				"accent": Color("#78d9ef"),
+				"accent": Color("#eef5ff"),
 			}
 
 

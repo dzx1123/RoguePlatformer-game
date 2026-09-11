@@ -133,15 +133,15 @@ func _draw_twin_attack_qi() -> void:
 		else:
 			points = _twin_secondary_arc_points(_attack_type, _reach_scale * 0.72)
 			depth = [14.0, 17.0, 16.0][_attack_type]
-			body_color = Color("#159bc4")
-			rim_color = Color("#63e9ff")
+			body_color = Color("#8137d7")
+			rim_color = Color("#b974ff")
 		_draw_attack_crescent(
 			points,
 			alpha * (0.94 if blade_index == 0 else 0.86),
 			depth,
 			body_color,
 			rim_color,
-			Color("#f7ffff")
+			Color("#e3b5ff")
 		)
 		_draw_slash_shards(
 			points,
@@ -432,112 +432,75 @@ func _draw_slash_shards(
 
 
 func _draw_twin_blades() -> void:
-	var bounds: Rect2 = GEOMETRY.get_twin_blades_rect(
-		Vector2.ZERO,
-		_facing,
-		_reach_scale
-	)
-	var travel_start_x: float = (
-		bounds.position.x if _facing > 0.0 else bounds.end.x
-	)
-	var travel_end_x: float = (
-		bounds.end.x if _facing > 0.0 else bounds.position.x
-	)
-	for hit_index in range(TWIN_HIT_PROGRESS.size()):
-		var hit_progress: float = TWIN_HIT_PROGRESS[hit_index]
-		var pulse_age: float = (_progress - hit_progress) / 0.16
-		if pulse_age < -0.75 or pulse_age > 1.0:
-			continue
-		var draw_progress: float = clampf(pulse_age + 0.75, 0.0, 1.0)
-		var pulse_alpha: float = (
-			smoothstep(0.0, 1.0, draw_progress / 0.28)
-			* (1.0 - smoothstep(0.48, 1.0, draw_progress))
-		)
-		var lane_y: float = -36.0 + float(hit_index) * 20.0
-		var live_x: float = lerpf(
-			travel_start_x,
-			travel_end_x,
-			smoothstep(0.0, 1.0, draw_progress)
-		)
-		var slash_direction: float = -1.0 if hit_index % 2 == 0 else 1.0
-		var slash_start := Vector2(
-			live_x - _facing * 58.0,
-			lane_y - slash_direction * 34.0
-		)
-		var slash_end := Vector2(
-			live_x + _facing * 26.0,
-			lane_y + slash_direction * 34.0
-		)
-		_draw_blade_streak(slash_start, slash_end, pulse_alpha, 10.0)
-		for trail_index in range(3):
-			var trail_offset: float = float(trail_index + 1) * 13.0
-			draw_line(
-				slash_start - Vector2(_facing * trail_offset, 0.0),
-				slash_end - Vector2(_facing * trail_offset, 0.0),
-				Color(
-					_accent.r,
-					_accent.g,
-					_accent.b,
-					pulse_alpha * (0.18 - float(trail_index) * 0.04)
-				),
-				maxf(1.0, 5.0 - float(trail_index)),
-				true
-			)
+	var bounds := GEOMETRY.get_twin_blades_rect(Vector2.ZERO, _facing, _reach_scale)
+	var center := bounds.get_center()
+	# Three damage beats, each surrounded by four staggered phantom cuts.
+	for beat in range(3):
+		for blade in range(4):
+			var age: float = (_progress - TWIN_HIT_PROGRESS[beat] - (float(blade) - 1.5) * 0.023) / 0.19
+			if age < -0.28 or age > 1.0:
+				continue
+			var alpha: float = smoothstep(-0.28, 0.0, age) * (1.0 - smoothstep(0.12, 1.0, age))
+			var slope: float = -1.0 if (blade + beat) % 2 == 0 else 1.0
+			var lane: float = (float(blade) - 1.5) * 9.0
+			var extent: float = bounds.size.x * (0.43 if blade < 3 else 0.49)
+			var start := center + Vector2(-_facing * extent, lane - slope * 34.0)
+			var end := center + Vector2(_facing * extent, lane + slope * 34.0)
+			var sweep: float = smoothstep(-0.28, 0.05, age)
+			end = start.lerp(end, sweep)
+			var points := _quadratic_arc_points(start, center + Vector2(0.0, lane - slope * 16.0), end)
+			_draw_attack_crescent(points, alpha, 8.0 if blade < 3 else 13.0,
+				Color("#6521d5"), Color("#ad58ff"), Color("#e3b5ff"))
+			_draw_slash_shards(points, alpha * 0.75, 10.0, Color("#c78aff"), blade)
+			# Needle-thin leading edge, rather than an opaque beam.
+			draw_line(start, end, Color(0.80, 0.48, 1.0, alpha * 0.6), 1.2, true)
 
 
 func _draw_greatsword() -> void:
-	var bounds: Rect2 = GEOMETRY.get_greatsword_rect(
-		Vector2.ZERO,
-		_facing,
-		_reach_scale
-	)
-	var windup: float = (
-		smoothstep(0.0, 1.0, clampf((_progress - 0.08) / 0.30, 0.0, 1.0))
-		* (1.0 - smoothstep(0.0, 1.0, clampf((_progress - 0.50) / 0.14, 0.0, 1.0)))
-	)
-	if windup > 0.01:
-		var raised_start := Vector2(-_facing * 20.0, 8.0)
-		var raised_end := Vector2(_facing * 30.0, -112.0)
-		_draw_blade_streak(raised_start, raised_end, windup * 0.72, 13.0)
-
-	var impact: float = 1.0 - clampf(absf(_progress - 0.62) / 0.12, 0.0, 1.0)
-	if impact > 0.01:
-		var cut_start := Vector2(-_facing * 34.0, -112.0)
-		var cut_end := Vector2(_facing * 34.0, 24.0)
-		_draw_blade_streak(cut_start, cut_end, impact, 20.0)
-		draw_circle(
-			cut_end,
-			12.0 + impact * 18.0,
-			Color(_accent.r, _accent.g, _accent.b, impact * 0.18)
-		)
-
-	var shockwave_progress: float = clampf((_progress - 0.60) / 0.28, 0.0, 1.0)
-	if shockwave_progress <= 0.0:
-		return
-	var shockwave_alpha: float = 1.0 - smoothstep(0.42, 1.0, shockwave_progress)
+	var bounds := GEOMETRY.get_greatsword_rect(Vector2.ZERO, _facing, _reach_scale)
 	var center_x: float = bounds.get_center().x
-	var half_width: float = bounds.size.x * 0.5 * shockwave_progress
-	var wave_points := PackedVector2Array()
-	for point_index in range(21):
-		var weight: float = float(point_index) / 20.0
-		var x_position: float = center_x + lerpf(-half_width, half_width, weight)
-		var arch: float = sin(weight * PI)
-		wave_points.append(Vector2(
-			x_position,
-			24.0 - arch * (10.0 + 16.0 * shockwave_progress)
-		))
-	draw_polyline(
-		wave_points,
-		Color(_accent.r, _accent.g, _accent.b, shockwave_alpha * 0.82),
-		8.0,
-		true
-	)
-	draw_polyline(
-		wave_points,
-		Color(1.0, 0.92, 0.76, shockwave_alpha * 0.92),
-		2.0,
-		true
-	)
+	var appear: float = smoothstep(0.12, 0.32, _progress)
+	var fade: float = 1.0 - smoothstep(0.72, 0.96, _progress)
+	var descent: float = pow(clampf((_progress - 0.42) / 0.18, 0.0, 1.0), 2.4)
+	var tip := Vector2(center_x, lerpf(-76.0, 30.0, descent))
+	var alpha: float = appear * fade
+	if alpha > 0.001:
+		# A single recognisable blade, guard and grip; the point lands on the hit beat.
+		for ghost in range(3, 0, -1):
+			if _progress > 0.42 and _progress < 0.65:
+				_draw_light_sword(tip - Vector2(0, ghost * 22.0), alpha * 0.055, 1.0 + ghost * 0.06)
+		_draw_light_sword(tip, alpha, 1.0)
+	var shock: float = clampf((_progress - 0.60) / 0.36, 0.0, 1.0)
+	if shock <= 0.0 or shock >= 1.0:
+		return
+	var shock_alpha: float = 1.0 - smoothstep(0.15, 1.0, shock)
+	var radius: float = bounds.size.x * 0.5 * sqrt(shock)
+	var ring := PackedVector2Array()
+	for i in range(49):
+		var angle: float = TAU * float(i) / 48.0
+		ring.append(Vector2(center_x + cos(angle) * radius, 30.0 + sin(angle) * radius * 0.15))
+	draw_polyline(ring, Color(1.0, 0.29, 0.035, shock_alpha * 0.25), 12.0, true)
+	draw_polyline(ring, Color(1.0, 0.56, 0.12, shock_alpha), 3.0, true)
+	for i in range(12):
+		var direction := Vector2(cos(float(i) * 2.4), -absf(sin(float(i) * 2.4)))
+		var at := Vector2(center_x, 30.0) + direction * radius * (0.45 + float(i % 3) * 0.16)
+		draw_line(at, at - direction * (4.0 + 13.0 * (1.0 - shock)), Color(1.0, 0.62, 0.16, shock_alpha), 2.0, true)
+
+
+func _draw_light_sword(tip: Vector2, alpha: float, size: float) -> void:
+	var blade := PackedVector2Array([Vector2(0,0), Vector2(-13,-31), Vector2(-16,-119), Vector2(-10,-133), Vector2(10,-133), Vector2(16,-119), Vector2(13,-31)])
+	for i in range(blade.size()):
+		blade[i] = tip + blade[i] * size
+	var outline := blade.duplicate()
+	outline.append(blade[0])
+	draw_polyline(outline, Color(1.0, 0.27, 0.015, alpha * 0.18), 17.0, true)
+	draw_polyline(outline, Color(1.0, 0.43, 0.035, alpha * 0.4), 7.0, true)
+	draw_colored_polygon(blade, Color(1.0, 0.36, 0.025, alpha * 0.85))
+	draw_colored_polygon(PackedVector2Array([tip, tip + Vector2(-6,-36)*size, tip + Vector2(-5,-128)*size, tip + Vector2(5,-128)*size, tip + Vector2(6,-36)*size]), Color(1.0, 0.78, 0.30, alpha))
+	var guard := tip + Vector2(0,-134) * size
+	draw_polyline(PackedVector2Array([guard+Vector2(-30,6)*size, guard+Vector2(-19,-4)*size, guard+Vector2(19,-4)*size, guard+Vector2(30,6)*size]), Color(1.0, 0.53, 0.08, alpha), 7.0*size, true)
+	draw_line(guard, guard + Vector2(0,-27)*size, Color(1.0, 0.66, 0.18, alpha), 7.0*size, true)
+	draw_circle(guard + Vector2(0,-29)*size, 4.0*size, Color(1.0, 0.83, 0.36, alpha))
 
 
 func _draw_blade_streak(

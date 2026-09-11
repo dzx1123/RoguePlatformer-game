@@ -141,14 +141,8 @@ const ENEMY_FLESH_HURT_PATHS: PackedStringArray = [
 const ENEMY_SLIME_HURT_PATHS: PackedStringArray = [
 	"res://assets/audio/designed/slime_hit.wav",
 ]
-const GOBLIN_ATTACK_VOICE_PATHS: PackedStringArray = [
-	"res://assets/audio/designed/goblin_atk_1.wav",
-	"res://assets/audio/designed/goblin_atk_2.wav",
-]
-const GOBLIN_HURT_VOICE_PATHS: PackedStringArray = [
-	"res://assets/audio/designed/goblin_hurt_1.wav",
-	"res://assets/audio/designed/goblin_hurt_2.wav",
-]
+const GOBLIN_ATTACK_VOICE_PATHS: PackedStringArray = ["res://assets/audio/designed/goblin_attack_user.wav"]
+const GOBLIN_HURT_VOICE_PATHS: PackedStringArray = ["res://assets/audio/designed/goblin_hurt_user.wav"]
 const SLIME_ATTACK_VOICE_PATHS: PackedStringArray = [
 	"res://assets/audio/designed/slime_atk_1.wav",
 	"res://assets/audio/designed/slime_atk_2.wav",
@@ -205,6 +199,11 @@ var _enemy_spit_sfx: Array[AudioStream] = []
 var _enemy_flesh_hurt_sfx: Array[AudioStream] = []
 var _enemy_slime_hurt_sfx: Array[AudioStream] = []
 var _goblin_attack_voices: Array[AudioStream] = []
+var _bat_attack_voices: Array[AudioStream] = []
+var _bat_hurt_voices: Array[AudioStream] = []
+var _goblin_attack_player: AudioStreamPlayer
+var _enemy_hurt_player: AudioStreamPlayer
+var _last_goblin_attack_msec: int = -1000
 var _goblin_hurt_voices: Array[AudioStream] = []
 var _slime_attack_voices: Array[AudioStream] = []
 var _slime_hurt_voices: Array[AudioStream] = []
@@ -280,6 +279,8 @@ func _ready() -> void:
 	_enemy_flesh_hurt_sfx = _load_designed_list(ENEMY_FLESH_HURT_PATHS)
 	_enemy_slime_hurt_sfx = _load_designed_list(ENEMY_SLIME_HURT_PATHS)
 	_goblin_attack_voices = _load_designed_list(GOBLIN_ATTACK_VOICE_PATHS)
+	_bat_attack_voices = _load_designed_list(PackedStringArray(["res://assets/audio/designed/goblin_atk_1.wav", "res://assets/audio/designed/goblin_atk_2.wav"]))
+	_bat_hurt_voices = _load_designed_list(PackedStringArray(["res://assets/audio/designed/goblin_hurt_1.wav", "res://assets/audio/designed/goblin_hurt_2.wav"]))
 	_goblin_hurt_voices = _load_designed_list(GOBLIN_HURT_VOICE_PATHS)
 	_slime_attack_voices = _load_designed_list(SLIME_ATTACK_VOICE_PATHS)
 	_slime_hurt_voices = _load_designed_list(SLIME_HURT_VOICE_PATHS)
@@ -312,6 +313,8 @@ func _ready() -> void:
 		_sfx_players.append(sfx_player)
 	_swing_player = _make_sfx_player("SwingChannel")
 	_hit_player = _make_sfx_player("HitChannel")
+	_goblin_attack_player = _make_sfx_player("GoblinAttackChannel")
+	_enemy_hurt_player = _make_sfx_player("EnemyHurtChannel")
 	_ensure_audio_bus(&"Music")
 	_ensure_audio_bus(&"SFX")
 	_ensure_audio_bus(&"Voice")
@@ -346,7 +349,7 @@ func play_sword_swing(weapon_id: StringName = &"") -> void:
 		_play_on_player(_swing_player, _sword_swing_sfx, MIX_SWING_DB, 1.0)
 
 
-func play_impact(is_slime: bool = false, is_boss: bool = false) -> void:
+func play_impact(is_slime: bool = false, is_boss: bool = false, is_bat: bool = false) -> void:
 	# One slash can damage several targets in the same frame. Keep one clear impact.
 	var now := Time.get_ticks_msec()
 	if now - _last_impact_msec < IMPACT_MIN_INTERVAL_MSEC:
@@ -357,7 +360,7 @@ func play_impact(is_slime: bool = false, is_boss: bool = false) -> void:
 	if bank.is_empty():
 		bank = _hit_sfx
 	_play_on_player(_hit_player, bank, MIX_HIT_DB, 0.94 if is_boss else 1.0)
-	_pending_hurt_clips = _slime_hurt_voices if is_slime else _goblin_hurt_voices
+	_pending_hurt_clips = _slime_hurt_voices if is_slime else (_bat_hurt_voices if is_bat else _goblin_hurt_voices)
 	_pending_hurt_pitch = 0.88 if is_boss else 1.0
 	_pending_hurt_db = MIX_ENEMY_HURT_VOICE_DB if not is_boss else MIX_ENEMY_HURT_VOICE_DB + 1.5
 	_hurt_delay_remaining = HIT_CRY_DELAY
@@ -462,9 +465,17 @@ func play_player_defeat_voice() -> void:
 	_play_player_voice(_player_defeat_voices, &"defeat", 0.98, MIX_VOICE_DEFEAT_DB)
 
 
-func play_enemy_attack_voice(is_slime: bool = false, is_boss: bool = false) -> void:
+func play_enemy_attack_voice(is_slime: bool = false, is_boss: bool = false, is_bat: bool = false) -> void:
+	if not is_slime and not is_bat:
+		var now := Time.get_ticks_msec()
+		if now - _last_goblin_attack_msec < 120:
+			return
+		_last_goblin_attack_msec = now
+		_play_on_player(_goblin_attack_player, _goblin_attack_voices,
+			MIX_ENEMY_VOICE_DB + (2.0 if is_boss else 0.0), 0.90 if is_boss else 1.0)
+		return
 	_add_voice(VoiceType.ENEMY_BITE, 0.20 if not is_boss else 0.28, 0.48 if not is_boss else 0.62)
-	var bank: Array[AudioStream] = _slime_attack_voices if is_slime else _goblin_attack_voices
+	var bank: Array[AudioStream] = _slime_attack_voices if is_slime else _bat_attack_voices
 	_play_combat_sample(
 		bank,
 		MIX_ENEMY_VOICE_DB if not is_boss else MIX_ENEMY_VOICE_DB + 2.0,
@@ -572,7 +583,8 @@ func _process(delta: float) -> void:
 	if _hurt_delay_remaining >= 0.0:
 		_hurt_delay_remaining -= delta
 		if _hurt_delay_remaining <= 0.0:
-			_play_combat_sample(
+			_play_on_player(
+				_enemy_hurt_player,
 				_pending_hurt_clips,
 				_pending_hurt_db,
 				_pending_hurt_pitch

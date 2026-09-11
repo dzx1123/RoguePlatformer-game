@@ -1600,6 +1600,7 @@ func _set_texture(texture: Texture2D) -> void:
 		return
 	_current_texture = texture
 	hero_sprite.texture = texture
+	_hero_edge_material.set_shader_parameter(&"violet_blade", _weapon_id == WeaponCatalog.TWIN_BLADES and texture.resource_path.get_file().begins_with("hero_attack_"))
 	var run_cutout: bool = _weapon_id != WeaponCatalog.SWORD and texture.resource_path.get_file().begins_with("hero_run_")
 	hero_sprite.material = _hero_run_material if run_cutout else _hero_edge_material
 

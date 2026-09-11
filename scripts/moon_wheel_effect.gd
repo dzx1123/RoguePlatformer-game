@@ -3,10 +3,10 @@ extends Node2D
 class_name MoonWheelEffect
 
 const GEOMETRY := preload("res://scripts/moon_wheel_geometry.gd")
-const DEEP_VIOLET := Color(0.075, 0.025, 0.18, 1.0)
-const DARK_MOON := Color(0.09, 0.03, 0.21, 1.0)
-const GHOST_VIOLET := Color(0.43, 0.20, 0.96, 1.0)
-const MOON_VIOLET := Color(0.76, 0.43, 1.0, 1.0)
+const DEEP_SILVER := Color(0.08, 0.10, 0.14, 1.0)
+const DARK_MOON := Color(0.12, 0.15, 0.19, 1.0)
+const GHOST_SILVER := Color(0.65, 0.73, 0.84, 1.0)
+const MOON_SILVER := Color(0.92, 0.96, 1.0, 1.0)
 const MOON_CORE := Color(0.84, 0.96, 1.0, 1.0)
 
 var _active: bool = false
@@ -110,7 +110,7 @@ func _draw() -> void:
 			opening_progress,
 			10.0,
 			opening_fade * 0.92,
-			MOON_VIOLET,
+			MOON_SILVER,
 			MOON_CORE
 		)
 
@@ -129,7 +129,7 @@ func _draw() -> void:
 		_draw_filled_ellipse(
 			center + Vector2(-_facing * stroke_radii.x * 0.12, -stroke_radii.y * 0.10),
 			stroke_radii * Vector2(0.54, 0.60),
-			Color(GHOST_VIOLET.r, GHOST_VIOLET.g, GHOST_VIOLET.b, moon_body_alpha * 0.22)
+			Color(GHOST_SILVER.r, GHOST_SILVER.g, GHOST_SILVER.b, moon_body_alpha * 0.22)
 		)
 
 	# The main brush stroke nearly closes the circle; its small lower gap makes it
@@ -143,7 +143,7 @@ func _draw() -> void:
 			moon_draw,
 			15.0,
 			moon_fade * (0.78 + impact * 0.22),
-			GHOST_VIOLET,
+			GHOST_SILVER,
 			MOON_CORE
 		)
 		_draw_tapered_arc(
@@ -154,7 +154,7 @@ func _draw() -> void:
 			secondary_draw,
 			7.0,
 			moon_fade * 0.42,
-			MOON_VIOLET,
+			MOON_SILVER,
 			Color(_accent.r, _accent.g, _accent.b, 1.0)
 		)
 
@@ -177,7 +177,7 @@ func _draw() -> void:
 			draw_line(
 				crack_start,
 				crack_end,
-				Color(MOON_VIOLET.r, MOON_VIOLET.g, MOON_VIOLET.b, darken * (1.0 - shatter) * 0.42),
+				Color(MOON_SILVER.r, MOON_SILVER.g, MOON_SILVER.b, darken * (1.0 - shatter) * 0.42),
 				1.4,
 				true
 			)
@@ -197,14 +197,14 @@ func _draw() -> void:
 		draw_line(
 			cut_start,
 			live_cut_end,
-			Color(DEEP_VIOLET.r, DEEP_VIOLET.g, DEEP_VIOLET.b, 0.58 * moon_fade),
+			Color(DEEP_SILVER.r, DEEP_SILVER.g, DEEP_SILVER.b, 0.58 * moon_fade),
 			18.0,
 			true
 		)
 		draw_line(
 			cut_start,
 			live_cut_end,
-			Color(MOON_VIOLET.r, MOON_VIOLET.g, MOON_VIOLET.b, 0.88 * moon_fade),
+			Color(MOON_SILVER.r, MOON_SILVER.g, MOON_SILVER.b, 0.88 * moon_fade),
 			8.0,
 			true
 		)
@@ -220,7 +220,7 @@ func _draw() -> void:
 		_draw_filled_ellipse(
 			center,
 			stroke_radii * Vector2(0.42 + impact * 0.14, 0.38 + impact * 0.12),
-			Color(MOON_VIOLET.r, MOON_VIOLET.g, MOON_VIOLET.b, impact * 0.12)
+			Color(MOON_SILVER.r, MOON_SILVER.g, MOON_SILVER.b, impact * 0.12)
 		)
 
 	# The completed dark moon breaks into outward-moving violet shards after the
@@ -238,7 +238,7 @@ func _draw() -> void:
 		draw_circle(
 			mote_position,
 			1.4 + float(mote_index % 2),
-			Color(MOON_VIOLET.r, MOON_VIOLET.g, MOON_VIOLET.b, mote_alpha)
+			Color(MOON_SILVER.r, MOON_SILVER.g, MOON_SILVER.b, mote_alpha)
 		)
 
 
@@ -267,7 +267,7 @@ func _draw_tapered_arc(
 		draw_line(
 			points[segment_index],
 			points[segment_index + 1],
-			Color(DEEP_VIOLET.r, DEEP_VIOLET.g, DEEP_VIOLET.b, alpha * 0.34),
+			Color(DEEP_SILVER.r, DEEP_SILVER.g, DEEP_SILVER.b, alpha * 0.34),
 			live_width + 8.0,
 			true
 		)
@@ -321,7 +321,7 @@ func _draw_shards(center: Vector2, radii: Vector2, shatter: float) -> void:
 		])
 		draw_colored_polygon(
 			shard_points,
-			Color(MOON_VIOLET.r, MOON_VIOLET.g, MOON_VIOLET.b, shard_alpha * 0.66)
+			Color(MOON_SILVER.r, MOON_SILVER.g, MOON_SILVER.b, shard_alpha * 0.66)
 		)
 		draw_line(
 			shard_center,
