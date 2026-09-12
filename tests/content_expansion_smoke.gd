@@ -19,6 +19,8 @@ func _run_test() -> void:
 	var player: RoguePlayer = main.get_node("Player") as RoguePlayer
 	player.skill_hit.connect(_on_skill_hit)
 	await _wait_physics_frames(12)
+	while float(player.get("_arrival_remaining")) > 0.0:
+		await physics_frame
 
 	_disable_enemies(main)
 	var sword_damage: int = player.get_attack_damage()

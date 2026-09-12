@@ -3,6 +3,9 @@ extends Area2D
 signal removed(projectile: Area2D)
 
 const LIFETIME := 3.0
+const SLIME_BUBBLE_SHEET := preload("res://assets/enemies/red_crystal_slime_ranged_sheet.png")
+# Detached bubble in the third frame of the source attack row.
+const SLIME_BUBBLE_REGION := Rect2(625.0, 731.0, 78.0, 72.0)
 
 var _velocity: Vector2 = Vector2.ZERO
 var _damage: int = 1
@@ -79,20 +82,12 @@ func _draw() -> void:
 	if _style == RogueEnemy.ProjectileStyle.ARROW:
 		_draw_arrow()
 		return
-	var trail_direction: Vector2 = -_velocity.normalized()
-	if trail_direction.is_zero_approx():
-		trail_direction = Vector2.LEFT
-	draw_line(
-		trail_direction * 5.0,
-		trail_direction * 20.0,
-		Color(0.96, 0.12, 0.28, 0.42),
-		6.0,
-		true
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	draw_texture_rect_region(
+		SLIME_BUBBLE_SHEET,
+		Rect2(-11.7, -10.8, 23.4, 21.6),
+		SLIME_BUBBLE_REGION
 	)
-	draw_circle(Vector2.ZERO, 9.0, Color(0.62, 0.02, 0.12, 0.82))
-	draw_circle(Vector2.ZERO, 6.0, Color(0.16, 0.84, 0.96, 0.96))
-	draw_arc(Vector2.ZERO, 8.0, 0.0, TAU, 18, Color(1.0, 0.22, 0.34, 0.94), 2.0)
-	draw_circle(Vector2(-2.0, -2.0), 2.0, Color.WHITE)
 
 
 func _draw_arrow() -> void:

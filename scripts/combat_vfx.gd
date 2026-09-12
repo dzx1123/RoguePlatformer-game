@@ -9,7 +9,7 @@ enum EffectType {
 }
 
 const HIT_DURATION := 0.24
-const DEFEAT_DURATION := 0.62
+const DEFEAT_DURATION := 0.78
 
 var _effect_type: int = EffectType.HIT
 var _remaining: float = HIT_DURATION
@@ -36,7 +36,9 @@ func play_defeat(accent: Color, scale_multiplier: float = 1.0) -> void:
 	_duration = DEFEAT_DURATION
 	_remaining = DEFEAT_DURATION
 	_scale_multiplier = maxf(0.8, scale_multiplier)
-	_accent = accent
+	# Defeat smoke is always a cool violet plume; keep boss scaling while
+	# ignoring the old red/orange burst accent passed by the room controller.
+	_accent = Color("#7d35c7")
 	_seed = global_position.x * 0.021 + global_position.y * 0.043
 	queue_redraw()
 
@@ -90,30 +92,16 @@ func _draw_hit(progress: float) -> void:
 
 
 func _draw_defeat(progress: float) -> void:
-	var fade: float = pow(1.0 - progress, 1.35)
-	var blast_radius: float = lerpf(14.0, 78.0, sqrt(progress)) * _scale_multiplier
-	draw_circle(Vector2(0.0, -8.0), blast_radius * 0.38, Color(_accent, fade * 0.22))
-	draw_arc(
-		Vector2(0.0, -8.0),
-		blast_radius,
-		0.0,
-		TAU,
-		24,
-		Color(_accent, fade * 0.68),
-		maxf(1.0, 4.0 * fade),
-		true
-	)
-	draw_arc(Vector2(0.0, -8.0), blast_radius * 0.62, -0.4, PI + 0.6, 14, Color("#f2d47b", fade * 0.86), maxf(1.0, 2.0 * fade), true)
-	draw_circle(Vector2(0.0, -8.0), 10.0 * (1.0 - progress) * _scale_multiplier, Color("#96f4ff", fade * 0.72))
-	for shard_index in range(11):
-		var angle: float = _seed + float(shard_index) * TAU / 11.0
-		var direction := Vector2(cos(angle), sin(angle) * 0.74 - 0.18).normalized()
-		var distance: float = lerpf(10.0, 92.0 + float(shard_index % 3) * 13.0, progress) * _scale_multiplier
-		var shard_center := direction * distance + Vector2(0.0, -8.0 + progress * progress * 45.0)
-		var shard_size: float = (8.0 - progress * 4.0) * _scale_multiplier
-		var tangent := Vector2(-direction.y, direction.x) * shard_size * 0.45
-		var tip := direction * shard_size
-		draw_colored_polygon(
-			PackedVector2Array([shard_center - tip, shard_center + tangent, shard_center + tip, shard_center - tangent]),
-			Color(_accent, fade * 0.90)
-		)
+	var fade: float = pow(1.0 - progress, 1.18)
+	var plume_radius: float = lerpf(16.0, 104.0, sqrt(progress)) * _scale_multiplier
+	var center := Vector2(0.0, -14.0 + progress * 24.0)
+	# Layered soft puffs approximate the reference smoke burst: compact flash,
+	# expanding lobes, then a transparent violet fade.
+	for puff_index in range(9):
+		var angle: float = _seed + float(puff_index) * TAU / 9.0
+		var orbit: float = plume_radius * (0.34 + float(puff_index % 3) * 0.09)
+		var puff_center := center + Vector2(cos(angle), sin(angle) * 0.72) * orbit
+		var puff_size: float = plume_radius * (0.25 + float(puff_index % 2) * 0.08)
+		var tint := _accent.lerp(Color("#4b167f"), float(puff_index % 3) * 0.20)
+		draw_circle(puff_center, puff_size, Color(tint, fade * (0.72 - float(puff_index % 3) * 0.09)))
+	draw_circle(center, plume_radius * 0.38, Color("#9d55e8", fade * 0.46))

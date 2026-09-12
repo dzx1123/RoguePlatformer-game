@@ -16,21 +16,24 @@ script = ExtResource("1_player")
 shape = SubResource("CapsuleShape_player")
 
 [node name="HeroSprite" type="Sprite2D" parent="." unique_id=2025043771]
-z_index = 1
+z_index = 3
 texture_filter = 1
 position = Vector2(0, -15)
 scale = Vector2(0.22, 0.22)
 
 [node name="SkillPoseEcho" type="Sprite2D" parent="."]
+z_index = 2
 visible = false
 texture_filter = 1
 position = Vector2(0, -15)
 scale = Vector2(0.22, 0.22)
 
 [node name="MoonWheelEffect" type="Node2D" parent="." unique_id=45084483]
+z_index = 4
 script = ExtResource("2_moon_wheel")
 
 [node name="WeaponSkillEffect" type="Node2D" parent="."]
+z_index = 4
 script = ExtResource("3_weapon_skill")
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=338405928]

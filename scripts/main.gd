@@ -26,6 +26,7 @@ const DEATH_RECAP_SCRIPT := preload("res://scripts/death_recap.gd")
 const TUTORIAL_SCRIPT := preload("res://scripts/run_tutorial.gd")
 const REWARD_FEEDBACK_SCRIPT := preload("res://scripts/reward_feedback.gd")
 const OPENING_INTRO_SCRIPT := preload("res://scripts/opening_intro.gd")
+const ROOM_ENTRY_BEAM_SCRIPT := preload("res://scripts/room_entry_beam.gd")
 const MOONLIT_GOTHIC_BRIDGE_BACKGROUND := preload("res://assets/backgrounds/moonlit_gothic_bridge.png")
 const MENU_MOONLIT_SANCTUM_BACKGROUND := preload("res://assets/backgrounds/menu_moonlit_sanctum_v1.png")
 const BUILD_LABEL := "月蚀混战测试版 0.4.1 · 2026.09.03"
@@ -35,6 +36,7 @@ const GOBLIN_CHAPTER_START := 5
 const MIXED_CHAPTER_START := 10
 const FINAL_CHAPTER_START := 15
 const ROOM_PLAYER_SPAWN := Vector2(150.0, 580.0)
+const ROOM_LEFT_SAFE_MARGIN := 220.0
 const ROOM_ENTRY_RECOVERY := 10
 const MAX_RUN_LIVES := 3
 const ENEMY_ROLE_MELEE := 0
@@ -2751,6 +2753,7 @@ func _load_room(pool_index: int) -> void:
 
 	var recovery: int = 0 if _current_room_index == 0 else ROOM_ENTRY_RECOVERY
 	player.enter_room(ROOM_PLAYER_SPAWN, recovery)
+	_spawn_room_entry_beam()
 	_configure_room_objective()
 	_spawn_room_enemies()
 	var room_title: String = _current_room_data.get("title", "未知房间")
@@ -3060,7 +3063,7 @@ func _spawn_room_enemies() -> void:
 		if surface_index < 0 or surface_index >= platform_rects.size():
 			continue
 		var surface: Rect2 = platform_rects[surface_index]
-		var minimum_x: float = surface.position.x + 42.0
+		var minimum_x: float = maxf(surface.position.x + 42.0, ROOM_LEFT_SAFE_MARGIN)
 		var maximum_x: float = surface.end.x - 42.0
 		if maximum_x <= minimum_x:
 			continue
@@ -3187,7 +3190,7 @@ func _spawn_boss() -> void:
 	for surface in platform_rects:
 		if surface.size.x > boss_surface.size.x:
 			boss_surface = surface
-	var minimum_x: float = maxf(boss_surface.position.x + 85.0, 190.0)
+	var minimum_x: float = maxf(boss_surface.position.x + 85.0, ROOM_LEFT_SAFE_MARGIN)
 	var maximum_x: float = minf(boss_surface.end.x - 85.0, WORLD_SIZE.x - 105.0)
 	var spawn_x: float = lerpf(minimum_x, maximum_x, 0.68)
 	var family: int = _get_primary_enemy_family_for_room(_current_room_index)
@@ -3389,6 +3392,14 @@ func _spawn_defeat_vfx(defeat_position: Vector2, enemy: RogueEnemy) -> void:
 	effect.z_index = 8
 	effect.call(&"play_defeat", accent, scale_multiplier)
 	_trigger_camera_shake(11.0 * scale_multiplier, 0.13)
+
+
+func _spawn_room_entry_beam() -> void:
+	var beam: Node2D = ROOM_ENTRY_BEAM_SCRIPT.new() as Node2D
+	add_child(beam)
+	beam.global_position = player.global_position + Vector2(0.0, -8.0)
+	beam.z_index = 12
+	beam.call(&"play", 1.0)
 
 
 func _on_room_cleared() -> void:
@@ -4939,6 +4950,7 @@ func _continue_saved_run() -> bool:
 	if not platform_rects.is_empty():
 		player.set_base_ground_surface_y(platform_rects[0].position.y)
 	player.enter_room(ROOM_PLAYER_SPAWN, 0)
+	_spawn_room_entry_beam()
 	player.set_current_health(int(snapshot.get("health", player.get_current_health())))
 	_configure_room_objective()
 	var resume_phase: int = int(snapshot.get("resume_phase", RunFlowState.Phase.COMBAT))

@@ -159,41 +159,21 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	var pulse: float = 0.5 + 0.5 * sin(_visual_time * 3.2)
-	var activation: float = 1.0 if _activating else 0.0
-	var beam_height: float = 170.0 + pulse * 6.0 + activation * 42.0
-	var beam_width: float = 86.0 + pulse * 3.0 + activation * 9.0
-
-	# Two soft layers create a continuous bottom-to-top fade without hard side rails.
-	if is_instance_valid(_beam_texture):
-		draw_texture_rect(
-			_beam_texture,
-			Rect2(-beam_width * 0.72, 20.0 - beam_height, beam_width * 1.44, beam_height),
-			false,
-			Color(0.45, 0.92, 1.0, 0.30 + activation * 0.14)
-		)
-		draw_texture_rect(
-			_beam_texture,
-			Rect2(-beam_width * 0.46, 20.0 - beam_height, beam_width * 0.92, beam_height),
-			false,
-			Color(0.76, 0.98, 1.0, 0.76 + pulse * 0.08 + activation * 0.12)
-		)
-
-	draw_set_transform(Vector2(0.0, 23.0), 0.0, Vector2(1.0, 0.26))
-	draw_circle(Vector2.ZERO, 72.0 + pulse * 6.0, Color(0.10, 0.70, 1.0, 0.10))
-	draw_circle(Vector2.ZERO, 48.0 + pulse * 3.0, Color(0.40, 0.94, 1.0, 0.18))
-	draw_arc(Vector2.ZERO, 58.0 + pulse * 2.0, 0.0, TAU, 48, Color(0.48, 0.93, 1.0, 0.34), 1.4)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-	for mote_index in range(5):
-		var mote_phase: float = _visual_time * (1.1 + float(mote_index % 3) * 0.18) + float(mote_index) * 1.73
-		var mote_x: float = sin(mote_phase) * (9.0 + float(mote_index % 3) * 6.0)
-		var mote_y: float = 18.0 - fposmod(mote_phase * 34.0, beam_height - 16.0)
-		draw_circle(
-			Vector2(mote_x, mote_y),
-			1.2 + float(mote_index % 2) * 0.5,
-			Color(0.76, 0.98, 1.0, 0.34 + pulse * 0.22)
-		)
-
-	draw_circle(Vector2(0.0, 18.0), 10.0 + pulse * 2.0, Color(0.68, 0.96, 1.0, 0.64))
-	draw_circle(Vector2(0.0, 18.0), 4.0 + pulse, Color(0.20, 0.80, 1.0, 0.94))
+	var pulse := 0.5 + 0.5 * sin(_visual_time * 3.2)
+	var strength := 1.5 if _activating else 1.0
+	# Unequal blue-white streams rise from a bright ground pool.
+	for ray in range(17):
+		var phase := float(ray) * 2.399
+		var x := sin(phase) * 43.0
+		var height := (65.0 + 120.0 * (0.5 + 0.5 * sin(_visual_time * 1.7 + phase))) * strength
+		var width := 3.0 + float(ray % 3) * 2.0
+		if is_instance_valid(_beam_texture):
+			draw_texture_rect(_beam_texture, Rect2(x - width, 20.0 - height, width * 2.0, height), false, Color(0.18,0.52,1.0,0.95 * strength))
+		var rise := fposmod(_visual_time * (0.35 + float(ray % 4) * 0.08) + float(ray) * 0.13, 1.0)
+		var pos := Vector2(x, 18.0 - rise * height)
+		draw_line(pos, pos + Vector2(0, 5.0), Color(0.30,0.68,1.0, sin(rise * PI) * 0.95), 1.2, true)
+	draw_set_transform(Vector2(0,22), 0, Vector2(1,0.18))
+	for layer in range(10,0,-1):
+		draw_circle(Vector2.ZERO, float(layer) * 6.0, Color(0.04,0.35,1.0,0.09 * strength))
+	draw_circle(Vector2.ZERO, 31.0 + pulse * 3.0, Color(0.28,0.62,1.0,0.85))
+	draw_set_transform(Vector2.ZERO,0,Vector2.ONE)

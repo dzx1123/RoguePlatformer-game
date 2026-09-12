@@ -196,6 +196,8 @@ var _skill_pose_echo_remaining: float = 0.0
 var _skill_pose_echo_origin := Vector2.ZERO
 var _spawn_point := Vector2.ZERO
 var _visual_time: float = 0.0
+var _arrival_remaining: float = 0.0
+var _arrival_idle_blend: float = 1.0
 var _run_cycle: float = 0.0
 var _run_settle_target: float = 0.0
 var _run_is_settling: bool = false
@@ -272,6 +274,20 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	_visual_time += delta
+	if _arrival_remaining > 0.0:
+		# Establish floor contact while invisible, so materializing does not
+		# trigger a fall/landing pose on the first controllable frame.
+		velocity = Vector2(0.0, gravity * delta)
+		move_and_slide()
+		_arrival_remaining = maxf(0.0, _arrival_remaining - delta)
+		velocity = Vector2.ZERO
+		_landing_squash_remaining = 0.0
+		_airborne_time = 0.0
+		_update_hero_visuals(delta)
+		modulate.a = smoothstep(0.0, 1.0, (0.40 - _arrival_remaining) / 0.40)
+		queue_redraw()
+		return
+	_arrival_idle_blend = minf(1.0, _arrival_idle_blend + delta / 0.65)
 
 	if auto_respawn and Input.is_action_just_pressed(&"restart"):
 		respawn()
@@ -443,6 +459,9 @@ func _physics_process(delta: float) -> void:
 
 
 func respawn() -> void:
+	_arrival_remaining = 0.0
+	_arrival_idle_blend = 1.0
+	modulate = Color.WHITE
 	global_position = _spawn_point
 	velocity = Vector2.ZERO
 	_is_dead = false
@@ -579,6 +598,11 @@ func enter_room(spawn_position: Vector2, recovery: int = 10) -> void:
 	_spawn_point = spawn_position
 	respawn()
 	_current_health = mini(maxi(1, max_health), carried_health + maxi(0, recovery))
+	if _base_ground_surface_y < INF:
+		global_position.y = _base_ground_surface_y - 28.0
+	_arrival_remaining = 1.50
+	_arrival_idle_blend = 0.0
+	modulate.a = 0.0
 	health_changed.emit(_current_health, maxi(1, max_health))
 
 
@@ -1054,7 +1078,7 @@ func receive_enemy_attack(
 	cause: StringName = &"enemy_attack"
 ) -> bool:
 	# The dash is an intentional i-frame window: enemy contact and projectiles do no damage.
-	if _is_dead or _dash_remaining > 0.0 or _hurt_invulnerability_remaining > 0.0:
+	if _arrival_remaining > 0.0 or _is_dead or _dash_remaining > 0.0 or _hurt_invulnerability_remaining > 0.0:
 		return false
 	if (
 		_skill_remaining > 0.0
@@ -1365,6 +1389,8 @@ func _settle_run_cycle(delta: float) -> void:
 
 
 func _resolve_visual_state() -> int:
+	if _arrival_remaining > 0.0:
+		return VisualState.IDLE
 	if _is_dead:
 		return VisualState.DEAD
 	if _hurt_remaining > 0.0:
@@ -1464,7 +1490,9 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 				VisualState.DASH,
 				VisualState.DASH_RECOVERY,
 			]:
-				minimum_transition_blend = 0.56
+				# Keep the authored wind-up visible instead of snapping into it when
+				# a skill starts at the same time as the idle pose is settling.
+				minimum_transition_blend = 0.38
 			elif _visual_state in [VisualState.RUN, VisualState.JUMP_RISE, VisualState.JUMP_FALL, VisualState.LAND]:
 				minimum_transition_blend = 0.22
 			pose_blend = maxf(pose_blend, minimum_transition_blend)
@@ -1696,11 +1724,20 @@ func _run_texture(frame_index: int = -1) -> Texture2D:
 
 func _animate_idle() -> void:
 	_set_texture(_weapon_pose_texture(&"hero_idle", HERO_IDLE))
-	var breath: float = sin(_visual_time * 2.2)
-	hero_sprite.position.y += breath * 0.45
+	# Combat-ready idle: a slow weight shift and breathing loop keep the
+	# character alive while preserving a planted foot and a clean transition.
+	var idle_phase: float = _visual_time * 2.05
+	var arrival_weight := smoothstep(0.0, 1.0, _arrival_idle_blend)
+	var breath: float = sin(idle_phase) * arrival_weight
+	var weight_shift: float = sin(idle_phase * 0.5 + 0.65) * arrival_weight
+	# Small but readable motion at the scale used in game: shoulders rise,
+	# cloak/weapon weight settles, then the body returns to its planted center.
+	hero_sprite.position.x += _facing * weight_shift * 1.35
+	hero_sprite.position.y += breath * 0.90
+	hero_sprite.rotation = -_facing * weight_shift * 0.022
 	hero_sprite.scale = Vector2(
-		HERO_SCALE * (1.0 - breath * 0.003),
-		HERO_SCALE * (1.0 + breath * 0.006)
+		HERO_SCALE * (1.0 - breath * 0.0025),
+		HERO_SCALE * (1.0 + breath * 0.005)
 	)
 
 
