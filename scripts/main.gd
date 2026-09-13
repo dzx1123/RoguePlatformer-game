@@ -167,6 +167,7 @@ var _death_recap
 var _tutorial
 var _continue_store
 var _entry_flow_active: bool = false
+var _enemy_entry_lock_remaining: float = 0.0
 var _entry_tween: Tween
 var _opening_intro: Control
 var _selected_difficulty: int = Difficulty.MEDIUM
@@ -305,6 +306,12 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_update_camera_shake(_delta)
+	if _enemy_entry_lock_remaining > 0.0:
+		_enemy_entry_lock_remaining = maxf(0.0, _enemy_entry_lock_remaining - _delta)
+		if _enemy_entry_lock_remaining <= 0.0:
+			for enemy in _enemies:
+				if is_instance_valid(enemy):
+					enemy.set_physics_process(true)
 	if _is_game_paused:
 		return
 	if _telemetry != null:
@@ -1720,7 +1727,6 @@ func _create_settings_ui() -> void:
 	_create_settings_card_heading(system_card, "显示与辅助", UI.ACCENT_MOON)
 	_create_settings_card_heading(bindings_card, "按键映射", UI.ACCENT_MOON)
 	_create_settings_card_heading(guide_card, "战斗提示", UI.ACCENT_MOON)
-
 	var title := Label.new()
 	title.position = Vector2(380.0, 60.0)
 	title.size = Vector2(520.0, 42.0)
@@ -1950,7 +1956,7 @@ func _create_settings_glass_card(
 	card.add_theme_stylebox_override(
 		"panel",
 		_create_surface_style(
-			Color(0.008, 0.030, 0.064, 0.48),
+			Color(0.012, 0.044, 0.078, 0.72),
 			Color(accent, 0.30),
 			16,
 			1,
@@ -1971,9 +1977,9 @@ func _create_settings_card_heading(card: Panel, heading_text: String, accent: Co
 	var heading := Label.new()
 	heading.name = "Heading"
 	heading.position = Vector2(20.0, 18.0)
-	heading.size = Vector2(card.size.x - 40.0, 20.0)
+	heading.size = Vector2(card.size.x - 40.0, 24.0)
 	heading.text = heading_text
-	heading.add_theme_font_size_override("font_size", 13)
+	heading.add_theme_font_size_override("font_size", 15)
 	heading.add_theme_color_override("font_color", Color(accent, 0.94))
 	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(heading)
@@ -2754,6 +2760,7 @@ func _load_room(pool_index: int) -> void:
 	var recovery: int = 0 if _current_room_index == 0 else ROOM_ENTRY_RECOVERY
 	player.enter_room(ROOM_PLAYER_SPAWN, recovery)
 	_spawn_room_entry_beam()
+	_enemy_entry_lock_remaining = 1.15
 	_configure_room_objective()
 	_spawn_room_enemies()
 	var room_title: String = _current_room_data.get("title", "未知房间")
@@ -3177,6 +3184,8 @@ func _spawn_enemy(
 		enemy.boss_phase_changed.connect(_on_boss_phase_changed)
 		_boss_enemy = enemy
 	add_child(enemy)
+	if _enemy_entry_lock_remaining > 0.0:
+		enemy.set_physics_process(false)
 	_enemies.append(enemy)
 	if rank == ENEMY_RANK_BOSS:
 		_hud_presenter.set_boss_visible(true)
@@ -3190,9 +3199,17 @@ func _spawn_boss() -> void:
 	for surface in platform_rects:
 		if surface.size.x > boss_surface.size.x:
 			boss_surface = surface
-	var minimum_x: float = maxf(boss_surface.position.x + 85.0, ROOM_LEFT_SAFE_MARGIN)
-	var maximum_x: float = minf(boss_surface.end.x - 85.0, WORLD_SIZE.x - 105.0)
-	var spawn_x: float = lerpf(minimum_x, maximum_x, 0.68)
+	# Bosses get a deliberate entrance position: never in the left spawn corner
+	# and never within melee range of the player's room-entry point.
+	var minimum_x: float = maxf(boss_surface.position.x + 110.0, ROOM_LEFT_SAFE_MARGIN + 180.0)
+	var maximum_x: float = minf(boss_surface.end.x - 110.0, WORLD_SIZE.x - 105.0)
+	var player_x: float = player.global_position.x
+	var preferred_x: float = maxf(player_x + 300.0, minimum_x + 80.0)
+	var spawn_x: float = clampf(preferred_x, minimum_x, maximum_x)
+	if absf(spawn_x - player_x) < 260.0:
+		var left_fallback := minf(player_x - 300.0, maximum_x)
+		if left_fallback >= minimum_x:
+			spawn_x = left_fallback
 	var family: int = _get_primary_enemy_family_for_room(_current_room_index)
 	_spawn_enemy(
 		Vector2(spawn_x, boss_surface.position.y - 52.0),

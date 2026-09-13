@@ -63,6 +63,9 @@ func _run_test() -> void:
 		_fail("Enemy hurt invulnerability did not reject an immediate repeated hit")
 		return
 
+	player.set("_arrival_remaining", 0.0)
+	player.set("_attack_remaining", 0.0)
+	player.set("_skill_remaining", 0.0)
 	player.set("_hurt_invulnerability_remaining", 0.0)
 	var player_health_before: int = player.get_current_health()
 	var player_was_hit: bool = player.receive_enemy_attack(

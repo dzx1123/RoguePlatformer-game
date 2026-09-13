@@ -306,7 +306,7 @@ func update_economy(gold: int, meta_shards: int, run_shards: int) -> void:
 func update_equipment(player: RoguePlayer, progression: ProgressionStore) -> void:
 	if equipment_label == null or progression == null:
 		return
-	equipment_label.text = "%s" % player.get_weapon_name()
+	equipment_label.text = ""
 	update_weapon_slots(player, progression)
 
 

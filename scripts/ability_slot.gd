@@ -46,16 +46,16 @@ func set_cooldown(remaining: float, duration: float) -> void:
 
 func _create_labels() -> void:
 	_title_label = Label.new()
-	_title_label.position = Vector2(2.0, 53.0)
-	_title_label.size = Vector2(78.0, 16.0)
+	_title_label.position = Vector2(2.0, 52.0)
+	_title_label.size = Vector2(100.0, 16.0)
 	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_title_label.add_theme_font_size_override("font_size", 10)
 	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_title_label)
 
 	_key_label = Label.new()
-	_key_label.position = Vector2(6.0, 4.0)
-	_key_label.size = Vector2(18.0, 16.0)
+	_key_label.position = Vector2(7.0, 4.0)
+	_key_label.size = Vector2(20.0, 16.0)
 	_key_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_key_label.add_theme_font_size_override("font_size", 11)
 	_key_label.add_theme_color_override("font_color", Color(0.88, 0.97, 1.0, 1.0))
@@ -63,8 +63,8 @@ func _create_labels() -> void:
 	add_child(_key_label)
 
 	_countdown_label = Label.new()
-	_countdown_label.position = Vector2(20.0, 17.0)
-	_countdown_label.size = Vector2(42.0, 28.0)
+	_countdown_label.position = Vector2(28.0, 17.0)
+	_countdown_label.size = Vector2(48.0, 28.0)
 	_countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_countdown_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_countdown_label.add_theme_font_size_override("font_size", 17)

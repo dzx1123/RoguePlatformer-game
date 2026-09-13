@@ -6,26 +6,30 @@ static func apply(page: Control) -> void:
 	font.font_names = PackedStringArray(["Microsoft YaHei", "Noto Sans CJK SC", "sans-serif"])
 	font.font_weight = 400
 	_style_text(page, font)
-	var page_bg := Color("#08090B")
-	var card_bg := Color("#14181C")
-	var card_stroke := Color("#2C3338")
+	var page_bg := Color("#040912")
+	var card_bg := Color("#0C1827")
+	var card_stroke := Color("#34566B")
 	for node: Node in page.get_children():
 		if node is ColorRect and (String(node.name) == "SettingsDimmer" or node.size.x >= 1280):
 			node.color = page_bg
 	var cards := {
-		"SettingsHeader": Rect2(48, 16, 1184, 70),
-		"SettingsAudioCard": Rect2(48, 96, 456, 260),
-		"SettingsSystemCard": Rect2(520, 96, 712, 260),
-		"SettingsBindingsCard": Rect2(48, 368, 616, 300),
-		"SettingsGuideCard": Rect2(680, 368, 552, 300),
+		"SettingsHeader": Rect2(48, 16, 1184, 74),
+		"SettingsAudioCard": Rect2(48, 100, 456, 252),
+		"SettingsSystemCard": Rect2(520, 100, 712, 252),
+		"SettingsBindingsCard": Rect2(48, 364, 616, 304),
+		"SettingsGuideCard": Rect2(680, 364, 552, 304),
 	}
 	for key: String in cards:
 		var card := page.get_node(key) as Panel
 		var rect: Rect2 = cards[key]
 		card.position = rect.position
 		card.size = rect.size
-		card.add_theme_stylebox_override("panel", MoonUI.surface(card_bg, card_stroke, 12))
-		# The header has its own large title; the generic card accent crossed through
+		var accent := MoonUI.ACCENT_MOON
+		if key == "SettingsBindingsCard":
+			accent = MoonUI.ACCENT_OMEN
+		elif key == "SettingsGuideCard":
+			accent = MoonUI.ACCENT_GOLD
+		card.add_theme_stylebox_override("panel", MoonUI.surface(card_bg, Color(accent, 0.62), 16, 1, 14))
 		# the first glyph and looked like a stray line.
 		if key == "SettingsHeader":
 			for child: Node in card.get_children():
@@ -39,8 +43,8 @@ static func apply(page: Control) -> void:
 	var names := ["MasterVolume", "MusicVolume", "EffectsVolume", "VoiceVolume"]
 	var labels := ["主音量", "音乐", "音效", "语音"]
 	for index in range(4):
-		_place(page, names[index], Rect2(182, 148 + index * 40, 286, 26))
-		_label(page, labels[index], Rect2(72, 143 + index * 40, 98, 32))
+		_place(page, names[index], Rect2(182, 150 + index * 40, 286, 26))
+		_label(page, labels[index], Rect2(72, 145 + index * 40, 98, 32))
 	_label(page, "设置与操作", Rect2(72, 22, 700, 32), 28)
 	_label(page, "调整你的月蚀路线 · 所有说明收纳于此", Rect2(72, 58, 900, 20), 14)
 	_label(page, "分辨率", Rect2(544, 148, 82, 36))
@@ -59,15 +63,15 @@ static func apply(page: Control) -> void:
 		"DisplayStatus": Rect2(544, 334, 652, 20),
 		"OperationGuide": Rect2(700, 412, 250, 256),
 		"OperationGuideCombat": Rect2(976, 412, 236, 256),
-		"ResetBindings": Rect2(48, 672, 252, 40),
-		"CloseSettings": Rect2(992, 672, 240, 40),
+		"ResetBindings": Rect2(48, 678, 252, 38),
+		"CloseSettings": Rect2(980, 678, 252, 38),
 		"SettingsAbout": Rect2(350, 676, 580, 22),
 	}
 	for key: String in controls:
 		_place(page, key, controls[key])
 	for key: String in ["OperationGuide", "OperationGuideCombat"]:
 		var guide_column := page.get_node(key) as RichTextLabel
-		guide_column.add_theme_constant_override("line_separation", 2)
+		guide_column.add_theme_constant_override("line_separation", 3)
 	for key in ["ControllerStatus", "DisplayStatus", "SettingsAbout"]:
 		var label := page.get_node(key) as Label
 		label.add_theme_font_size_override("font_size", 13)
@@ -81,9 +85,9 @@ static func apply(page: Control) -> void:
 	}
 	var index := 0
 	for action: String in bindings:
-		var origin := Vector2(68 + (index / 7) * 302, 406 + (index % 7) * 34)
-		_label(page, bindings[action], Rect2(origin, Vector2(86, 36)))
-		_place(page, "Bind_" + action, Rect2(origin + Vector2(90, 0), Vector2(194, 36)))
+		var origin := Vector2(66 + (index / 7) * 300, 400 + (index % 7) * 36)
+		_label(page, bindings[action], Rect2(origin, Vector2(90, 34)))
+		_place(page, "Bind_" + action, Rect2(origin + Vector2(96, 0), Vector2(188, 34)))
 		index += 1
 
 

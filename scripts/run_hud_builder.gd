@@ -25,9 +25,9 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 	bottom_hud.size = Vector2(DISPLAY_SIZE.x, DISPLAY_SIZE.y - HUD_DOCK_TOP)
 	bottom_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var bottom_style := StyleBoxFlat.new()
-	bottom_style.bg_color = Color(UI.BG_PANEL, 0.92)
+	bottom_style.bg_color = Color("#071321", 0.97)
 	bottom_style.border_color = UI.ACCENT_MOON
-	bottom_style.border_width_top = 2
+	bottom_style.border_width_top = 3
 	bottom_style.shadow_color = Color(0.0, 0.0, 0.0, 0.66)
 	bottom_style.shadow_size = 14
 	bottom_style.shadow_offset = Vector2(0.0, -4.0)
@@ -42,13 +42,13 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 	bottom_hud.add_child(top_rune)
 
 	_create_hud_panel(
-		hud, "VitalsPanel", Vector2(32.0, 644.0), Vector2(352.0, 72.0), Color("#63dce8")
+		hud, "VitalsPanel", Vector2(24.0, 644.0), Vector2(376.0, 72.0), Color("#53d8f0")
 	)
 	_create_hud_panel(
-		hud, "AbilityPanel", Vector2(408.0, 644.0), Vector2(464.0, 72.0), Color("#91a9ff")
+		hud, "AbilityPanel", Vector2(416.0, 644.0), Vector2(448.0, 72.0), Color("#9b8cff")
 	)
 	var weapon_panel := _create_hud_panel(
-		hud, "WeaponPanel", Vector2(894.0, 644.0), Vector2(354.0, 72.0), Color("#d9ba73")
+		hud, "WeaponPanel", Vector2(888.0, 644.0), Vector2(368.0, 72.0), Color("#e2ae55")
 	)
 
 	var health_background := ColorRect.new()
@@ -139,6 +139,7 @@ static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -
 	equipment_label.add_theme_font_size_override("font_size", 12)
 	equipment_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.56, 1.0))
 	equipment_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	equipment_label.visible = false
 	hud.add_child(equipment_label)
 
 	var lives_label := Label.new()
@@ -204,7 +205,7 @@ static func _create_hud_panel(
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var decorative: bool = panel_name in ["VitalsPanel", "AbilityPanel", "WeaponPanel", "RoomCard"]
 	panel.add_theme_stylebox_override("panel",
-		UI.surface(Color.TRANSPARENT if decorative else Color(UI.BG_DEEP, 0.90),
+		UI.surface(Color(0.02, 0.08, 0.14, 0.62) if decorative else Color(UI.BG_DEEP, 0.90),
 			Color.TRANSPARENT if decorative else Color(UI.STROKE_QUIET, 0.65), UI.CHIP_RADIUS, 0 if decorative else 1))
 	hud.add_child(panel)
 	return panel
@@ -214,24 +215,24 @@ static func _create_weapon_hud(weapon_panel: Panel) -> void:
 	for weapon_index: int in range(WeaponCatalog.all_weapon_ids().size()):
 		var slot := Panel.new()
 		slot.name = "WeaponSlot_%d" % weapon_index
-		slot.position = Vector2(14.0 + float(weapon_index) * 78.0, 20.0)
-		slot.size = Vector2(70.0, 48.0)
+		slot.position = Vector2(8.0 + float(weapon_index) * 94.0, 18.0)
+		slot.size = Vector2(88.0, 50.0)
 		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		weapon_panel.add_child(slot)
 
 		var slot_label := Label.new()
 		slot_label.name = "Label"
 		slot_label.position = Vector2(2.0, 2.0)
-		slot_label.size = Vector2(66.0, 44.0)
+		slot_label.size = Vector2(84.0, 44.0)
 		slot_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		slot_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		slot_label.add_theme_font_size_override("font_size", 10)
+		slot_label.add_theme_font_size_override("font_size", 9)
 		slot_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		slot.add_child(slot_label)
 
 	var switch_panel := Panel.new()
 	switch_panel.name = "WeaponSwitch"
-	switch_panel.position = Vector2(278.0, 20.0)
+	switch_panel.position = Vector2(294.0, 18.0)
 	switch_panel.size = Vector2(66.0, 48.0)
 	switch_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var switch_style := StyleBoxFlat.new()
@@ -261,25 +262,25 @@ static func _create_weapon_hud(weapon_panel: Panel) -> void:
 static func _create_ability_hud(hud: CanvasLayer) -> void:
 	var ability_bar := Control.new()
 	ability_bar.name = "AbilityBar"
-	ability_bar.position = Vector2(499.0, 644.0)
-	ability_bar.size = Vector2(282.0, 72.0)
+	ability_bar.position = Vector2(500.0, 644.0)
+	ability_bar.size = Vector2(360.0, 72.0)
 	ability_bar.mouse_filter = Control.MOUSE_FILTER_PASS
 	hud.add_child(ability_bar)
 
 	var attack_slot := ABILITY_SLOT_SCRIPT.new() as Control
 	attack_slot.name = "AttackAbility"
 	attack_slot.position = Vector2(0.0, 0.0)
-	attack_slot.size = Vector2(82.0, 72.0)
+	attack_slot.size = Vector2(104.0, 72.0)
 	ability_bar.add_child(attack_slot)
 
 	var dash_slot := ABILITY_SLOT_SCRIPT.new() as Control
 	dash_slot.name = "DashAbility"
-	dash_slot.position = Vector2(100.0, 0.0)
-	dash_slot.size = Vector2(82.0, 72.0)
+	dash_slot.position = Vector2(128.0, 0.0)
+	dash_slot.size = Vector2(104.0, 72.0)
 	ability_bar.add_child(dash_slot)
 
 	var skill_slot := ABILITY_SLOT_SCRIPT.new() as Control
 	skill_slot.name = "SkillAbility"
-	skill_slot.position = Vector2(200.0, 0.0)
-	skill_slot.size = Vector2(82.0, 72.0)
+	skill_slot.position = Vector2(256.0, 0.0)
+	skill_slot.size = Vector2(104.0, 72.0)
 	ability_bar.add_child(skill_slot)
