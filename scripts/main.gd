@@ -195,6 +195,7 @@ var _settings_high_contrast_toggle: CheckButton
 var _settings_color_blind_toggle: CheckButton
 var _settings_hud_scale_selector: OptionButton
 var _settings_damage_numbers_toggle: CheckButton
+var _settings_tutorial_toggle: CheckButton
 var _settings_guide_label: RichTextLabel
 var _settings_combat_guide_label: RichTextLabel
 var _settings_controller_status_label: Label
@@ -1768,6 +1769,10 @@ func _create_settings_ui() -> void:
 		"DamageNumbersToggle", "显示伤害数字", Vector2(900.0, 248.0),
 		_on_damage_numbers_toggled
 	)
+	_settings_tutorial_toggle = _create_settings_toggle(
+		"TutorialToggle", "教学提示", Vector2(684.0, 362.0),
+		_on_tutorial_toggled
+	)
 
 	var resolution_label := Label.new()
 	resolution_label.position = Vector2(684.0, 202.0)
@@ -2218,6 +2223,9 @@ func _open_settings(from_pause: bool) -> void:
 	_settings_damage_numbers_toggle.set_pressed_no_signal(
 		bool(_settings.call(&"get_damage_numbers_enabled"))
 	)
+	_settings_tutorial_toggle.set_pressed_no_signal(
+		bool(_settings.call(&"get_tutorial_enabled"))
+	)
 	_settings_resolution_selector.select(int(_settings.call(&"get_resolution_index")))
 	_settings_fullscreen_toggle.set_pressed_no_signal(
 		bool(_settings.call(&"get_fullscreen_enabled"))
@@ -2381,6 +2389,11 @@ func _on_voice_volume_changed(value: float) -> void:
 
 func _on_damage_numbers_toggled(enabled: bool) -> void:
 	_settings.call(&"set_damage_numbers_enabled", enabled)
+
+func _on_tutorial_toggled(enabled: bool) -> void:
+	_settings.call(&"set_tutorial_enabled", enabled)
+	if not enabled and is_instance_valid(_tutorial):
+		_tutorial.hide_lesson()
 
 
 func _on_resolution_selected(option_index: int) -> void:
@@ -2782,7 +2795,9 @@ func _load_room(pool_index: int) -> void:
 			elif _current_encounter == EncounterType.CHALLENGE:
 				_set_status("进入 %s·挑战房——高压敌群，胜利获得额外金币与星屑" % room_title)
 			elif _last_upgrade_name.is_empty():
-				_set_status("进入 %s·%s——清除全部敌人" % [
+				_set_status("%s  ·  %s  ·  进入 %s·%s——清除全部敌人" % [
+					_get_chapter_title(_current_room_index),
+					_get_chapter_phase(_current_room_index),
 					room_title,
 					_get_encounter_name(_current_encounter),
 				])
@@ -2794,6 +2809,28 @@ func _load_room(pool_index: int) -> void:
 	_update_music_state()
 	_persist_continue_snapshot()
 	_update_room_label()
+
+
+func _get_chapter_title(room_index: int) -> String:
+	# 当前 20 房路线完整覆盖第一章；后续章节预留给扩展路线。
+	if room_index < 20:
+		return "第一章·月影门廊"
+	if room_index < 40:
+		return "第二章·余烬铸庭"
+	if room_index < 60:
+		return "第三章·苍蓝高廊"
+	return "终章·蚀月深渊"
+
+
+func _get_chapter_phase(room_index: int) -> String:
+	var local_room := posmod(maxi(room_index, 0), 20)
+	if local_room < 5:
+		return "探索段"
+	if local_room < 10:
+		return "试炼段"
+	if local_room < 15:
+		return "压迫段"
+	return "终局段"
 	queue_redraw()
 
 
@@ -3142,7 +3179,10 @@ func _spawn_enemy(
 			else "MeleeRedCrystalSlime_%02d"
 		) % (_enemies.size() + 1)
 	if archetype != ENEMY_ARCHETYPE_STANDARD and family != ENEMY_FAMILY_NIGHT_BAT:
-		enemy.name = "%s_%s" % [_get_enemy_archetype_node_prefix(archetype), enemy.name]
+		var archetype_prefix := _get_enemy_archetype_node_prefix(archetype)
+		if archetype == ENEMY_ARCHETYPE_SHIELD_GUARD and _current_room_index < 20:
+			archetype_prefix = "MoonEclipseGuard"
+		enemy.name = "%s_%s" % [archetype_prefix, enemy.name]
 	enemy.position = spawn_position
 	var combat_profile: Dictionary = _get_combat_profile()
 	var behavior_profile: Dictionary = (
@@ -3179,6 +3219,8 @@ func _spawn_enemy(
 	enemy.defeated.connect(_on_enemy_defeated.bind(enemy))
 	enemy.projectile_requested.connect(_on_enemy_projectile_requested.bind(enemy))
 	enemy.sound_requested.connect(_on_enemy_sound_requested)
+	if archetype == ENEMY_ARCHETYPE_SHIELD_GUARD:
+		enemy.shield_blocked.connect(_on_shield_blocked)
 	if rank == ENEMY_RANK_BOSS:
 		enemy.health_changed.connect(_on_boss_health_changed)
 		enemy.boss_phase_changed.connect(_on_boss_phase_changed)
@@ -3190,6 +3232,11 @@ func _spawn_enemy(
 	if rank == ENEMY_RANK_BOSS:
 		_hud_presenter.set_boss_visible(true)
 		_on_boss_health_changed(enemy.get_current_health(), enemy.get_max_health())
+
+
+func _on_shield_blocked() -> void:
+	if _current_room_index < 20:
+		_set_status("月蚀护卫挡住了正面攻击——绕到身后或使用上劈/下劈")
 
 
 func _spawn_boss() -> void:
@@ -4157,9 +4204,23 @@ func _on_boss_health_changed(current_health: int, maximum_health: int) -> void:
 	var boss_name: String = "赤晶史莱姆王"
 	if is_instance_valid(_boss_enemy) and _boss_enemy.get_enemy_family() == ENEMY_FAMILY_GOBLIN:
 		boss_name = "赤牙战争酋长"
+	var boss_role := _get_boss_role(_current_room_index)
+	if not boss_role.is_empty():
+		boss_name = "%s·%s" % [boss_role, boss_name]
 	var boss_phase: int = _boss_enemy.get_boss_phase() if is_instance_valid(_boss_enemy) else 1
 	if _hud_presenter != null:
 		_hud_presenter.update_boss(current_health, maximum_health, boss_name, boss_phase)
+
+
+func _get_boss_role(room_index: int) -> String:
+	if room_index < 0:
+		return ""
+	match posmod(room_index, 20):
+		4: return "守门人"
+		9: return "精英首领"
+		14: return "压迫首领"
+		19: return "最终首领"
+		_: return ""
 
 
 func _on_boss_phase_changed(phase: int) -> void:
@@ -4759,6 +4820,7 @@ func _maybe_begin_tutorial() -> void:
 		or _progression.get_runs_completed() > 0
 		or _current_room_index != 0
 		or not _flow_state.run_active
+		or not bool(_settings.call(&"get_tutorial_enabled"))
 	):
 		if is_instance_valid(_tutorial):
 			_tutorial.hide_lesson()
@@ -5103,13 +5165,35 @@ func _draw_gothic_platform(rect: Rect2, room_accent: Color) -> void:
 func _draw() -> void:
 	draw_rect(Rect2(Vector2(-640.0, -240.0), Vector2(2560.0, 1200.0)), Color("#050b14"))
 	var room_accent := Color("#78bdc3")
+	var room_theme := Color("#78bdc3")
 	if not _current_room_data.is_empty():
 		room_accent = _current_room_data.get("accent", room_accent)
+		room_theme = _room_theme_color(_current_room_index)
 	draw_texture_rect(MOONLIT_GOTHIC_BRIDGE_BACKGROUND, Rect2(Vector2.ZERO, WORLD_SIZE), false)
 	draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color(0.015, 0.04, 0.10, 0.12))
+	# Each five-room chapter gets a restrained color wash and skyline bands so
+	# players can recognize progression without changing collision or balance.
+	if not _current_room_data.is_empty():
+		draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color(room_theme, 0.10))
+		for band_index in range(3):
+			var band_y := 108.0 + float(band_index) * 116.0
+			draw_rect(Rect2(0.0, band_y, WORLD_SIZE.x, 2.0), Color(room_theme, 0.16 - band_index * 0.03))
 	for rect in platform_rects:
 		_draw_gothic_platform(rect, room_accent)
 	_draw_room_objective_overlay()
+
+
+func _room_theme_color(room_index: int) -> Color:
+	var chapter := clampi(floori(float(maxi(room_index, 0)) / 5.0), 0, 3)
+	match chapter:
+		0:
+			return Color("#6fc8c1") # moonlit approach
+		1:
+			return Color("#d49a5a") # ember forge
+		2:
+			return Color("#8b9fe8") # cobalt galleries
+		_:
+			return Color("#b86fbe") # eclipse depths
 
 
 func _draw_room_objective_overlay() -> void:

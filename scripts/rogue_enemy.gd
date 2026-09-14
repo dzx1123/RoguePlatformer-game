@@ -12,6 +12,7 @@ signal projectile_requested(
 	projectile_style: int
 )
 signal sound_requested(cue: StringName, is_boss: bool)
+signal shield_blocked
 signal boss_phase_changed(phase: int)
 
 const MELEE_SLIME_SHEET := preload("res://assets/enemies/red_crystal_slime_melee_sheet.png")
@@ -695,6 +696,7 @@ func _apply_player_hit(
 	var applied_damage: int = maxi(1, damage)
 	var applied_knockback_multiplier: float = knockback_multiplier
 	if _is_shield_guard() and _is_shield_blocking(attack_origin):
+		shield_blocked.emit()
 		applied_damage = maxi(1, roundi(float(applied_damage) * 0.48))
 		applied_knockback_multiplier *= 0.30
 

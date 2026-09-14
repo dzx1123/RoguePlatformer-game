@@ -56,6 +56,7 @@ var _music_volume: float = 0.80
 var _effects_volume: float = 0.85
 var _voice_volume: float = 0.90
 var _damage_numbers_enabled: bool = true
+var _tutorial_enabled: bool = true
 var _resolution_index: int = 0
 var _fullscreen_enabled: bool = false
 var _vsync_enabled: bool = true
@@ -87,6 +88,7 @@ func load_settings() -> bool:
 	_effects_volume = clampf(float(data.get("effects_volume", _effects_volume)), 0.0, 1.0)
 	_voice_volume = clampf(float(data.get("voice_volume", _voice_volume)), 0.0, 1.0)
 	_damage_numbers_enabled = bool(data.get("damage_numbers_enabled", true))
+	_tutorial_enabled = bool(data.get("tutorial_enabled", true))
 	_resolution_index = clampi(int(data.get("resolution_index", 0)), 0, RESOLUTION_OPTIONS.size() - 1)
 	_fullscreen_enabled = bool(data.get("fullscreen_enabled", false))
 	_vsync_enabled = bool(data.get("vsync_enabled", true))
@@ -129,6 +131,7 @@ func save_settings() -> Error:
 		"effects_volume": _effects_volume,
 		"voice_volume": _voice_volume,
 		"damage_numbers_enabled": _damage_numbers_enabled,
+		"tutorial_enabled": _tutorial_enabled,
 		"resolution_index": _resolution_index,
 		"fullscreen_enabled": _fullscreen_enabled,
 		"vsync_enabled": _vsync_enabled,
@@ -344,6 +347,13 @@ func set_damage_numbers_enabled(enabled: bool) -> void:
 func get_damage_numbers_enabled() -> bool:
 	return _damage_numbers_enabled
 
+func set_tutorial_enabled(enabled: bool) -> void:
+	_tutorial_enabled = enabled
+	save_settings()
+
+func get_tutorial_enabled() -> bool:
+	return _tutorial_enabled
+
 
 func get_resolution_options() -> Array[Vector2i]:
 	return RESOLUTION_OPTIONS.duplicate()
@@ -442,6 +452,7 @@ func _reset_defaults() -> void:
 	_effects_volume = 0.85
 	_voice_volume = 0.90
 	_damage_numbers_enabled = true
+	_tutorial_enabled = true
 	_resolution_index = 0
 	_fullscreen_enabled = false
 	_vsync_enabled = true
