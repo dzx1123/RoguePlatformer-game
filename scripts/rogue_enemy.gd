@@ -213,6 +213,8 @@ var _night_bat_dive_committed: bool = false
 
 func _ready() -> void:
 	collision_layer = 4
+	# Player/foe contact uses hurtboxes and combat distance. Full body collision
+	# causes vertical stacking and sticky landings, so enemies only collide with platforms.
 	collision_mask = 0 if is_flying_enemy() else 1
 
 	var body_collision := CollisionShape2D.new()

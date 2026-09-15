@@ -252,6 +252,10 @@ var _hero_run_material: ShaderMaterial
 
 
 func _ready() -> void:
+	# Enemy contact uses combat hitboxes; full body blocking causes sticky
+	# vertical stacking when the player lands on a foe.
+	set_collision_layer_value(2, true)
+	set_collision_mask_value(4, false)
 	var edge_material := ShaderMaterial.new()
 	edge_material.shader = HERO_EDGE_SHADER
 	_hero_edge_material = edge_material
@@ -508,6 +512,7 @@ func respawn() -> void:
 	_visual_state_elapsed = 0.0
 	_sprite_pose_initialized = false
 	set_collision_mask_value(1, true)
+	set_collision_mask_value(4, false)
 	health_changed.emit(_current_health, maxi(1, max_health))
 	_update_hero_visuals()
 	queue_redraw()
@@ -950,6 +955,7 @@ func _start_dash() -> void:
 	if _skill_remaining > 0.0:
 		_finish_skill()
 	_dash_remaining = dash_duration
+	set_collision_mask_value(4, false)
 	_dash_cooldown_remaining = maxf(0.01, dash_cooldown_duration)
 	_dash_echo_remaining = 0.0
 	_dash_exit_blend_remaining = 0.0
@@ -962,6 +968,7 @@ func _start_dash() -> void:
 
 func _finish_dash() -> void:
 	_dash_remaining = 0.0
+	set_collision_mask_value(4, false)
 	if _is_dead or _hurt_remaining > 0.0:
 		return
 	# Dash uses the same planted-foot handoff as the other committed actions.
@@ -1248,6 +1255,7 @@ func _die(attacker_position: Vector2, reason: StringName = &"unknown") -> void:
 	_last_death_reason = reason if not reason.is_empty() else &"unknown"
 	_death_remaining = DEATH_DURATION
 	_dash_remaining = 0.0
+	set_collision_mask_value(4, false)
 	_finish_attack()
 	_finish_skill()
 	_skill_exit_blend_remaining = 0.0
