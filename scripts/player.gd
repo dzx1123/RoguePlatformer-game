@@ -1232,6 +1232,10 @@ func get_skill_impact_scale() -> float:
 			return 1.20
 
 
+func allows_body_separation() -> bool:
+	return is_on_floor() and not _is_dead and _dash_remaining <= 0.0 and _hurt_remaining <= 0.0 and _arrival_remaining <= 0.0 and _skill_remaining <= 0.0
+
+
 func get_dash_cooldown_remaining() -> float:
 	return _dash_cooldown_remaining
 

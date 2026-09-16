@@ -851,6 +851,7 @@ func _physics_process(delta: float) -> void:
 			_try_pursuit_jump()
 
 	move_and_slide()
+	_apply_horizontal_body_separation(delta)
 	var now_on_floor: bool = is_on_floor()
 	if now_on_floor and not was_on_floor:
 		_landing_motion_remaining = LANDING_MOTION_DURATION
@@ -869,6 +870,30 @@ func _physics_process(delta: float) -> void:
 		return
 	_update_sprite_animation(delta)
 	queue_redraw()
+
+
+func _apply_horizontal_body_separation(delta: float) -> void:
+	if _is_defeated or is_flying_enemy() or not is_on_floor() or _hurt_remaining > 0.0:
+		return
+	if not is_instance_valid(_target) or not _target.has_method("allows_body_separation"):
+		return
+	if not _target.allows_body_separation():
+		return
+	# Compare feet, not centers: bosses have larger capsules. Never push vertically.
+	var radius: float = 44.0 if is_boss() else (24.0 if is_elite() else 18.0)
+	var half_height: float = 52.0 if is_boss() else (29.0 if is_elite() else 22.0)
+	if absf(global_position.y + half_height - (_target.global_position.y + 28.0)) > 12.0:
+		return
+	var offset: float = global_position.x - _target.global_position.x
+	var penetration: float = radius + 18.0 - absf(offset)
+	if penetration <= 0.0:
+		return
+	var direction: float = signf(offset) if absf(offset) > 0.1 else -_facing
+	# Sweep against terrain rather than teleporting through walls. In a corner
+	# allow overlap instead of trapping or displacing the player into hazards.
+	move_and_collide(Vector2(direction * minf(penetration, 480.0 * delta), 0.0))
+	if velocity.x * direction < 0.0:
+		velocity.x = 0.0
 
 
 func _is_shield_blocking(attack_origin: Vector2) -> bool:
