@@ -3,6 +3,11 @@ extends RefCounted
 ## 第二章设计包：先作为独立原型数据保存，不进入当前 20 房正式路线。
 class_name Chapter2Catalog
 
+const HEAT_PERIOD := 3.0
+const HEAT_WARNING_SECONDS := 0.85
+const HEAT_ACTIVE_SECONDS := 0.55
+const HEAT_DAMAGE := 8
+
 const THEME := {
 	"id": &"ember_forge",
 	"title": "第二章·余烬铸庭",
@@ -18,9 +23,9 @@ static func room_prototypes() -> Array[Dictionary]:
 			"title": "熔炉长廊",
 			"theme": THEME["id"],
 			"layout_rule": "multi_level_heat_lanes",
-			"hazard_warning_seconds": 0.85,
-			"hazard_active_seconds": 0.55,
-			"hazard_damage": 8,
+			"hazard_warning_seconds": HEAT_WARNING_SECONDS,
+			"hazard_active_seconds": HEAT_ACTIVE_SECONDS,
+			"hazard_damage": HEAT_DAMAGE,
 			"memory_hook": "周期热区迫使玩家换层",
 		},
 		{
@@ -28,9 +33,9 @@ static func room_prototypes() -> Array[Dictionary]:
 			"title": "断裂铸桥",
 			"theme": THEME["id"],
 			"layout_rule": "broken_ground_air_control",
-			"hazard_warning_seconds": 0.65,
-			"hazard_active_seconds": 0.40,
-			"hazard_damage": 10,
+			"hazard_warning_seconds": HEAT_WARNING_SECONDS,
+			"hazard_active_seconds": HEAT_ACTIVE_SECONDS,
+			"hazard_damage": HEAT_DAMAGE,
 			"memory_hook": "断桥间隙鼓励冲刺和空中调整",
 		},
 	]
@@ -56,6 +61,6 @@ static func enemy_roster() -> Array[Dictionary]:
 static func event_prototypes() -> Array[Dictionary]:
 	return [
 		{"id": &"forge_toll", "title": "铸火代价", "choice": "失去生命换取武器专属强化"},
-		{"id": &"cooling_ritual", "title": "冷却仪式", "choice": "关闭下一房热区，放弃部分金币"},
+		{"id": &"cooling_ritual", "title": "冷却仪式", "choice": "恢复 25 生命或关闭下一战斗房环境热区（不影响熔火弹）"},
 		{"id": &"molten_trial", "title": "熔流试炼", "choice": "接受精英挑战，获得稀有强化"},
 	]

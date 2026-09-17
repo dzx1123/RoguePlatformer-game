@@ -8,13 +8,14 @@ var landing := Vector2.ZERO
 var target: Node2D
 var age := 0.0
 var impacted := false
+var damage := 12
 
 func advance(delta: float) -> void:
 	age += delta
 	if age >= WARNING + FLIGHT and not impacted:
 		impacted = true
 		if is_instance_valid(target) and target.global_position.distance_to(landing) <= BLAST_RADIUS:
-			target.receive_enemy_attack(landing, 12, &"ember_impact")
+			target.receive_enemy_attack(landing, damage, &"ember_impact")
 	if age >= WARNING + FLIGHT + 0.25:
 		queue_free()
 	queue_redraw()

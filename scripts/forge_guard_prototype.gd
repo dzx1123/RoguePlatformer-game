@@ -47,7 +47,7 @@ func _physics_process(delta: float) -> void:
 	if charge_state == ChargeState.CHARGE and not hit_this_charge and is_instance_valid(_target):
 		if absf(_target.position.x - position.x) < 40 and absf(_target.position.y - position.y) < 44:
 			hit_this_charge = true
-			_target.receive_enemy_attack(position, 16, &"forge_guard_charge")
+			_target.receive_enemy_attack(position, _get_scaled_damage(16), &"forge_guard_charge")
 	queue_redraw()
 
 func _begin_recovery() -> void:
@@ -65,10 +65,9 @@ func _draw() -> void:
 		color = Color.WHITE
 	if _is_defeated:
 		color.a = clampf(_death_remaining / DEATH_ANIMATION_DURATION, 0, 1)
-	draw_rect(Rect2(-24, -32, 48, 54), color)
-	draw_rect(Rect2(charge_facing * 26 - 5, -30, 10, 50), color.darkened(0.3))
+	var pose := 3 if _is_defeated else (1 if charge_state == ChargeState.WINDUP else (2 if charge_state == ChargeState.CHARGE else 0))
+	ART.draw_actor(self, 1, pose, charge_facing if charge_state in [ChargeState.CHARGE, ChargeState.WINDUP] else _art_facing(), 106, _hurt_remaining > 0, _art_alpha())
 	draw_rect(Rect2(-28, -43, 56 * float(_current_health) / maxf(_max_health, 1), 4), color)
-	draw_string(ThemeDB.fallback_font, Vector2(-75, -56), "铸炉守卫·占位外观", HORIZONTAL_ALIGNMENT_LEFT, -1, 13)
 	if charge_state == ChargeState.WINDUP and not _is_defeated:
 		draw_line(Vector2(0, 22), Vector2(charge_facing * 80, 22), Color("#ffd16b"), 3)
 	if charge_state == ChargeState.RECOVER and not _is_defeated:

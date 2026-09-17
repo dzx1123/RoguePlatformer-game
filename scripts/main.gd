@@ -154,6 +154,12 @@ var _upgrade_tween: Tween
 var _upgrade_victory_summary: Control
 var _victory_restart_button: Button
 var _victory_title_button: Button
+var _chapter2_button: Button
+var _chapter2_menu_button: Button
+const CHAPTER2_STORE := preload("res://scripts/chapter2_continue_store.gd")
+var chapter2_save_path := CHAPTER2_STORE.CHAPTER2_PATH
+var _campaign_transitioning := false
+var _chapter_transition_pending := false
 var _reward_layer_mode: int = RewardLayerMode.RELIC
 var _reward_feedback: RewardFeedback
 var _entry_overlay: Control
@@ -217,6 +223,8 @@ func _set_run_phase(next_phase: int) -> void:
 
 
 func _ready() -> void:
+	if get_tree().has_meta(&"campaign_result"):
+		save_enabled = bool(get_tree().get_meta(&"campaign_result").runtime.save_enabled)
 	# The gameplay root must be pausable. HUD owns the always-processing input bridge.
 	process_mode = Node.PROCESS_MODE_PAUSABLE
 	hud.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -291,7 +299,7 @@ func _ready() -> void:
 	if save_enabled:
 		_progression.load_progress()
 		_continue_store.load_snapshot()
-		if _telemetry.load_data() and _telemetry.is_run_active():
+		if _telemetry.load_data() and _telemetry.is_run_active() and not _campaign_waiting():
 			var interrupted_run: Dictionary = _telemetry.get_current_run_snapshot()
 			var interrupted_weapon := StringName(String(
 				interrupted_run.get("ending_weapon_id", WeaponCatalog.SWORD)
@@ -299,6 +307,9 @@ func _ready() -> void:
 			_telemetry.finish_run(false, interrupted_weapon, &"interrupted")
 	_room_pool = ROOM_CATALOG_SCRIPT.create_room_pool()
 	_lives_remaining = MAX_RUN_LIVES
+	if get_tree().has_meta(&"campaign_result"):
+		call_deferred("_restore_campaign_result")
+		return
 	if save_enabled:
 		_show_start_screen(_should_play_opening_intro())
 	else:
@@ -306,6 +317,8 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	if _chapter_transition_pending and Input.is_action_just_pressed(&"interact"):
+		_start_chapter2_journey()
 	_update_camera_shake(_delta)
 	if _enemy_entry_lock_remaining > 0.0:
 		_enemy_entry_lock_remaining = maxf(0.0, _enemy_entry_lock_remaining - _delta)
@@ -581,7 +594,7 @@ func _ensure_context_focus() -> void:
 	if is_instance_valid(_upgrade_overlay) and _upgrade_overlay.visible:
 		if _flow_state.run_complete and is_instance_valid(_victory_restart_button):
 			var on_victory_cta := (
-				focus_owner == _victory_restart_button
+				focus_owner == _victory_restart_button or focus_owner == _chapter2_button
 				or (
 					is_instance_valid(_victory_title_button)
 					and focus_owner == _victory_title_button
@@ -929,6 +942,16 @@ func _create_victory_summary() -> void:
 	_victory_title_button.pressed.connect(_on_victory_title_pressed)
 	_style_victory_title_button(_victory_title_button)
 	_upgrade_victory_summary.add_child(_victory_title_button)
+	_chapter2_button = Button.new()
+	_chapter2_button.text = "第二章已完成"
+	_chapter2_button.hide()
+	_chapter2_button.position = Vector2(340, 308)
+	_chapter2_button.size = Vector2(340, 44)
+	_chapter2_button.pressed.connect(_start_chapter2_journey)
+	_upgrade_victory_summary.add_child(_chapter2_button)
+	_victory_restart_button.focus_neighbor_bottom = _victory_restart_button.get_path_to(_chapter2_button)
+	_victory_title_button.focus_neighbor_bottom = _victory_title_button.get_path_to(_chapter2_button)
+	_chapter2_button.focus_neighbor_top = _chapter2_button.get_path_to(_victory_restart_button)
 
 	_victory_restart_button.focus_neighbor_right = _victory_restart_button.get_path_to(_victory_title_button)
 	_victory_restart_button.focus_neighbor_left = _victory_restart_button.get_path_to(_victory_title_button)
@@ -1360,6 +1383,10 @@ func _create_entry_ui() -> void:
 	_start_button = _create_menu_button("StartGame", "开启新局", Vector2(432, 318), Vector2(416, 68))
 	_entry_overlay.add_child(_start_button)
 	_start_button.pressed.connect(_show_difficulty_selection)
+	_chapter2_menu_button = _create_menu_button("Chapter2Direct", "开发测试 · 第二章", Vector2(440, 400), Vector2(400, 52))
+	_entry_overlay.add_child(_chapter2_menu_button)
+	_style_entry_button(_chapter2_menu_button, UI.ACCENT_GOLD, false)
+	_chapter2_menu_button.pressed.connect(_open_chapter2_direct)
 	_continue_button = _create_menu_button("ContinueRun", "继续旅程", Vector2(432, 318), Vector2(416, 68))
 	_entry_overlay.add_child(_continue_button)
 	_continue_button.pressed.connect(_continue_saved_run)
@@ -1497,11 +1524,13 @@ func _reset_entry_layout() -> void:
 		_continue_button.position = Vector2(432, 318)
 	var settings_button: Button = _entry_overlay.get_node("EntrySettings") as Button
 	var quit_button: Button = _entry_overlay.get_node("EntryQuit") as Button
-	settings_button.position = Vector2(480, 476 if has_continue else 400)
-	quit_button.position = Vector2(480, 524 if has_continue else 448)
+	_chapter2_menu_button.position = Vector2(440, 470 if has_continue else 400)
+	_chapter2_menu_button.visible = true
+	settings_button.position = Vector2(290, 532 if has_continue else 466)
+	quit_button.position = Vector2(670, 532 if has_continue else 466)
 	(_entry_overlay.get_node("EntryFrame") as Panel).visible = false
 	_entry_progress_panel.position = Vector2(48, 616)
-	var focus_buttons: Array = [_start_button, settings_button, quit_button]
+	var focus_buttons: Array = [_start_button, _chapter2_menu_button, settings_button, quit_button]
 	if has_continue:
 		focus_buttons.push_front(_continue_button)
 	_configure_vertical_focus(focus_buttons)
@@ -1531,6 +1560,7 @@ func _play_entry_transition(showing_difficulty: bool) -> void:
 		if _continue_button.visible:
 			controls.append(_continue_button)
 		controls.append(_start_button)
+		controls.append(_chapter2_menu_button)
 		controls.append(_entry_overlay.get_node("EntrySettings"))
 		controls.append(_entry_overlay.get_node("EntryQuit"))
 		controls.append(_entry_progress_panel)
@@ -2523,6 +2553,7 @@ func _hold_entry_chrome() -> void:
 		_entry_overlay.get_node("EntryKicker") as Control,
 		_entry_overlay.get_node("EntryFooter") as Control,
 		_start_button,
+		_chapter2_menu_button,
 		_entry_overlay.get_node("EntrySettings") as Control,
 		_entry_overlay.get_node("EntryQuit") as Control,
 		_entry_progress_panel,
@@ -2568,6 +2599,7 @@ func _show_difficulty_selection() -> void:
 	(_entry_overlay.get_node("EntryFooter") as Label).position = Vector2(240, 628)
 	(_entry_overlay.get_node("DifficultyBack") as Button).visible = true
 	_start_button.visible = false
+	_chapter2_menu_button.hide()
 	if is_instance_valid(_continue_button):
 		_continue_button.visible = false
 	(_entry_overlay.get_node("EntrySettings") as Button).visible = false
@@ -2618,6 +2650,8 @@ func _refresh_entry_progress_summary() -> void:
 
 
 func _start_game_with_difficulty(difficulty: int) -> void:
+	if save_enabled:
+		CHAPTER2_STORE.new(chapter2_save_path).clear_snapshot()
 	_selected_difficulty = clampi(difficulty, Difficulty.EASY, Difficulty.HARD)
 	_lives_remaining = MAX_RUN_LIVES
 	_entry_flow_active = false
@@ -3940,7 +3974,94 @@ func _present_reward_feedback(
 	)
 
 
+func _start_chapter2_journey() -> void:
+	if _campaign_transitioning:
+		return
+	var data := CHAPTER2_STORE.from_player(player, _gold)
+	data.campaign = {"seed": _run_seed, "difficulty": _selected_difficulty, "lives": _lives_remaining, "run_shards": _run_shards, "run_number": _run_number}
+	var store := CHAPTER2_STORE.new(chapter2_save_path, save_enabled)
+	var error := store.save_snapshot(data)
+	if error != OK:
+		_chapter_transition_pending = true
+		player.set_input_enabled(true)
+		_set_status("章节过渡保存失败，按交互键重试：%d" % error)
+		return
+	_chapter_transition_pending = false
+	_campaign_transitioning = true
+	if _telemetry != null:
+		_telemetry.complete_room(&"chapter_complete")
+	_clear_projectiles()
+	player.set_input_enabled(false)
+	get_tree().set_meta(&"campaign_runtime", {"telemetry": _telemetry, "progression": _progression, "save_enabled": save_enabled})
+	get_tree().set_meta(&"chapter2_initial", data)
+	_clear_continue_snapshot()
+	_launch_chapter2_scene()
+
 func _complete_run() -> void:
+	# Room 20 ends a chapter, not the run. Settlement belongs to room 40.
+	_start_chapter2_journey()
+
+func _open_chapter2_direct() -> void:
+	if not _entry_flow_active:
+		return
+	var store := CHAPTER2_STORE.new(chapter2_save_path + ".test")
+	store.load_snapshot()
+	if not store.can_resume():
+		var data := CHAPTER2_STORE.from_player(player, 10)
+		data.weapon_id = str(_progression.get_selected_weapon())
+		data.health = 100
+		data.max_health = 100
+		data.upgrade_counts = {}
+		var error := store.save_snapshot(data)
+		if error != OK:
+			_entry_subtitle.text = "第二章存档创建失败：%d" % error
+			return
+	_launch_chapter2_scene(chapter2_save_path + ".test")
+
+func _launch_chapter2_scene(path: String = "") -> void:
+	get_tree().set_meta(&"chapter2_save_path", chapter2_save_path if path.is_empty() else path)
+	get_tree().change_scene_to_file("res://scenes/Chapter2Journey.tscn")
+
+func _campaign_waiting() -> bool:
+	if get_tree().has_meta(&"campaign_result"):
+		return true
+	var store := CHAPTER2_STORE.new(chapter2_save_path)
+	return store.load_snapshot() and store.can_resume() and store.get_snapshot().has("campaign")
+
+func _restore_campaign_result() -> void:
+	var result: Dictionary = get_tree().get_meta(&"campaign_result")
+	get_tree().remove_meta(&"campaign_result")
+	var data: Dictionary = result.data
+	var campaign: Dictionary = data.campaign
+	chapter2_save_path = result.path
+	_progression = result.runtime.progression
+	_telemetry = result.runtime.telemetry
+	_selected_difficulty = int(campaign.difficulty)
+	_lives_remaining = int(campaign.lives)
+	_run_seed = int(campaign.seed)
+	_run_number = int(campaign.run_number)
+	_run_shards = int(campaign.run_shards)
+	_gold = int(data.gold)
+	_current_room_index = 20 + int(data.room_index)
+	_current_room_data = {"title": "余烬铸庭", "id": &"forge_campaign"}
+	_entry_flow_active = false
+	_entry_overlay.hide()
+	_set_entry_gameplay_suspended(false)
+	player.configure_weapon(StringName(str(data.weapon_id)))
+	var counts := {}
+	for key in data.upgrade_counts:
+		counts[StringName(str(key))] = int(data.upgrade_counts[key])
+	player.restore_run_progression(counts, maxi(1, int(data.health)))
+	player.apply_max_health_delta(int(data.max_health) - player.get_max_health())
+	player.set_current_health(maxi(1, int(data.health)))
+	player.set_physics_process(false)
+	_set_run_phase(RunFlowState.Phase.COMBAT)
+	if bool(result.victory):
+		_finish_campaign_run()
+	else:
+		player._die(Vector2.ZERO, StringName(str(result.cause)))
+
+func _finish_campaign_run() -> void:
 	if _flow_state.run_complete:
 		return
 	_set_run_phase(RunFlowState.Phase.COMPLETE)
@@ -3954,7 +4075,7 @@ func _complete_run() -> void:
 	var unlock_summary: String = _bank_run_progress(true)
 	_configure_reward_layer(RewardLayerMode.VICTORY)
 	_upgrade_overlay.visible = true
-	_upgrade_title.text = "月蚀路线已封印"
+	_upgrade_title.text = "月桥与铸庭 · 全程通关"
 	_refresh_choice_overlay_prompts()
 	for button in _upgrade_buttons:
 		button.visible = false
@@ -4846,6 +4967,16 @@ func _refresh_continue_button() -> void:
 			int(snapshot.get("room_index", 0)) + 1,
 			WeaponCatalog.get_weapon_name(StringName(String(snapshot.get("weapon_id", "")))),
 		]
+	var chapter2 := CHAPTER2_STORE.new(chapter2_save_path)
+	if save_enabled and chapter2.load_snapshot() and chapter2.can_resume():
+		_continue_button.visible = _entry_flow_active and _start_button.visible
+		_continue_button.text = "继续旅程 · 第二章" if chapter2.get_snapshot().has("campaign") else "继续第二章 · 旧试玩"
+		_continue_button.tooltip_text = "从第 %d 房继续同一局旅程" % (21 + int(chapter2.get_snapshot().room_index))
+	elif save_enabled and not has_continue:
+		var test_store := CHAPTER2_STORE.new(chapter2_save_path + ".test")
+		if test_store.load_snapshot() and test_store.can_resume():
+			_continue_button.visible = _entry_flow_active and _start_button.visible
+			_continue_button.text = "继续第二章 · 开发测试"
 
 
 func _has_continue_snapshot() -> bool:
@@ -4954,6 +5085,15 @@ func _deserialize_room_data(serialized: Dictionary) -> Dictionary:
 
 
 func _continue_saved_run() -> bool:
+	var chapter2 := CHAPTER2_STORE.new(chapter2_save_path)
+	if save_enabled and chapter2.load_snapshot() and chapter2.can_resume():
+		_launch_chapter2_scene()
+		return true
+	if not _has_continue_snapshot() and save_enabled:
+		var test_store := CHAPTER2_STORE.new(chapter2_save_path + ".test")
+		if test_store.load_snapshot() and test_store.can_resume():
+			_launch_chapter2_scene(chapter2_save_path + ".test")
+			return true
 	if not _has_continue_snapshot():
 		return false
 	var snapshot: Dictionary = _continue_store.get_snapshot()
@@ -5107,60 +5247,7 @@ func _chapter_index() -> int:
 
 
 func _draw_gothic_platform(rect: Rect2, room_accent: Color) -> void:
-	var visible_height: float = minf(rect.size.y, WORLD_SIZE.y - rect.position.y)
-	if visible_height <= 0.0:
-		return
-	var facade := Rect2(rect.position, Vector2(rect.size.x, visible_height))
-	var rune_color := room_accent.lerp(Color("#50d9ed"), 0.65)
-	var stone_edge := Color("#07111b")
-	var stone_face := Color("#132a3a")
-	var gold_trim := Color("#c79b48")
-
-	# The cap is the walkable stone lip. It shares the collider's exact top edge.
-	draw_rect(facade, stone_edge)
-	draw_rect(Rect2(rect.position + Vector2(2.0, 3.0), Vector2(rect.size.x - 4.0, maxf(0.0, visible_height - 3.0))), stone_face)
-	draw_rect(Rect2(rect.position, Vector2(rect.size.x, minf(8.0, visible_height))), Color("#29495a"))
-	draw_line(rect.position + Vector2(0.0, 1.0), rect.position + Vector2(rect.size.x, 1.0), gold_trim, 1.5)
-	draw_line(rect.position + Vector2(0.0, 6.0), rect.position + Vector2(rect.size.x, 6.0), Color("#5e8290"), 1.0)
-
-	var block_width: float = 42.0
-	var block_x: float = rect.position.x + 4.0
-	var row_index: int = 0
-	while block_x < rect.end.x - 3.0:
-		var offset: float = 0.0 if row_index % 2 == 0 else block_width * 0.5
-		for row_y in range(14, int(visible_height), 15):
-			var seam_x: float = block_x + offset
-			if seam_x > rect.position.x + 3.0 and seam_x < rect.end.x - 3.0:
-				draw_line(
-					Vector2(seam_x, rect.position.y + float(row_y)),
-					Vector2(seam_x, rect.position.y + minf(float(row_y + 12), visible_height - 2.0)),
-					Color("#0a1a25"),
-					1.0
-				)
-		row_index += 1
-		block_x += block_width
-	for row_y in range(14, int(visible_height), 15):
-		draw_line(
-			Vector2(rect.position.x + 3.0, rect.position.y + float(row_y)),
-			Vector2(rect.end.x - 3.0, rect.position.y + float(row_y)),
-			Color("#0a1a25"),
-			1.0
-		)
-
-	var rune_x: float = rect.position.x + 24.0
-	while rune_x < rect.end.x - 16.0:
-		if visible_height >= 22.0:
-			var rune_center := Vector2(rune_x, rect.position.y + 15.0)
-			draw_colored_polygon(
-				PackedVector2Array([
-					rune_center + Vector2(0.0, -4.0), rune_center + Vector2(4.0, 0.0),
-					rune_center + Vector2(0.0, 4.0), rune_center + Vector2(-4.0, 0.0),
-				]),
-				rune_color
-			)
-			draw_circle(rune_center, 1.4, Color("#d8f7ff"))
-		rune_x += 96.0
-
+	preload("res://scripts/gothic_platform_art.gd").draw_platform(self, rect, room_accent)
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2(-640.0, -240.0), Vector2(2560.0, 1200.0)), Color("#050b14"))

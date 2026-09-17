@@ -106,9 +106,10 @@ const BRIDGE_PLATFORMS := [
 	Rect2(1120, 620, 200, 100), Rect2(210, 425, 160, 26),
 	Rect2(470, 330, 180, 26), Rect2(800, 330, 170, 26),
 ]
-const HEAT_PERIOD := 3.0
-const HEAT_WARNING_START := 1.60
-const HEAT_ACTIVE_START := 2.45
+const HEAT_CONFIG := preload("res://scripts/chapter2_catalog.gd")
+const HEAT_PERIOD := HEAT_CONFIG.HEAT_PERIOD
+const HEAT_ACTIVE_START := HEAT_PERIOD - HEAT_CONFIG.HEAT_ACTIVE_SECONDS
+const HEAT_WARNING_START := HEAT_ACTIVE_START - HEAT_CONFIG.HEAT_WARNING_SECONDS
 
 func heat_is_active() -> bool:
 	return not heat_disabled and cycle >= HEAT_ACTIVE_START
@@ -184,18 +185,7 @@ func _load_layout(index: int, carry_health: bool = false) -> void:
 	platforms = PLATFORM_RECTS if room_index == 0 else BRIDGE_PLATFORMS
 	heat_zones = [Rect2(280, 580, 90, 40), Rect2(680, 580, 110, 40), Rect2(1010, 580, 130, 40)] if room_index == 0 else [Rect2(420, 520, 100, 40), Rect2(700, 445, 100, 40), Rect2(980, 510, 90, 40)]
 	for rect: Rect2 in platforms:
-		var body := StaticBody2D.new()
-		body.collision_layer = 1
-		body.position = rect.get_center()
-		var collision := CollisionShape2D.new()
-		var shape := RectangleShape2D.new()
-		shape.size = rect.size
-		collision.shape = shape
-		collision.one_way_collision = rect.size.y < 100.0
-		if collision.one_way_collision:
-			body.add_to_group("drop_through_platform")
-		body.add_child(collision)
-		terrain.add_child(body)
+		_add_platform(rect)
 	if is_instance_valid(player):
 		if carry_health:
 			player.enter_room(Vector2(100, 580), 0)
@@ -203,6 +193,20 @@ func _load_layout(index: int, carry_health: bool = false) -> void:
 			player.respawn()
 		player.set_physics_process(not paused)
 	queue_redraw()
+
+func _add_platform(rect: Rect2) -> void:
+	var body := StaticBody2D.new()
+	body.collision_layer = 1
+	body.position = rect.get_center()
+	var collision := CollisionShape2D.new()
+	var shape := RectangleShape2D.new()
+	shape.size = rect.size
+	collision.shape = shape
+	collision.one_way_collision = rect.size.y < 100.0
+	if collision.one_way_collision:
+		body.add_to_group("drop_through_platform")
+	body.add_child(collision)
+	terrain.add_child(body)
 
 func _physics_process(delta: float) -> void:
 	if paused or ritual_open:
@@ -229,19 +233,25 @@ func _physics_process(delta: float) -> void:
 		for ember in embers.get_children():
 			ember.advance(delta)
 	if Input.is_action_just_pressed(&"interact"):
-		try_exit()
+		if try_exit():
+			return
 	elapsed += delta
 	cycle = fmod(elapsed, HEAT_PERIOD)
-	if heat_is_active() and not player.is_dead():
+	if heat_is_active() and _heat_damage_enabled() and not player.is_dead():
 		var player_box := Rect2(player.position - Vector2(18, 28), Vector2(36, 56))
 		for heat: Rect2 in heat_zones:
 			if heat.intersects(player_box):
-				if player.receive_enemy_attack(heat.get_center(), 8, &"forge_heat"):
+				if player.receive_enemy_attack(heat.get_center(), HEAT_CONFIG.HEAT_DAMAGE, &"forge_heat"):
 					heat_hits += 1
 				break
 	queue_redraw()
 
+func _heat_damage_enabled() -> bool:
+	return true
+
 func _spawn_ember() -> void:
+	if is_instance_valid(caster):
+		caster.cast_pose_time = 1.52
 	# Lock a supported landing point once. The marker never tracks the player.
 	var point := player.position + Vector2(0, 28)
 	var best_y := INF
@@ -297,14 +307,14 @@ func _draw() -> void:
 	if retry_remaining >= 0:
 		draw_string(ThemeDB.fallback_font, Vector2(440, 170), "挑战失败 · 正在重置本房", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("#ffd1a0"))
 	if route_complete:
-		draw_string(ThemeDB.fallback_font, Vector2(430, 130), "两张地图已探索完成 · F2 重新试玩", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("#77ead5"))
+		draw_string(ThemeDB.fallback_font, Vector2(430, 130), _completion_text(), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("#77ead5"))
 	for rect: Rect2 in platforms:
-		draw_rect(rect, Color("#262a32"))
-		draw_line(rect.position, Vector2(rect.end.x, rect.position.y), Color("#d49a5a"), 3.0)
-		for x in range(int(rect.position.x) + 12, int(rect.end.x), 36):
-			draw_circle(Vector2(x, rect.position.y + 12), 2.0, Color("#8e7660"))
+		preload("res://scripts/gothic_platform_art.gd").draw_platform(self, rect, Color("#d49a5a"))
 		if rect.size.y < 100:
-			draw_line(rect.position + Vector2(12, 26), rect.position + Vector2(40, 48), Color("#46424a"), 5)
+			# Recessed corbels are decoration, not solid walls beneath one-way ledges.
+			for edge in [rect.position.x + 18, rect.end.x - 18]:
+				draw_colored_polygon(PackedVector2Array([Vector2(edge - 12, rect.end.y), Vector2(edge + 12, rect.end.y), Vector2(edge, rect.end.y + 28)]), Color("#132a3a"))
+				draw_line(Vector2(edge, rect.end.y), Vector2(edge, rect.end.y + 20), Color("#5e8290"), 2)
 	for heat: Rect2 in heat_zones:
 		var warning := not heat_disabled and cycle >= HEAT_WARNING_START and cycle < HEAT_ACTIVE_START
 		var active := heat_is_active()
@@ -317,6 +327,12 @@ func _draw() -> void:
 			for x in range(int(heat.position.x) + 8, int(heat.end.x), 22):
 				draw_line(Vector2(x, heat.end.y), Vector2(x + 8, heat.position.y), Color("#ffd78c"), 2.0)
 
+	_draw_hud()
+
+func _completion_text() -> String:
+	return "两张地图已探索完成 · F2 重新试玩"
+
+func _draw_hud() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(34.0, 42.0), "第二章原型 · " + ("熔炉长廊" if room_index == 0 else "断裂铸桥"), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 24, Color("#f1c184"))
 	draw_string(ThemeDB.fallback_font, Vector2(34.0, 70.0), "清理全部敌人后出口开放 · 敌人为占位外观 · " + ("热区已冷却" if heat_disabled else "热区预警 0.85 秒"), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color("#bd9b86"))
 	if is_instance_valid(player):
@@ -331,7 +347,7 @@ func _draw_forge_background() -> void:
 		draw_rect(Rect2(x + 14, 175, 97, 410), Color("#15131d"))
 		for y in range(200, 600, 62):
 			draw_line(Vector2(x, y), Vector2(x + 125, y), Color("#302630"), 2)
-	if room_index == 0:
+	if _uses_hall_background():
 		for x in [120.0, 545.0, 1000.0]:
 			draw_rect(Rect2(x, 210, 160, 330), Color("#39272b"))
 			draw_circle(Vector2(x + 80, 350), 67, Color("#7d3624"))
@@ -348,3 +364,6 @@ func _draw_forge_background() -> void:
 		for i in range(24):
 			var x: float = i * 57.0
 			draw_line(Vector2(x, 646 + sin(elapsed + i) * 3), Vector2(x + 34, 646 + sin(elapsed + i) * 3), Color("#bf6232"), 3)
+
+func _uses_hall_background() -> bool:
+	return room_index == 0

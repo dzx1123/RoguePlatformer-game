@@ -7,6 +7,8 @@ var direction := 1.0
 var burn_spent := false
 const LEFT := 500.0
 const RIGHT := 780.0
+var lane_left := LEFT
+var lane_right := RIGHT
 
 func _ready() -> void:
 	super._ready()
@@ -55,7 +57,7 @@ func _physics_process(delta: float) -> void:
 			State.REST:
 				if remaining <= 0:
 					state = State.WAIT
-	velocity.x = clampf(velocity.x, (LEFT - position.x) / maxf(delta, 0.001), (RIGHT - position.x) / maxf(delta, 0.001))
+	velocity.x = clampf(velocity.x, (lane_left - position.x) / maxf(delta, 0.001), (lane_right - position.x) / maxf(delta, 0.001))
 	move_and_slide()
 	queue_redraw()
 
@@ -64,7 +66,7 @@ func _try_burn() -> void:
 		return
 	if _target.position.distance_to(position) < 48:
 		burn_spent = true
-		_target.receive_enemy_attack(position, 8, &"ember_beetle_burn")
+		_target.receive_enemy_attack(position, _get_scaled_damage(8), &"ember_beetle_burn")
 
 func _draw() -> void:
 	var color := Color("#a35730")
@@ -74,10 +76,8 @@ func _draw() -> void:
 		color = Color.WHITE
 	if _is_defeated:
 		color.a = clampf(_death_remaining / DEATH_ANIMATION_DURATION, 0, 1)
-	draw_circle(Vector2(0, 5), 19, color)
-	for x in [-16, 0, 16]:
-		draw_line(Vector2(x, 8), Vector2(x + 9, 22), color, 3)
+	var pose := 3 if _is_defeated else (1 if state == State.WARN else (2 if state in [State.POUNCE, State.BURN] else 0))
+	ART.draw_actor(self, 2, pose, direction, 48, _hurt_remaining > 0, _art_alpha())
 	if state == State.BURN and not _is_defeated:
 		draw_arc(Vector2.ZERO, 48, 0, TAU, 24, Color("#ff743c"), 3)
 	draw_rect(Rect2(-22, -23, 44 * float(_current_health) / 36, 3), color)
-	draw_string(ThemeDB.fallback_font, Vector2(-65, -35), "余烬甲虫·占位外观", HORIZONTAL_ALIGNMENT_LEFT, -1, 13)
