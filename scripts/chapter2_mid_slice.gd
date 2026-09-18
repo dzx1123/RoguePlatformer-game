@@ -55,7 +55,7 @@ func try_exit() -> bool:
 		gold += 15
 		last_reward = "链架宝箱：金币 +15"
 		return true
-	if player.position.distance_to(EXIT_POSITION) > 65 or not living_enemies().is_empty():
+	if not _at_exit() or not living_enemies().is_empty():
 		return false
 	if room.goal == &"trial" and not trial_active and not claimed.has(room.id):
 		_open_choice(&"trial")
@@ -178,15 +178,21 @@ func _draw() -> void:
 	var room := rooms[room_index]
 	if room.has("chest"):
 		var opened := claimed.has(&"chain_chest")
-		draw_rect(Rect2(room.chest - Vector2(18, 12), Vector2(36, 24)), Color("#655f55") if opened else Color("#e4ba67"))
+		var chest_base: Vector2 = room.chest + Vector2(0, 32)
+		var edge := Color("#5e8290") if opened else Color("#e8b45a")
+		draw_rect(Rect2(chest_base - Vector2(23, 28), Vector2(46, 28)), Color("#132a3a"))
+		draw_rect(Rect2(chest_base - Vector2(23, 28), Vector2(46, 28)), edge, false, 2)
+		var lid_y := -39.0 if opened else -28.0
+		draw_rect(Rect2(chest_base + Vector2(-25, lid_y), Vector2(50, 9)), Color("#29495a"))
+		draw_line(chest_base + Vector2(-25, lid_y), chest_base + Vector2(25, lid_y), edge, 2)
+		for x in [-14, 14]:
+			draw_line(chest_base + Vector2(x, -26), chest_base + Vector2(x, -2), edge, 2)
+		if not opened:
+			draw_rect(Rect2(chest_base + Vector2(-4, -21), Vector2(8, 10)), edge)
 		draw_string(ThemeDB.fallback_font, room.chest + Vector2(-75, -25), "已领取" if opened else "交互：金币 +15", HORIZONTAL_ALIGNMENT_LEFT, -1, 15)
 	if wave_delay >= 0 and _waves_pending():
 		for spec: Dictionary in room.waves[next_wave]:
 			draw_arc(spec.position + Vector2(0, 20), 35, 0, TAU, 24, Color("#ffda85"), 3)
-			draw_string(ThemeDB.fallback_font, spec.position + Vector2(-38, -60), "即将出现", HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
-	if _waves_pending() and (room.goal != &"trial" or trial_active):
-		draw_rect(Rect2(1120, 516, 160, 35), Color("#100d16"))
-		draw_string(ThemeDB.fallback_font, Vector2(1130, 539), "全部波次后开放", HORIZONTAL_ALIGNMENT_LEFT, -1, 15)
 
 func _draw_forge_background() -> void:
 	super._draw_forge_background()

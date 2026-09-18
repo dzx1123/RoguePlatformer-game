@@ -141,6 +141,7 @@ var _progression: ProgressionStore
 var _telemetry
 var _boss_enemy: RogueEnemy
 
+var _reward_view: RewardChoiceView
 var _upgrade_overlay: Control
 var _upgrade_dimmer: ColorRect
 var _upgrade_panel: Panel
@@ -744,100 +745,21 @@ func _trigger_camera_shake(_strength: float, _duration: float = 0.09) -> void:
 
 
 func _create_upgrade_ui() -> void:
-	_upgrade_overlay = Control.new()
-	_upgrade_overlay.name = "UpgradeChoice"
-	_upgrade_overlay.position = Vector2.ZERO
-	_upgrade_overlay.size = DISPLAY_SIZE
-	_upgrade_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	hud.add_child(_upgrade_overlay)
-
-	_upgrade_dimmer = ColorRect.new()
-	_upgrade_dimmer.name = "UpgradeDimmer"
-	_upgrade_dimmer.size = DISPLAY_SIZE
-	_upgrade_dimmer.color = Color(0.006, 0.014, 0.035, 0.82)
-	_upgrade_dimmer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_upgrade_overlay.add_child(_upgrade_dimmer)
-
-	_upgrade_panel = Panel.new()
-	_upgrade_panel.name = "UpgradePanel"
-	_upgrade_panel.size = Vector2(1120.0, 590.0)
-	_upgrade_panel.position = Vector2(
-		(DISPLAY_SIZE.x - _upgrade_panel.size.x) * 0.5,
-		(DISPLAY_SIZE.y - _upgrade_panel.size.y) * 0.5
-	)
-	_upgrade_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_upgrade_panel.add_theme_stylebox_override(
-		"panel",
-		_create_surface_style(
-			Color(0.018, 0.055, 0.095, 0.975),
-			Color(0.30, 0.86, 1.0, 0.82),
-			18,
-			2,
-			18
-		)
-	)
-	_upgrade_overlay.add_child(_upgrade_panel)
-
-	_upgrade_rule = ColorRect.new()
-	_upgrade_rule.name = "RewardRule"
-	_upgrade_rule.position = Vector2(42.0, 22.0)
-	_upgrade_rule.size = Vector2(1036.0, 2.0)
-	_upgrade_rule.color = Color(0.42, 0.91, 1.0, 0.72)
-	_upgrade_rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_upgrade_panel.add_child(_upgrade_rule)
-
-	_upgrade_kicker = Label.new()
-	_upgrade_kicker.name = "UpgradeKicker"
-	_upgrade_kicker.position = Vector2(0.0, 38.0)
-	_upgrade_kicker.size = Vector2(1120.0, 28.0)
-	_upgrade_kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_upgrade_kicker.text = "月弧遗物 · 三选一"
-	_upgrade_kicker.add_theme_font_size_override("font_size", UI.CAPTION)
-	_upgrade_kicker.add_theme_color_override("font_color", Color(0.42, 0.85, 1.0, 0.92))
-	_upgrade_kicker.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_upgrade_panel.add_child(_upgrade_kicker)
-
-	_upgrade_title = Label.new()
-	_upgrade_title.position = Vector2(55.0, 70.0)
-	_upgrade_title.size = Vector2(1010.0, 52.0)
-	_upgrade_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_upgrade_title.add_theme_font_size_override("font_size", UI.TITLE)
-	_upgrade_title.add_theme_color_override("font_color", UI.TEXT_PRIMARY)
-	_upgrade_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_upgrade_panel.add_child(_upgrade_title)
-
-	_upgrade_hint = Label.new()
-	_upgrade_hint.position = Vector2(70.0, 122.0)
-	_upgrade_hint.size = Vector2(980.0, 34.0)
-	_upgrade_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_upgrade_hint.add_theme_font_size_override("font_size", UI.CAPTION)
-	_upgrade_hint.add_theme_color_override("font_color", UI.TEXT_SECONDARY)
-	_upgrade_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_upgrade_panel.add_child(_upgrade_hint)
-
-	for choice_index in range(3):
-		var button := Button.new()
-		button.name = "Upgrade_%d" % (choice_index + 1)
-		button.position = Vector2(50.0 + float(choice_index) * 340.0, 180.0)
-		button.size = Vector2(300.0, 340.0)
-		button.pivot_offset = button.size * 0.5
-		button.add_theme_font_size_override("font_size", 19)
-		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.alignment = HORIZONTAL_ALIGNMENT_CENTER
-		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		button.pressed.connect(_on_upgrade_button_pressed.bind(choice_index))
-		button.mouse_entered.connect(_on_upgrade_card_hovered.bind(button, true))
-		button.mouse_exited.connect(_on_upgrade_card_hovered.bind(button, false))
-		button.focus_entered.connect(_on_upgrade_card_hovered.bind(button, true))
-		button.focus_exited.connect(_on_upgrade_card_hovered.bind(button, false))
-		_create_upgrade_card_content(button)
-		_style_upgrade_card(button, {})
-		_upgrade_panel.add_child(button)
-		_upgrade_buttons.append(button)
-	_configure_horizontal_focus(_upgrade_buttons)
+	_reward_view = RewardChoiceView.new()
+	hud.add_child(_reward_view)
+	_reward_view.build(_settings, _soundscape)
+	_reward_view._flow_state = _flow_state
+	_reward_view.selected.connect(_on_upgrade_button_pressed)
+	_upgrade_overlay = _reward_view._upgrade_overlay
+	_upgrade_dimmer = _reward_view._upgrade_dimmer
+	_upgrade_panel = _reward_view._upgrade_panel
+	_upgrade_rule = _reward_view._upgrade_rule
+	_upgrade_kicker = _reward_view._upgrade_kicker
+	_upgrade_title = _reward_view._upgrade_title
+	_upgrade_hint = _reward_view._upgrade_hint
+	_upgrade_buttons = _reward_view._upgrade_buttons
 	_create_victory_summary()
 	_configure_reward_layer(RewardLayerMode.RELIC)
-
 	_hide_upgrade_overlay()
 
 
@@ -1017,7 +939,7 @@ func _configure_victory_summary(earned_shards: int, unlock_summary: String) -> v
 	var route_card: Panel = _upgrade_victory_summary.get_node("VictoryStat_0") as Panel
 	var shards_card: Panel = _upgrade_victory_summary.get_node("VictoryStat_1") as Panel
 	var weapon_card: Panel = _upgrade_victory_summary.get_node("VictoryStat_2") as Panel
-	(route_card.get_node("Value") as Label).text = "%d / %d" % [ROOMS_PER_RUN, ROOMS_PER_RUN]
+	(route_card.get_node("Value") as Label).text = "40 / 40"
 	(route_card.get_node("Detail") as Label).text = "%s难度 · S%d" % [
 		get_selected_difficulty_name(),
 		_run_seed,
@@ -1103,147 +1025,11 @@ func _create_surface_style(
 
 
 func _style_upgrade_card(button: Button, choice: Dictionary) -> void:
-	var rarity_name: String = String(choice.get("rarity_name", "普通"))
-	if _flow_state.event_active:
-		rarity_name = "事件"
-	var accent: Color = UI.RARITY_COMMON
-	match rarity_name:
-		"稀有": accent = UI.RARITY_RARE
-		"传说": accent = UI.RARITY_LEGEND
-		"事件": accent = UI.ACCENT_OMEN
-	if _flow_state.shopping:
-		accent = UI.ACCENT_GOLD
-	button.add_theme_stylebox_override("normal", UI.card(accent))
-	button.add_theme_stylebox_override("hover", UI.card(accent, true))
-	button.add_theme_stylebox_override("focus", UI.card(accent, true))
-	button.add_theme_stylebox_override("pressed", UI.card(accent, true))
-	button.add_theme_stylebox_override("disabled", UI.surface(UI.BG_DEEP, UI.STROKE_QUIET))
-	button.add_theme_color_override("font_color", UI.TEXT_PRIMARY)
-	button.add_theme_color_override("font_hover_color", UI.TEXT_PRIMARY)
-	button.add_theme_color_override("font_pressed_color", UI.TEXT_PRIMARY)
-	button.add_theme_color_override("font_disabled_color", UI.TEXT_DISABLED)
-	if button.disabled:
-		accent = UI.TEXT_DISABLED
-	var emblem: Control = button.get_node_or_null("CardEmblem") as Control
-	if emblem != null:
-		emblem.set_meta(&"accent", accent)
-		emblem.set_meta(&"identity", String(choice.get("id", "")))
-		emblem.queue_redraw()
-	var accent_bar: ColorRect = button.get_node_or_null("CardAccent") as ColorRect
-	var separator: ColorRect = button.get_node_or_null("CardSeparator") as ColorRect
-	var rarity_label: Label = button.get_node_or_null("CardRarity") as Label
-	var title_label: Label = button.get_node_or_null("CardTitle") as Label
-	var footer_label: Label = button.get_node_or_null("CardFooter") as Label
-	if accent_bar != null:
-		accent_bar.color = Color(accent, 0.92)
-	if separator != null:
-		separator.color = Color(accent, 0.62)
-	if rarity_label != null:
-		rarity_label.add_theme_color_override("font_color", Color(accent, 1.0))
-	if title_label != null:
-		title_label.add_theme_color_override("font_color", UI.TEXT_DISABLED if button.disabled else UI.TEXT_PRIMARY)
-	if footer_label != null:
-		footer_label.add_theme_color_override("font_color", Color(accent, 0.84))
-	var description_label: Label = button.get_node_or_null("CardDescription") as Label
-	if description_label != null:
-		description_label.add_theme_color_override("font_color", UI.TEXT_DISABLED if button.disabled else UI.TEXT_SECONDARY)
-	var sigil_label: Label = button.get_node_or_null("CardSigil") as Label
-	if sigil_label != null:
-		sigil_label.add_theme_color_override("font_color", Color(accent, 0.84))
+	_reward_view._style_upgrade_card(button, choice)
 
 
 func _create_upgrade_card_content(button: Button) -> void:
-	var accent_bar := ColorRect.new()
-	accent_bar.name = "CardAccent"
-	accent_bar.position = Vector2(12.0, 0.0)
-	accent_bar.size = Vector2(276.0, 3.0)
-	accent_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(accent_bar)
-
-	var rarity_label := Label.new()
-	rarity_label.name = "CardRarity"
-	rarity_label.position = Vector2(20.0, 20.0)
-	rarity_label.size = Vector2(260.0, 22.0)
-	rarity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	rarity_label.add_theme_font_size_override("font_size", 14)
-	rarity_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(rarity_label)
-
-	var separator := ColorRect.new()
-	separator.name = "CardSeparator"
-	separator.position = Vector2(30.0, 57.0)
-	separator.size = Vector2(240.0, 1.0)
-	separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(separator)
-
-	var title_label := Label.new()
-	title_label.name = "CardTitle"
-	title_label.position = Vector2(24.0, 134.0)
-	title_label.size = Vector2(252.0, 44.0)
-	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	title_label.add_theme_font_size_override("font_size", UI.HEADLINE)
-	title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(title_label)
-
-	var sigil_label := Label.new()
-	sigil_label.name = "CardSigil"
-	sigil_label.position = Vector2(0.0, 63.0)
-	sigil_label.size = Vector2(300.0, 64.0)
-	sigil_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sigil_label.text = "◇"
-	sigil_label.visible = false
-	sigil_label.add_theme_font_size_override("font_size", UI.DISPLAY)
-	sigil_label.add_theme_color_override("font_color", Color(0.60, 0.90, 1.0, 0.82))
-	sigil_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(sigil_label)
-	var emblem := Control.new()
-	emblem.name = "CardEmblem"
-	emblem.position = Vector2(94, 53)
-	emblem.size = Vector2(112, 80)
-	emblem.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	emblem.draw.connect(func(): UI.draw_reward_emblem(emblem, emblem.get_meta(&"accent", UI.ACCENT_MOON), String(emblem.get_meta(&"identity", ""))))
-	button.add_child(emblem)
-
-	var description_label := Label.new()
-	description_label.name = "CardDescription"
-	description_label.position = Vector2(26.0, 185.0)
-	description_label.size = Vector2(248.0, 66.0)
-	description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	description_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	description_label.add_theme_font_size_override("font_size", UI.BODY)
-	description_label.add_theme_color_override("font_color", UI.TEXT_SECONDARY)
-	description_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(description_label)
-
-	var cost_label := Label.new()
-	cost_label.name = "CardCost"
-	cost_label.position = Vector2(20, 252)
-	cost_label.size = Vector2(260, 26)
-	cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	cost_label.add_theme_font_size_override("font_size", UI.CAPTION)
-	cost_label.add_theme_color_override("font_color", UI.ACCENT_RISK)
-	cost_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(cost_label)
-
-	var badge := Panel.new()
-	badge.name = "CardBadge"
-	badge.position = Vector2(44, 281)
-	badge.size = Vector2(212, 40)
-	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(badge)
-
-	var footer_label := Label.new()
-	footer_label.name = "CardFooter"
-	footer_label.position = Vector2(20.0, 282.0)
-	footer_label.size = Vector2(260.0, 38.0)
-	footer_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	footer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	footer_label.add_theme_font_size_override("font_size", 13)
-	footer_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(footer_label)
+	_reward_view._create_upgrade_card_content(button)
 
 
 func _set_upgrade_card_content(
@@ -1254,26 +1040,11 @@ func _set_upgrade_card_content(
 	description: String,
 	footer_text: String
 ) -> void:
-	button.text = ""
-	button.tooltip_text = "%s · %s" % [card_name, description]
-	(button.get_node("CardRarity") as Label).text = "[%s]  %s" % [shortcut, rarity_name]
-	(button.get_node("CardTitle") as Label).text = card_name
-	(button.get_node("CardDescription") as Label).text = description
-	(button.get_node("CardFooter") as Label).text = footer_text
+	_reward_view._set_upgrade_card_content(button, shortcut, rarity_name, card_name, description, footer_text)
 
 
 func _on_upgrade_card_hovered(button: Button, emphasized: bool) -> void:
-	if button.disabled or not button.visible:
-		return
-	var choice_index: int = _upgrade_buttons.find(button)
-	if choice_index < 0:
-		return
-	var resting_position := Vector2(50.0 + float(choice_index) * 340.0, 180.0)
-	var reduced: bool = _settings != null and _settings.get_reduced_effects_enabled()
-	var target_position := resting_position + (Vector2(0.0, -8.0) if emphasized and not reduced else Vector2.ZERO)
-	var tween := button.create_tween().set_parallel(true)
-	tween.tween_property(button, "position", target_position, 0.12)
-	button.scale = Vector2.ONE
+	_reward_view._on_upgrade_card_hovered(button, emphasized)
 
 
 func _play_upgrade_overlay_intro() -> void:
@@ -1377,7 +1148,7 @@ func _create_entry_ui() -> void:
 		Vector2(300, 132), Vector2(680, 24), UI.CAPTION, UI.ACCENT_MOON)
 	_entry_title = _entry_label(_entry_overlay, "EntryTitle", "月蚀回廊",
 		Vector2(250, 170), Vector2(780, 76), UI.DISPLAY, UI.TEXT_PRIMARY)
-	_entry_subtitle = _entry_label(_entry_overlay, "EntrySubtitle", "二十房月桥 · 肉鸽动作",
+	_entry_subtitle = _entry_label(_entry_overlay, "EntrySubtitle", "月桥与铸庭 · 四十房连续旅程",
 		Vector2(270, 254), Vector2(740, 44), UI.CAPTION, UI.TEXT_SECONDARY)
 
 	_start_button = _create_menu_button("StartGame", "开启新局", Vector2(432, 318), Vector2(416, 68))
@@ -2503,7 +2274,7 @@ func _show_start_screen(play_opening: bool = false) -> void:
 	(_entry_overlay.get_node("EntryFrame") as Panel).visible = false
 	(_entry_overlay.get_node("DifficultyBack") as Button).visible = false
 	_entry_title.text = "月蚀回廊"
-	_entry_subtitle.text = "二十房月桥 · 肉鸽动作"
+	_entry_subtitle.text = "月桥与铸庭 · 四十房连续旅程"
 	(_entry_overlay.get_node("EntryKicker") as Label).text = "踏入月夜 · 循回不息"
 	(_entry_overlay.get_node("EntryFooter") as Label).text = (
 		"可继续未完成的路线，或开始新的月蚀路线"
@@ -3443,7 +3214,7 @@ func _spawn_hit_vfx(
 	add_child(effect)
 	effect.global_position = hit_position + Vector2(0.0, -12.0)
 	effect.z_index = 8
-	effect.call(&"play_hit", facing, scale_multiplier * rank_scale)
+	effect.call(&"play_enemy_hit", enemy, facing, scale_multiplier)
 	if is_instance_valid(_soundscape):
 		_soundscape.play_impact(
 			enemy.get_enemy_family() == RogueEnemy.EnemyFamily.SLIME,
@@ -3677,10 +3448,10 @@ func _refresh_choice_overlay_prompts() -> void:
 			)
 		_upgrade_hint.text = (
 			"已通过 %d 个房间。A 再来一局 · B 返回标题，或按 %s 快速开新局"
-			% [ROOMS_PER_RUN, _get_action_prompt(&"restart")]
+			% [40, _get_action_prompt(&"restart")]
 			if _using_controller_input
 			else "已通过 %d 个房间。「再来一局」或「返回标题」，也可按 %s 开新局"
-			% [ROOMS_PER_RUN, _get_action_prompt(&"restart")]
+			% [40, _get_action_prompt(&"restart")]
 		)
 		return
 	if not _flow_state.choosing_upgrade or _upgrade_choices.size() < _upgrade_buttons.size():
@@ -4441,7 +4212,7 @@ func _update_room_label() -> void:
 		_run_number,
 		_run_seed,
 		_current_room_index + 1,
-		ROOMS_PER_RUN,
+		40,
 		_get_encounter_name(_current_encounter),
 		chapter_name,
 		room_title
@@ -4484,14 +4255,14 @@ func _cycle_weapon() -> void:
 	if unlocked.size() <= 1:
 		_set_status("尚未解锁其他武器；击败精英并完成更多轮次可解锁")
 		return
-	var current_index: int = unlocked.find(player.get_weapon_id())
+	var current_index: int = unlocked.find(player.get_requested_weapon_id())
 	var next_index: int = posmod(current_index + 1, unlocked.size())
 	var next_weapon: StringName = unlocked[next_index]
-	if player.configure_weapon(next_weapon):
+	if player.request_weapon_switch(next_weapon):
 		_progression.select_weapon(next_weapon)
 		if save_enabled:
 			_progression.save_progress()
-		_set_status("切换武器：%s" % player.get_weapon_name())
+		_set_status(("切换武器：%s" if player.get_weapon_id() == next_weapon else "收招后切换：%s") % str(WeaponCatalog.get_weapon(next_weapon).name))
 		_update_equipment_hud()
 		_refresh_build_overview()
 

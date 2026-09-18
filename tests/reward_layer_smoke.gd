@@ -182,7 +182,7 @@ func _run_test() -> void:
 	risk_chest.queue_free()
 	await process_frame
 
-	main.call(&"_complete_run")
+	main.call(&"_finish_campaign_run")
 	await process_frame
 	if not _assert_layer_mode(main, "月蚀封印", true):
 		return
@@ -192,7 +192,7 @@ func _run_test() -> void:
 	var shards_value: Label = victory_summary.get_node("VictoryStat_1/Value") as Label
 	var weapon_value: Label = victory_summary.get_node("VictoryStat_2/Value") as Label
 	if (
-		not route_value.text.contains("20 / 20")
+		not route_value.text.contains("40 / 40")
 		or not shards_value.text.begins_with("+")
 		or weapon_value.text.is_empty()
 		or victory_restart == null

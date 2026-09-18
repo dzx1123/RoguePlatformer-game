@@ -22,9 +22,12 @@ func run_test() -> void:
 	guard.state_time = 0
 	guard._physics_process(0.01)
 	assert(guard.charge_state == guard.ChargeState.WINDUP)
+	var warning: Rect2 = guard.get_charge_warning_rect()
+	assert(is_equal_approx(warning.end.x, guard.lane_right - guard.position.x + 40), "Warning must cover clamped charge travel plus contact reach")
 	target.position.x = 510
 	guard._physics_process(0.10)
 	assert(guard.charge_facing == 1.0, "Warning direction must stay locked")
+	assert(guard.get_charge_warning_rect() == warning)
 	assert(target.hits == 0 and guard.charge_state == guard.ChargeState.WINDUP)
 	guard.state_time = 0
 	guard._physics_process(0.01)

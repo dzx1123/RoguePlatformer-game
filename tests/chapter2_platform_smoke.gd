@@ -31,7 +31,8 @@ func run_test() -> void:
 	var scene = load("res://scenes/Chapter2FullSlice.tscn").instantiate()
 	root.add_child(scene)
 	scene.set_physics_process(false)
-	for index in [0, 1, 2, 3, 5, 8, 14, 19]:
+	var indices := [10, 11] if "new_rooms" in OS.get_cmdline_user_args() else [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 14, 19]
+	for index in indices:
 		scene._load_layout(index)
 		for enemy in scene.living_enemies():
 			enemy.queue_free()

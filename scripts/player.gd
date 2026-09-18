@@ -199,6 +199,7 @@ var _visual_time: float = 0.0
 var _arrival_remaining: float = 0.0
 var _arrival_idle_blend: float = 1.0
 var _run_cycle: float = 0.0
+var _pending_weapon_id: StringName = &""
 var _run_settle_target: float = 0.0
 var _run_is_settling: bool = false
 var _run_has_settled: bool = true
@@ -307,6 +308,8 @@ func _physics_process(delta: float) -> void:
 
 	var was_on_floor: bool = is_on_floor()
 	_update_timers(delta)
+	if not _pending_weapon_id.is_empty() and _can_switch_weapon_now():
+		configure_weapon(_pending_weapon_id)
 
 	if was_on_floor:
 		_air_jumps_used = 0
@@ -463,6 +466,7 @@ func _physics_process(delta: float) -> void:
 
 
 func respawn() -> void:
+	_pending_weapon_id = &""
 	_arrival_remaining = 0.0
 	_arrival_idle_blend = 1.0
 	modulate = Color.WHITE
@@ -662,9 +666,26 @@ func apply_run_upgrade(upgrade_id: StringName) -> bool:
 	return true
 
 
+func _can_switch_weapon_now() -> bool:
+	return not _is_dead and _attack_remaining <= 0 and _skill_remaining <= 0 and _dash_remaining <= 0 and _hurt_remaining <= 0 and _attack_exit_blend_remaining <= 0 and _skill_exit_blend_remaining <= 0 and _dash_exit_blend_remaining <= 0
+
+func request_weapon_switch(weapon_id: StringName) -> bool:
+	if _is_dead or not WeaponCatalog.all_weapon_ids().has(weapon_id):
+		return false
+	_pending_weapon_id = weapon_id
+	if _can_switch_weapon_now():
+		return configure_weapon(weapon_id)
+	return true
+
+func get_requested_weapon_id() -> StringName:
+	return _pending_weapon_id if not _pending_weapon_id.is_empty() else _weapon_id
+
 func configure_weapon(weapon_id: StringName) -> bool:
 	if not WeaponCatalog.all_weapon_ids().has(weapon_id):
 		return false
+	_pending_weapon_id = &""
+	var previous_run_cycle := _run_cycle
+	var previous_skill_cooldown := _skill_cooldown_remaining
 	var weapon: Dictionary = WeaponCatalog.get_weapon(weapon_id)
 	_weapon_id = weapon.get("id", WeaponCatalog.SWORD)
 	_weapon_name = String(weapon.get("name", "月弧长剑"))
@@ -741,9 +762,19 @@ func configure_weapon(weapon_id: StringName) -> bool:
 	)
 	_configure_skill_hit_sequence(weapon)
 	_weapon_accent = weapon.get("accent", Color("#78d9ef"))
+	# Decode/cache the full cycle before locomotion starts, not on its individual
+	# display frames. This also primes the registration measurements.
+	for frame_index in range(12):
+		_get_boot_baseline(_run_reference_texture(frame_index))
+		_get_boot_baseline(_run_texture(frame_index))
 	_finish_attack()
 	_finish_skill()
-	_skill_cooldown_remaining = 0.0
+	_skill_cooldown_remaining = previous_skill_cooldown
+	_attack_exit_blend_remaining = 0.0
+	_skill_exit_blend_remaining = 0.0
+	_skill_pose_echo_remaining = 0.0
+	skill_pose_echo.hide()
+	_run_cycle = previous_run_cycle
 	weapon_changed.emit(_weapon_id, _weapon_name, _skill_name)
 	_update_hero_visuals()
 	queue_redraw()
@@ -1579,6 +1610,11 @@ func _apply_weapon_pose_calibration() -> void:
 	# All weapon frames already carry the exact canonical head at source scale.
 	# Keep one scale across idle, locomotion and all attack directions.
 	var pose_name: String = texture_path.get_file()
+	if pose_name.begins_with("hero_run_"):
+		# Register the planted boot immediately with each texture, independently
+		# of transform smoothing. The generated frames have uneven sole rows.
+		var reference := _run_reference_texture(int(pose_name.trim_prefix("hero_run_").trim_suffix(".png")))
+		hero_sprite.offset.y = _get_boot_baseline(reference) - _get_boot_baseline(_current_texture)
 	if pose_name == "hero_idle.png" or pose_name == "hero_land.png":
 		var reference_path: String = "res://assets/characters/frames_polished/" + pose_name
 		if not _weapon_pose_cache.has(reference_path):
@@ -1626,6 +1662,7 @@ func _get_pose_smoothing_rate(visual_state: int) -> float:
 
 
 func _reset_sprite_pose() -> void:
+	hero_sprite.offset = Vector2.ZERO
 	hero_sprite.visible = true
 	hero_sprite.region_enabled = false
 	hero_sprite.position = Vector2(0.0, -15.0)
@@ -1705,6 +1742,9 @@ func _resolve_weapon_texture_alias(texture: Texture2D) -> Texture2D:
 func _run_texture(frame_index: int = -1) -> Texture2D:
 	var resolved_index := int(floor(_run_cycle)) if frame_index < 0 else frame_index
 	var normalized_index := posmod(resolved_index, 12)
+	return _weapon_pose_texture(StringName("hero_run_%d" % normalized_index), _run_reference_texture(normalized_index))
+
+func _run_reference_texture(normalized_index: int) -> Texture2D:
 	var fallback: Texture2D
 	match normalized_index:
 		0:
@@ -1731,7 +1771,7 @@ func _run_texture(frame_index: int = -1) -> Texture2D:
 			fallback = HERO_RUN_10
 		_:
 			fallback = HERO_RUN_11
-	return _weapon_pose_texture(StringName("hero_run_%d" % normalized_index), fallback)
+	return fallback
 
 
 func _animate_idle() -> void:

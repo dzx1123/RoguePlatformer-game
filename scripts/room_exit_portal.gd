@@ -10,6 +10,7 @@ signal entered
 var _visual_time: float = 0.0
 var _activating: bool = false
 var _prompt_root: Control
+var prompt_offset_x := -142.0
 var _prompt_label: Label
 var _opener_near: bool = false
 var _beam_texture: ImageTexture
@@ -86,7 +87,7 @@ func is_activating() -> bool:
 func _create_prompt_bubble() -> void:
 	_prompt_root = Control.new()
 	_prompt_root.name = "PromptBubble"
-	_prompt_root.position = Vector2(-142.0, -224.0)
+	_prompt_root.position = Vector2(prompt_offset_x, -224.0)
 	_prompt_root.size = Vector2(284.0, 52.0)
 	_prompt_root.pivot_offset = Vector2(142.0, 43.0)
 	_prompt_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -150,7 +151,7 @@ func _process(delta: float) -> void:
 	if is_instance_valid(_prompt_root) and not _activating:
 		var pulse: float = 0.5 + 0.5 * sin(_visual_time * 3.6)
 		_prompt_root.position = Vector2(
-			-142.0,
+			prompt_offset_x,
 			-224.0 - sin(_visual_time * 2.6) * 3.0
 		)
 		_prompt_root.scale = Vector2.ONE * (1.0 + pulse * 0.018)

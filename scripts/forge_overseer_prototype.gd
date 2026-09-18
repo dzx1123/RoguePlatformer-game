@@ -157,3 +157,6 @@ func _draw() -> void:
 		draw_line(Vector2(locked_facing * 160, 22), Vector2(locked_facing * 140, 4), Color("#ffd085"), 4)
 	if state in [State.SHIFT, State.RECOVER]:
 		draw_string(ThemeDB.fallback_font, Vector2(-60, -112), "核心过载 · 换位" if state == State.SHIFT else "反击窗口", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, tint)
+
+func get_impact_height() -> float:
+	return 140.0

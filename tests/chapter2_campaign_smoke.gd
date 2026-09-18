@@ -43,6 +43,32 @@ func run_test() -> void:
 		await create_timer(0.25).timeout
 		Input.action_release(&"move_right")
 		assert(journey.player.position.x > x + 20 and journey.player.modulate.a > 0.95)
+		# Recreate from a real JSON checkpoint, retaining only the run services.
+		var checkpoint_path := "D:/Godot/RoguePlatformer-game/test_output/campaign_resume.json"
+		var store = load("res://scripts/chapter2_continue_store.gd").new(checkpoint_path)
+		assert(store.save_snapshot(journey._snapshot()) == OK)
+		var runtime: Dictionary = journey.campaign_runtime
+		journey.queue_free()
+		await process_frame
+		set_meta(&"campaign_runtime", runtime)
+		journey = load("res://scenes/Chapter2Journey.tscn").instantiate()
+		journey.save_path = checkpoint_path
+		# Use disk loading but keep progression and telemetry writes disabled.
+		runtime.save_enabled = true
+		root.add_child(journey)
+		current_scene = journey
+		runtime.save_enabled = false
+		journey.persistence_enabled = false
+		assert(journey.campaign.seed == seed_value and journey.campaign.lives == 2)
+		assert(journey.player.get_current_health() == 47 and journey.gold == 81)
+		assert(journey.campaign_hud.has_node("BottomHUD"))
+		if "capture" in OS.get_cmdline_user_args() and not victory:
+			root.size = Vector2i(1280, 720)
+			root.content_scale_size = Vector2i(1280, 720)
+			await create_timer(1.7).timeout
+			await RenderingServer.frame_post_draw
+			var capture_error := root.get_texture().get_image().save_png("res://test_output/chapter2_campaign_hud.png")
+			assert(capture_error == OK)
 		journey.player.set_current_health(30)
 		journey.retry_room()
 		assert(journey.player.get_current_health() == 30, "Campaign must not allow free checkpoint healing")
@@ -73,6 +99,7 @@ func run_test() -> void:
 			assert(main._current_room_index == 0 and main._lives_remaining == 1)
 		main.queue_free()
 		await process_frame
+		store.clear_snapshot()
 		paused = false
 	print("chapter2_campaign_smoke: PASS")
 	quit()

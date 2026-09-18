@@ -585,6 +585,15 @@ func is_hit_by_attack(
 	return attack_rect.intersects(get_hurtbox_rect())
 
 
+func get_impact_bounds() -> Rect2:
+	var hurtbox := get_node_or_null("Hurtbox")
+	if hurtbox != null:
+		for child in hurtbox.get_children():
+			if child is CollisionShape2D and child.shape is RectangleShape2D:
+				var size: Vector2 = child.shape.size * global_scale.abs()
+				return Rect2(child.global_position - size * 0.5, size)
+	return Rect2(global_position - Vector2(29, 26), Vector2(58, 52))
+
 func receive_player_attack(
 	attack_origin: Vector2,
 	facing: float,

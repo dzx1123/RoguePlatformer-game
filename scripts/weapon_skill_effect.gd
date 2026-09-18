@@ -382,8 +382,16 @@ func _draw_crescent_band(
 				inner[point_index + 1],
 				inner[point_index],
 			])
-		draw_colored_polygon(segment, color)
-		_crescent_surface_polygon_count += 1
+		# Tight turns can fold an offset quad across itself. Submit its two
+		# triangles separately, skipping collapsed tips, instead of asking the
+		# polygon triangulator to resolve a self-intersection.
+		for vertex in range(1, segment.size() - 1):
+			var a := segment[0]
+			var b := segment[vertex]
+			var c := segment[vertex + 1]
+			if absf((b - a).cross(c - a)) > 0.001:
+				draw_colored_polygon(PackedVector2Array([a, b, c]), color)
+				_crescent_surface_polygon_count += 1
 
 
 func _draw_slash_shards(

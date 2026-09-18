@@ -272,11 +272,20 @@ func _attack_hit(origin: Vector2, facing: float) -> void:
 	for enemy in living_enemies():
 		if enemy.receive_player_attack(origin, facing, player.get_attack_damage(), player.get_attack_reach(), player.get_attack_type(), player.get_weapon_id()):
 			player.confirm_attack_connected()
+			_spawn_impact_slash(enemy, facing, 1.0)
 
 func _skill_hit(origin: Vector2, facing: float, damage: int, reach: float) -> void:
 	if not paused:
 		for enemy in living_enemies():
-			enemy.receive_player_weapon_skill(origin, facing, damage, reach, player.get_weapon_id(), player.get_skill_hit_index(), player.get_skill_hit_count())
+			if enemy.receive_player_weapon_skill(origin, facing, damage, reach, player.get_weapon_id(), player.get_skill_hit_index(), player.get_skill_hit_count()):
+				_spawn_impact_slash(enemy, facing, 1.25)
+
+func _spawn_impact_slash(enemy: RogueEnemy, facing: float, strength: float) -> void:
+	var effect := preload("res://scripts/combat_vfx.gd").new()
+	add_child(effect)
+	effect.global_position = enemy.global_position + Vector2(0, -12)
+	effect.z_index = 8
+	effect.play_enemy_hit(enemy, facing, strength)
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if ritual_open:
@@ -300,21 +309,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, ROOM_SIZE), Color("#100d16"))
 	_draw_forge_background()
-	var exit_open := living_enemies().is_empty()
-	var exit_color := Color("#77ead5") if exit_open else Color("#88747d")
-	draw_arc(EXIT_POSITION, 29, 0, TAU, 32, exit_color, 4)
-	draw_string(ThemeDB.fallback_font, EXIT_POSITION + Vector2(-90, -45), "E / RB 出口" if exit_open else "清敌后开放", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, exit_color)
+	_draw_exit_marker()
 	if retry_remaining >= 0:
 		draw_string(ThemeDB.fallback_font, Vector2(440, 170), "挑战失败 · 正在重置本房", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("#ffd1a0"))
 	if route_complete:
 		draw_string(ThemeDB.fallback_font, Vector2(430, 130), _completion_text(), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("#77ead5"))
 	for rect: Rect2 in platforms:
-		preload("res://scripts/gothic_platform_art.gd").draw_platform(self, rect, Color("#d49a5a"))
-		if rect.size.y < 100:
-			# Recessed corbels are decoration, not solid walls beneath one-way ledges.
-			for edge in [rect.position.x + 18, rect.end.x - 18]:
-				draw_colored_polygon(PackedVector2Array([Vector2(edge - 12, rect.end.y), Vector2(edge + 12, rect.end.y), Vector2(edge, rect.end.y + 28)]), Color("#132a3a"))
-				draw_line(Vector2(edge, rect.end.y), Vector2(edge, rect.end.y + 20), Color("#5e8290"), 2)
+		preload("res://scripts/forge_platform_art.gd").draw_platform(self, rect)
 	for heat: Rect2 in heat_zones:
 		var warning := not heat_disabled and cycle >= HEAT_WARNING_START and cycle < HEAT_ACTIVE_START
 		var active := heat_is_active()
@@ -328,6 +329,12 @@ func _draw() -> void:
 				draw_line(Vector2(x, heat.end.y), Vector2(x + 8, heat.position.y), Color("#ffd78c"), 2.0)
 
 	_draw_hud()
+
+func _draw_exit_marker() -> void:
+	var exit_open := living_enemies().is_empty()
+	var exit_color := Color("#77ead5") if exit_open else Color("#88747d")
+	draw_arc(EXIT_POSITION, 29, 0, TAU, 32, exit_color, 4)
+	draw_string(ThemeDB.fallback_font, EXIT_POSITION + Vector2(-90, -45), "E / RB 出口" if exit_open else "清敌后开放", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, exit_color)
 
 func _completion_text() -> String:
 	return "两张地图已探索完成 · F2 重新试玩"

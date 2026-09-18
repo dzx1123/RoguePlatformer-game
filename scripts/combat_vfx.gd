@@ -19,13 +19,18 @@ var _scale_multiplier: float = 1.0
 var _accent := Color("#8eeaff")
 var _seed: float = 0.0
 
+func play_enemy_hit(enemy: RogueEnemy, facing: float, strength: float = 1.0) -> void:
+	var bounds := enemy.get_impact_bounds()
+	global_position = bounds.get_center()
+	play_hit(facing, clampf(bounds.size.y / 90.0, 0.4, 2.2) * clampf(strength, 1.0, 1.15))
+
 
 func play_hit(facing: float, scale_multiplier: float = 1.0) -> void:
 	_effect_type = EffectType.HIT
 	_duration = HIT_DURATION
 	_remaining = HIT_DURATION
 	_facing = 1.0 if facing >= 0.0 else -1.0
-	_scale_multiplier = maxf(0.7, scale_multiplier)
+	_scale_multiplier = maxf(0.35, scale_multiplier)
 	_accent = Color("#d8fbff")
 	_seed = global_position.x * 0.031 + global_position.y * 0.017
 	queue_redraw()
@@ -59,37 +64,40 @@ func _draw() -> void:
 
 
 func _draw_hit(progress: float) -> void:
-	var fade: float = pow(1.0 - progress, 1.45)
-	var impact := Vector2(0.0, -8.0)
-	var outer_color := Color("#4ddff5")
-	var edge_color := Color("#213d87")
-	var core_color := Color("#f6dd92")
-	var reach: float = lerpf(24.0, 66.0, progress) * _scale_multiplier
-	var start_angle: float = -1.28 if _facing > 0.0 else PI - 0.28
-	var end_angle: float = 0.22 if _facing > 0.0 else PI + 1.28
-
-	# Two offset crescent cuts read as a weapon strike rather than a generic ring.
-	draw_arc(impact + Vector2(_facing * 5.0, 0.0), reach, start_angle, end_angle, 18, Color(edge_color, fade * 0.90), maxf(2.0, 6.0 * fade), true)
-	draw_arc(impact + Vector2(_facing * 7.0, -1.0), reach * 0.92, start_angle + 0.05, end_angle - 0.04, 18, Color(outer_color, fade), maxf(1.5, 3.1 * fade), true)
-	draw_arc(impact + Vector2(_facing * 9.0, -2.0), reach * 0.82, start_angle + 0.12, end_angle - 0.11, 15, Color(core_color, fade * 0.92), maxf(1.0, 1.5 * fade), true)
-
-	var slash_direction := Vector2(_facing, -0.25).normalized()
-	draw_line(impact - slash_direction * 14.0 * _scale_multiplier, impact + slash_direction * (20.0 + progress * 18.0) * _scale_multiplier, Color(core_color, fade * 0.86), maxf(1.0, 2.4 * fade), true)
-	draw_circle(impact, (8.0 - progress * 3.0) * _scale_multiplier, Color(outer_color, fade * 0.34))
-	for shard_index in range(9):
-		var angle: float = _seed + float(shard_index) * TAU / 9.0
-		var direction := Vector2(cos(angle), sin(angle) * 0.72 - 0.16).normalized()
-		if direction.x * _facing < -0.42:
-			direction.x *= -1.0
-		var distance: float = lerpf(8.0, 56.0 + float(shard_index % 3) * 9.0, progress) * _scale_multiplier
-		var shard_center := impact + direction * distance
-		var shard_size: float = (5.0 - progress * 2.0) * _scale_multiplier
-		var tangent := Vector2(-direction.y, direction.x) * shard_size * 0.44
-		draw_colored_polygon(
-			PackedVector2Array([shard_center - direction * shard_size, shard_center + tangent, shard_center + direction * shard_size, shard_center - tangent]),
-			Color(_accent.lerp(outer_color, 0.55), fade * 0.90)
-		)
-
+	var fade := pow(maxf(0.0, 1.0 - progress), 1.65)
+	if fade < 0.02:
+		return
+	var center := Vector2.ZERO
+	var axis := Vector2(_facing * 0.74, -0.67).normalized()
+	var normal := Vector2(-axis.y, axis.x)
+	var length := (24.0 + 30.0 * sin(progress * PI * 0.75)) * _scale_multiplier
+	# A narrow diagonal cut, with a white impact core and cyan tapered edges.
+	for layer in range(3):
+		var width: float = [8.0, 3.5, 1.3][layer] * _scale_multiplier * fade
+		var tint: Color = [Color("#087bbd"), Color("#26dcff"), Color("#f3ffff")][layer]
+		draw_colored_polygon(PackedVector2Array([
+			center - axis * length * 0.7,
+			center + normal * width,
+			center + axis * length * 0.7,
+			center - normal * width,
+		]), Color(tint, fade * (0.45 if layer == 0 else 1.0)))
+	var flash := maxf(0, 1.0 - progress * 3.0)
+	for ray in range(6):
+		var angle := float(ray) * TAU / 6.0 + 0.3
+		var direction := Vector2(cos(angle), sin(angle))
+		var tip := center + direction * (10.0 + float(ray % 2) * 9.0) * _scale_multiplier * flash
+		var side := Vector2(-direction.y, direction.x) * 2.8 * _scale_multiplier * flash
+		if flash > 0.001:
+			draw_colored_polygon(PackedVector2Array([center + side, tip, center - side]), Color("#eaffff", flash))
+	for shard in range(8):
+		var direction := axis.rotated(sin(float(shard) * 2.4 + _seed) * 1.15)
+		if shard % 3 == 0:
+			direction = -direction
+		var distance := (8.0 + progress * (28.0 + float(shard % 3) * 12.0)) * _scale_multiplier
+		var point := center + direction * distance
+		var size := (2.0 + float(shard % 3)) * _scale_multiplier * fade
+		var side := Vector2(-direction.y, direction.x) * size * 0.35
+		draw_colored_polygon(PackedVector2Array([point - direction * size, point + side, point + direction * size * 2.6, point - side]), Color("#50e8ff", fade))
 
 func _draw_defeat(progress: float) -> void:
 	var fade: float = pow(1.0 - progress, 1.18)

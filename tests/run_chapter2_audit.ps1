@@ -5,9 +5,9 @@ $checks = @('chapter2_design_smoke', 'chapter2_slice_smoke', 'chapter2_mid_smoke
 $results = @()
 foreach ($check in $checks) {
     $logPath = Join-Path $projectRoot "test_output/audit_$check.log"
-    $process = Start-Process -FilePath $enginePath -ArgumentList '--headless', '--path', $projectRoot, '--script', "res://tests/$check.gd", '--log-file', $logPath -WindowStyle Hidden -PassThru
+    $process = Start-Process -FilePath $enginePath -ArgumentList '--headless', '--path', $projectRoot, '--script', "res://tests/$check.gd", '--quit-after', '14000', '--log-file', $logPath -WindowStyle Hidden -PassThru
     $finished = $process.WaitForExit(240000)
-    if (-not $finished) { Stop-Process -Id $process.Id }
+    if (-not $finished) { Stop-Process -Id $process.Id; $process.WaitForExit() }
     $log = if (Test-Path -LiteralPath $logPath) { [IO.File]::ReadAllText($logPath) } else { '' }
     $passed = $finished -and $process.ExitCode -eq 0 -and $log.Contains("${check}: PASS") -and -not $log.Contains('SCRIPT ERROR:')
     $results += [pscustomobject]@{test=$check; passed=$passed; log=$logPath}

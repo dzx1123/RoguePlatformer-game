@@ -76,7 +76,7 @@ func try_exit() -> bool:
 			_open_choice(&"branch")
 			return true
 		return false
-	if player.position.distance_to(EXIT_POSITION) <= 65 and living_enemies().is_empty():
+	if _at_exit() and living_enemies().is_empty():
 		var room := rooms[room_index]
 		if room_index == 18 and not claimed.has(room.id):
 			_open_choice(&"supply")

@@ -109,7 +109,7 @@ func _spawn_ember() -> void:
 func try_exit() -> bool:
 	if paused or ritual_open or route_complete or player.is_dead():
 		return false
-	if player.position.distance_to(EXIT_POSITION) > 65 or not living_enemies().is_empty():
+	if not _at_exit() or not living_enemies().is_empty():
 		return false
 	var room := rooms[room_index]
 	if room.reward == &"ritual" and not claimed.has(room.id):
@@ -123,6 +123,9 @@ func try_exit() -> bool:
 			last_reward = "第 %d 房奖励：金币 +%d（仅本次试玩）" % [room.number, room_gold]
 		_advance_room()
 	return true
+
+func _at_exit() -> bool:
+	return player.position.distance_to(EXIT_POSITION) <= 65
 
 func _advance_room() -> void:
 	if cooling_room == int(rooms[room_index].number):
@@ -249,7 +252,7 @@ func _toggle_pause() -> void:
 	player.set_physics_process(not paused and not ritual_open and not route_complete and not player.is_dead())
 	for enemy in living_enemies():
 		enemy.set_physics_process(not paused and not player.is_dead())
-	if ritual_open:
+	if ritual_open and ritual_panel.get_child_count() > 0:
 		for control in ritual_panel.get_child(0).get_children():
 			if control is Button:
 				control.disabled = paused
@@ -283,6 +286,20 @@ func _draw_hud() -> void:
 
 func _draw_forge_background() -> void:
 	preload("res://scripts/forge_background_art.gd").draw_background(self, rooms[room_index].layout)
+	# Recessed vent grilles identify the hazard even during the inactive phase.
+	for heat: Rect2 in rooms[room_index].get("heat", []):
+		var floor_y := heat.end.y
+		draw_rect(Rect2(heat.position.x, floor_y - 9, heat.size.x, 9), Color("#07111b"))
+		for x in range(int(heat.position.x) + 5, int(heat.end.x) - 3, 12):
+			draw_line(Vector2(x, floor_y - 8), Vector2(x, floor_y - 1), Color("#996c46"), 3)
+	if rooms[room_index].reward == &"ritual":
+		# A cooling vessel beside the interaction point gives the event a world landmark.
+		var center := Vector2(1130, 602)
+		draw_rect(Rect2(center - Vector2(24, 2), Vector2(48, 20)), Color("#132a3a"))
+		draw_colored_polygon(PackedVector2Array([center + Vector2(-34, -26), center + Vector2(34, -26), center + Vector2(23, -3), center + Vector2(-23, -3)]), Color("#29495a"))
+		draw_line(center + Vector2(-32, -24), center + Vector2(32, -24), Color("#77ead5"), 4)
+		draw_circle(center + Vector2(0, -44), 7, Color("#77ead5"))
+		draw_arc(center + Vector2(0, -44), 15, 0, TAU, 24, Color("#5e8290"), 1.5)
 
 func _uses_hall_background() -> bool:
 	return true

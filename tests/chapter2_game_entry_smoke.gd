@@ -33,6 +33,9 @@ func run_test() -> void:
 	await process_frame
 	var journey = current_scene
 	assert(journey.scene_file_path.ends_with("Chapter2Journey.tscn"))
+	assert(journey.campaign_hud.has_node("BottomHUD"), "Development entry must use chapter-one HUD")
+	assert(journey.campaign_presenter.attack_slot.visible and journey.campaign_presenter.skill_slot.visible)
+	assert(not journey.return_panel.visible, "Legacy corner button must not replace the shared HUD")
 	assert(not paused, "Chapter 2 inherited the main menu's paused SceneTree")
 	await create_timer(1.7).timeout
 	assert(journey.player.modulate.a > 0.95, "Hero must finish arrival and become visible")
@@ -57,8 +60,8 @@ func run_test() -> void:
 	assert(main.scene_file_path.ends_with("Main.tscn"))
 	main.chapter2_save_path = SAVE
 	main._show_start_screen(false)
-	assert(main._continue_button.text.contains("第二章"))
-	assert(main._continue_saved_run())
+	# The development entry resumes its own file without displacing a real run.
+	main._chapter2_menu_button.pressed.emit()
 	await process_frame
 	await process_frame
 	journey = current_scene
