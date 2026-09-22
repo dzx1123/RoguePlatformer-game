@@ -42,6 +42,8 @@ func _physics_process(delta: float) -> void:
 	if _is_defeated:
 		super._physics_process(delta)
 		return
+	if _consume_forge_hitstop(delta):
+		return
 	_hurt_remaining = maxf(0, _hurt_remaining - delta)
 	_hurt_invulnerability_remaining = maxf(0, _hurt_invulnerability_remaining - delta)
 	velocity.x = 0
@@ -64,12 +66,17 @@ func _physics_process(delta: float) -> void:
 	remaining -= delta
 	match state:
 		State.IDLE:
+			velocity.x = _walk_velocity(LEFT, RIGHT, 62)
+			if absf(velocity.x) > 1:
+				locked_facing = signf(velocity.x)
 			if remaining <= 0:
 				_begin_attack(attack_index % 3)
+				velocity.x = 0
 				attack_index += 1
 		State.HAMMER_WARNING:
 			if remaining <= 0:
 				state = State.HAMMER_HIT
+				sound_requested.emit(&"goblin_attack", true)
 				remaining = 0.15
 				hit_spent = true
 				if hammer_rect.intersects(Rect2(_target.position - Vector2(18, 28), Vector2(36, 56))):
@@ -86,6 +93,7 @@ func _physics_process(delta: float) -> void:
 		State.CHARGE_WARNING:
 			if remaining <= 0:
 				state = State.CHARGE
+				sound_requested.emit(&"goblin_attack", true)
 				remaining = 0.65
 		State.CHARGE:
 			velocity.x = locked_facing * 420
@@ -141,9 +149,7 @@ func _draw() -> void:
 		tint.a = clampf(_death_remaining / DEATH_ANIMATION_DURATION, 0, 1)
 	var pose := 3 if _is_defeated else (1 if state in [State.HAMMER_WARNING, State.CHARGE_WARNING, State.SHIFT] else (2 if state in [State.HAMMER_HIT, State.CHARGE, State.BARRAGE] else 0))
 	ART.draw_actor(self, 3, pose, locked_facing, 140, _hurt_remaining > 0, _art_alpha())
-	draw_string(ThemeDB.fallback_font, Vector2(-90, -146), "铸庭监炉者", HORIZONTAL_ALIGNMENT_LEFT, -1, 16)
-	draw_rect(Rect2(-85, -132, 170, 7), Color("#3a2930"))
-	draw_rect(Rect2(-85, -132, 170 * float(_current_health) / 520, 7), Color("#ffb970"))
+	_draw_forge_health()
 	if _is_defeated:
 		return
 	if state in [State.HAMMER_WARNING, State.HAMMER_HIT]:

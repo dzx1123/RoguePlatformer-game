@@ -20,6 +20,8 @@ func _physics_process(delta: float) -> void:
 	if _is_defeated:
 		super._physics_process(delta)
 		return
+	if _consume_forge_hitstop(delta):
+		return
 	_hurt_remaining = maxf(0, _hurt_remaining - delta)
 	_hurt_invulnerability_remaining = maxf(0, _hurt_invulnerability_remaining - delta)
 	velocity.y += 1800 * delta
@@ -31,15 +33,18 @@ func _physics_process(delta: float) -> void:
 		state_time -= delta
 		match charge_state:
 			ChargeState.WAIT:
+				velocity.x = _walk_velocity(lane_left, lane_right, 72)
 				if state_time <= 0 and absf(_target.position.y - position.y) < 90 and absf(_target.position.x - position.x) < 240:
 					charge_facing = 1.0 if _target.position.x >= position.x else -1.0
 					charge_state = ChargeState.WINDUP
+					velocity.x = 0
 					state_time = 0.8
 			ChargeState.WINDUP:
 				if _hurt_remaining > 0:
 					_begin_recovery()
 				elif state_time <= 0:
 					charge_state = ChargeState.CHARGE
+					sound_requested.emit(&"goblin_attack", is_boss())
 					state_time = CHARGE_DURATION
 					hit_this_charge = false
 			ChargeState.CHARGE:
@@ -75,7 +80,7 @@ func _draw() -> void:
 		color.a = clampf(_death_remaining / DEATH_ANIMATION_DURATION, 0, 1)
 	var pose := 3 if _is_defeated else (1 if charge_state == ChargeState.WINDUP else (2 if charge_state == ChargeState.CHARGE else 0))
 	ART.draw_actor(self, 1, pose, charge_facing if charge_state in [ChargeState.CHARGE, ChargeState.WINDUP] else _art_facing(), 106, _hurt_remaining > 0, _art_alpha(), _pose_motion(pose, clampf(1.0 - state_time / 0.8, 0, 1)))
-	draw_rect(Rect2(-28, -43, 56 * float(_current_health) / maxf(_max_health, 1), 4), color)
+	_draw_forge_health()
 	if charge_state == ChargeState.WINDUP and not _is_defeated:
 		var warning := get_charge_warning_rect()
 		draw_rect(warning, Color(1.0, 0.75, 0.25, 0.13))

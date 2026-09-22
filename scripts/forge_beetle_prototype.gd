@@ -22,6 +22,8 @@ func _physics_process(delta: float) -> void:
 	if _is_defeated:
 		super._physics_process(delta)
 		return
+	if _consume_forge_hitstop(delta):
+		return
 	_hurt_remaining = maxf(0, _hurt_remaining - delta)
 	_hurt_invulnerability_remaining = maxf(0, _hurt_invulnerability_remaining - delta)
 	remaining -= delta
@@ -33,9 +35,13 @@ func _physics_process(delta: float) -> void:
 	else:
 		match state:
 			State.WAIT:
+				velocity.x = _walk_velocity(lane_left, lane_right, 90)
+				if absf(velocity.x) > 1:
+					direction = signf(velocity.x)
 				if remaining <= 0 and is_on_floor() and absf(_target.position.y - position.y) < 80 and absf(_target.position.x - position.x) < 240:
 					direction = 1.0 if _target.position.x >= position.x else -1.0
 					state = State.WARN
+					velocity.x = 0
 					remaining = 0.45
 			State.WARN:
 				if _hurt_remaining > 0:
@@ -43,6 +49,7 @@ func _physics_process(delta: float) -> void:
 					remaining = 0.9
 				elif remaining <= 0:
 					state = State.POUNCE
+					sound_requested.emit(&"bite", is_boss())
 					remaining = 0.45
 					velocity.y = -240
 			State.POUNCE:
@@ -90,7 +97,7 @@ func _draw() -> void:
 			draw_circle(Vector2.ZERO, BURN_RADIUS, Color(1, 0.25, 0.1, 0.15))
 		else:
 			draw_string(ThemeDB.fallback_font, Vector2(-30, -58), "即将灼烧", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, ring_color)
-	draw_rect(Rect2(-22, -23, 44 * clampf(float(_current_health) / maxf(_max_health, 1), 0, 1), 3), color)
+	_draw_forge_health()
 
 func get_impact_height() -> float:
 	return 48.0

@@ -194,8 +194,8 @@ func _run_test() -> void:
 	if dash_exit_duration <= 0.0:
 		_fail("Dash release did not enter the planted recovery window")
 		return
-	if int(player.call(&"_resolve_visual_state")) != RoguePlayer.VisualState.DASH_RECOVERY:
-		_fail("Dash release did not expose the recovery visual state")
+	if int(player.call(&"_resolve_visual_state")) not in [RoguePlayer.VisualState.JUMP_RISE, RoguePlayer.VisualState.JUMP_FALL]:
+		_fail("Air dash release should rejoin the airborne pose")
 		return
 	if absf(float(player.get("_run_cycle"))) > 0.001 or not bool(player.get("_run_has_settled")):
 		_fail("Dash release resumed from an arbitrary running frame")
@@ -233,8 +233,8 @@ func _run_test() -> void:
 	if attack_exit_duration <= 0.0:
 		_fail("Attack release did not enter the planted recovery window")
 		return
-	if int(player.call(&"_resolve_visual_state")) != RoguePlayer.VisualState.ATTACK_RECOVERY:
-		_fail("Attack release did not expose the recovery visual state")
+	if int(player.call(&"_resolve_visual_state")) not in [RoguePlayer.VisualState.JUMP_RISE, RoguePlayer.VisualState.JUMP_FALL]:
+		_fail("Air attack release should rejoin the airborne pose")
 		return
 	if absf(float(player.get("_run_cycle"))) > 0.001 or not bool(player.get("_run_has_settled")):
 		_fail("Attack release resumed from an arbitrary running frame")

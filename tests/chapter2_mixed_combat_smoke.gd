@@ -5,7 +5,7 @@ func _initialize() -> void:
 	call_deferred("run_test")
 
 func release_inputs() -> void:
-	for action in [&"move_left", &"move_right", &"jump", &"attack", &"skill", &"dash"]:
+	for action in [&"move_left", &"move_right", &"jump", &"attack", &"skill", &"dash", &"aim_down"]:
 		Input.action_release(action)
 
 func run_test() -> void:
@@ -14,9 +14,16 @@ func run_test() -> void:
 	scene.persistence_enabled = false
 	root.add_child(scene)
 	var indices := [12, 14] if "late_rooms" in OS.get_cmdline_user_args() else [4, 6, 9, 11]
-	for case_index in range(indices.size() * 3):
+	if "final_rooms" in OS.get_cmdline_user_args():
+		indices = [15, 17]
+	var weapons := WeaponCatalog.all_weapon_ids()
+	for argument in OS.get_cmdline_user_args():
+		if StringName(argument) in weapons:
+			weapons = [StringName(argument)]
+			break
+	for case_index in range(indices.size() * weapons.size()):
 		var index: int = indices[case_index % indices.size()]
-		var weapon: StringName = WeaponCatalog.all_weapon_ids()[case_index / indices.size()]
+		var weapon: StringName = weapons[case_index / indices.size()]
 		scene._load_layout(index)
 		scene.player.configure_weapon(weapon)
 		await create_timer(1.8).timeout
@@ -41,6 +48,10 @@ func run_test() -> void:
 				quit(1)
 				return
 			var enemies: Array = scene.living_enemies()
+			if "diagnose" in OS.get_cmdline_user_args() and frame % 600 == 0:
+				print("frame=", frame, " player=", scene.player.position, " health=", scene.player.get_current_health())
+				for foe in enemies:
+					print("enemy=", foe.position, " hp=", foe.get_current_health())
 			if enemies.is_empty():
 				if not scene._waves_pending():
 					cleared = true
@@ -53,16 +64,25 @@ func run_test() -> void:
 					if enemy.position.distance_to(scene.player.position) < target.position.distance_to(scene.player.position):
 						target = enemy
 				var offset: Vector2 = target.position - scene.player.position
+				if offset.y > 60 and scene.player.is_on_floor() and frame % 24 == 0:
+					Input.action_press(&"aim_down")
+					Input.action_press(&"jump")
 				if absf(offset.x) > 40 or frame % 36 == 0:
 					Input.action_press(&"move_right" if offset.x > 0 else &"move_left")
 				if offset.y < -45 and frame % 24 == 0:
 					Input.action_press(&"jump")
 				if target is GUARD and target.charge_state == GUARD.ChargeState.WINDUP and absf(offset.x) < 200 and scene.player.is_on_floor():
 					Input.action_press(&"jump")
+				for heat: Rect2 in scene.heat_zones:
+					if scene.player.is_on_floor() and scene.player.position.y > heat.position.y - 35 and scene.player.position.x > heat.position.x - 55 and scene.player.position.x < heat.end.x + 55:
+						Input.action_press(&"jump")
 				if absf(offset.x) < 130 and absf(offset.y) < 65:
 					Input.action_press(&"attack")
 					if frame % 60 == 0:
 						Input.action_press(&"skill")
+			await physics_frame
+			# Keep synthetic presses alive through a complete player physics update.
+			# SceneTree.physics_frame fires before nodes run their physics callbacks.
 			await physics_frame
 		release_inputs()
 		if not cleared:

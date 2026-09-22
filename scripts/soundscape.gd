@@ -1061,3 +1061,44 @@ static func _u32(bytes: PackedByteArray, offset: int) -> int:
 		| (bytes[offset + 2] << 16)
 		| (bytes[offset + 3] << 24)
 	)
+
+func handle_player_action(action: StringName, weapon_id: StringName) -> void:
+	match action:
+		&"attack":
+			play_sword_swing(weapon_id)
+			play_player_attack_voice()
+		&"dash":
+			play_dash()
+		&"skill":
+			play_skill(weapon_id)
+			play_player_skill_voice()
+		&"jump":
+			play_jump()
+		&"land":
+			play_land()
+		&"footstep":
+			play_footstep()
+
+
+
+func handle_player_vocal(cue: StringName) -> void:
+	match cue:
+		&"hurt":
+			play_player_hurt_voice()
+		&"defeat":
+			play_player_defeat_voice()
+
+
+
+func handle_enemy_sound(cue: StringName, is_boss: bool) -> void:
+	match cue:
+		&"goblin_attack":
+			play_enemy_attack_voice(false, is_boss)
+		&"night_bat_attack":
+			play_enemy_attack_voice(false, is_boss, true)
+		&"slime_attack":
+			play_enemy_attack_voice(true, is_boss)
+		&"bite":
+			play_enemy_bite(is_boss)
+		&"spit":
+			play_enemy_spit(is_boss)

@@ -98,6 +98,9 @@ const RESPAWN_INVULNERABILITY := 1.0
 const DASH_COOLDOWN := 2.0
 const DASH_EXIT_BLEND_DURATION := 0.065
 const DROP_THROUGH_DURATION := 0.20
+const ACTION_BUFFER_DURATION := 0.18
+const JUMP_BUFFER_DURATION := 0.12
+const COYOTE_DURATION := 0.09
 const HITSTOP_ATTACK := 0.050
 const HITSTOP_SKILL := 0.072
 const HITSTOP_BOSS_BONUS := 0.028
@@ -147,6 +150,8 @@ const TWIN_SKILL_POSE_ROTATIONS := [
 @export_category("Movement")
 @export var run_speed := 380.0
 @export var ground_acceleration := 2600.0
+@export var ground_braking := 3400.0
+@export var ground_turn_acceleration := 3600.0
 @export var air_acceleration := 1800.0
 @export var gravity := 1800.0
 @export var jump_velocity := -640.0
@@ -180,6 +185,13 @@ var _attack_cooldown_remaining: float = 0.0
 var _attack_elapsed: float = 0.0
 var _attack_exit_blend_remaining: float = 0.0
 var _attack_button_latched: bool = false
+var _buffered_action: StringName = &""
+var _action_buffer_remaining := 0.0
+var _buffered_facing := 0.0
+var _buffered_attack_type := AttackType.FORWARD
+var _jump_buffer_remaining := 0.0
+var _buffered_drop := false
+var _coyote_remaining := 0.0
 var _attack_hit_emitted: bool = false
 var _attack_type: int = AttackType.FORWARD
 var _downslash_bounce_applied: bool = false
@@ -300,10 +312,10 @@ func _physics_process(delta: float) -> void:
 	if _is_dead:
 		_process_death(delta)
 		return
+	_capture_action_inputs()
 	if _hitstop_remaining > 0.0:
+		_visual_time -= delta
 		_hitstop_remaining = maxf(0.0, _hitstop_remaining - delta)
-		_update_hero_visuals(delta)
-		queue_redraw()
 		return
 
 	var was_on_floor: bool = is_on_floor()
@@ -313,8 +325,11 @@ func _physics_process(delta: float) -> void:
 
 	if was_on_floor:
 		_air_jumps_used = 0
-	elif _dash_remaining <= 0.0:
-		velocity.y += gravity * delta
+		_coyote_remaining = COYOTE_DURATION
+	else:
+		if _dash_remaining <= 0.0:
+			velocity.y += gravity * delta
+		_coyote_remaining = maxf(0.0, _coyote_remaining - delta)
 
 	var input_direction: float = 0.0
 	if _input_enabled:
@@ -340,43 +355,20 @@ func _physics_process(delta: float) -> void:
 			if was_on_floor and not is_equal_approx(previous_facing, _facing):
 				_begin_ground_turn(previous_facing)
 
-	if (
-		_input_enabled
-		and Input.is_action_just_pressed(&"jump")
-		and _hurt_remaining <= 0.0
-	):
-		var holding_down: bool = InputMap.has_action(&"aim_down") and Input.is_action_pressed(&"aim_down")
-		if was_on_floor and holding_down and _can_drop_through_platform():
+	if _jump_buffer_remaining > 0.0 and _hurt_remaining <= 0.0:
+		if was_on_floor and _buffered_drop and _can_drop_through_platform():
 			_start_drop_through()
-		elif was_on_floor:
+			_jump_buffer_remaining = 0.0
+			_coyote_remaining = 0.0
+		elif was_on_floor or _coyote_remaining > 0.0:
 			_jump()
 		elif _air_jumps_used < extra_jumps:
 			_air_jumps_used += 1
 			_jump()
 			_spawn_air_jump_ring()
-
-	if (
-		_input_enabled
-		and Input.is_action_just_pressed(&"dash")
-		and can_cancel_into_dash()
-	):
-		if not is_zero_approx(requested_facing):
-			_facing = requested_facing
-		_start_dash()
-
-	if _input_enabled and Input.is_action_just_pressed(&"skill"):
-		if not is_zero_approx(requested_facing):
-			_facing = requested_facing
-		_start_skill()
-
-	var attack_button_pressed: bool = _input_enabled and Input.is_action_pressed(&"attack")
-	if not attack_button_pressed:
-		_attack_button_latched = false
-	elif not _attack_button_latched:
-		_attack_button_latched = true
-		if not is_zero_approx(requested_facing):
-			_facing = requested_facing
-		_start_attack(_get_directional_attack_type())
+	_jump_buffer_remaining = maxf(0.0, _jump_buffer_remaining - delta)
+	_consume_buffered_action()
+	_action_buffer_remaining = maxf(0.0, _action_buffer_remaining - delta)
 
 	if _dash_remaining > 0.0:
 		velocity = Vector2(_facing * dash_speed, 0.0)
@@ -397,10 +389,14 @@ func _physics_process(delta: float) -> void:
 			)
 			target_speed += _facing * _get_skill_lunge_speed(skill_progress)
 		var acceleration: float = ground_acceleration if was_on_floor else air_acceleration
+		if was_on_floor and _attack_remaining <= 0.0 and _skill_remaining <= 0.0 and _hurt_remaining <= 0.0:
+			if is_zero_approx(input_direction):
+				acceleration = ground_braking
+			elif velocity.x * input_direction < 0.0:
+				acceleration = ground_turn_acceleration
 		velocity.x = move_toward(velocity.x, target_speed, acceleration * delta)
 
 	move_and_slide()
-	_update_dash_echoes(delta)
 
 	var now_on_floor: bool = is_on_floor()
 	if now_on_floor:
@@ -441,9 +437,6 @@ func _physics_process(delta: float) -> void:
 		and _attack_remaining <= 0.0
 		and _skill_remaining <= 0.0
 		and _dash_remaining <= 0.0
-		and _skill_exit_blend_remaining <= 0.0
-		and _attack_exit_blend_remaining <= 0.0
-		and _dash_exit_blend_remaining <= 0.0
 	):
 		var previous_cycle: float = _run_cycle
 		var pixels_per_frame: float = RUN_STRIDE_PIXELS / RUN_FRAME_COUNT
@@ -462,10 +455,13 @@ func _physics_process(delta: float) -> void:
 		_settle_run_cycle(delta)
 
 	_update_hero_visuals(delta)
+	_update_dash_echoes(delta)
 	queue_redraw()
 
 
 func respawn() -> void:
+	clear_action_buffer()
+	_coyote_remaining = 0.0
 	_pending_weapon_id = &""
 	_arrival_remaining = 0.0
 	_arrival_idle_blend = 1.0
@@ -585,6 +581,16 @@ func apply_hitstop(duration: float, is_boss_hit: bool = false) -> void:
 
 func get_hitstop_remaining() -> float:
 	return _hitstop_remaining
+
+
+func get_hitstop_duration(is_skill_hit: bool) -> float:
+	match _weapon_id:
+		WeaponCatalog.TWIN_BLADES:
+			return 0.032 if is_skill_hit else 0.033
+		WeaponCatalog.GREATSWORD:
+			return 0.085 if is_skill_hit else 0.065
+		_:
+			return HITSTOP_SKILL if is_skill_hit else HITSTOP_ATTACK
 
 
 func can_cancel_into_dash() -> bool:
@@ -866,6 +872,7 @@ func heal(amount: int) -> int:
 func set_input_enabled(enabled: bool) -> void:
 	_input_enabled = enabled
 	if not enabled:
+		clear_action_buffer()
 		_attack_button_latched = false
 		_dash_remaining = 0.0
 		if not _is_dead:
@@ -933,6 +940,8 @@ func _get_display_facing() -> float:
 
 
 func _jump() -> void:
+	_jump_buffer_remaining = 0.0
+	_coyote_remaining = 0.0
 	_clear_turn_transition()
 	_attack_exit_blend_remaining = 0.0
 	_dash_exit_blend_remaining = 0.0
@@ -1035,6 +1044,62 @@ func _start_attack(attack_type: int = AttackType.FORWARD) -> void:
 	action_started.emit(&"attack")
 
 
+func clear_action_buffer() -> void:
+	_buffered_action = &""
+	_action_buffer_remaining = 0.0
+	_jump_buffer_remaining = 0.0
+	_buffered_drop = false
+
+
+func _capture_action_inputs() -> void:
+	if not _input_enabled:
+		clear_action_buffer()
+		return
+	# One pending action, latest press wins. Holding attack remains one swing.
+	var attack_pressed := Input.is_action_pressed(&"attack")
+	if attack_pressed and not _attack_button_latched:
+		_queue_action(&"attack")
+	_attack_button_latched = attack_pressed
+	if Input.is_action_just_pressed(&"skill"):
+		_queue_action(&"skill")
+	if Input.is_action_just_pressed(&"dash"):
+		_queue_action(&"dash")
+	if Input.is_action_just_pressed(&"jump"):
+		_jump_buffer_remaining = JUMP_BUFFER_DURATION
+		_buffered_drop = InputMap.has_action(&"aim_down") and Input.is_action_pressed(&"aim_down")
+
+
+func _queue_action(action: StringName) -> void:
+	_buffered_action = action
+	_action_buffer_remaining = ACTION_BUFFER_DURATION
+	_buffered_facing = Input.get_axis(&"move_left", &"move_right")
+	_buffered_attack_type = _get_directional_attack_type()
+
+
+func _consume_buffered_action() -> void:
+	if _action_buffer_remaining <= 0.0 or _buffered_action.is_empty() or _hitstop_remaining > 0.0:
+		return
+	var ready := false
+	match _buffered_action:
+		&"dash":
+			ready = can_cancel_into_dash()
+		&"attack", &"skill":
+			ready = _attack_remaining <= 0.0 and _skill_remaining <= 0.0 and _dash_remaining <= 0.0 and _hurt_remaining <= 0.0 and not _is_dead
+			ready = ready and (_attack_cooldown_remaining <= 0.0 if _buffered_action == &"attack" else _skill_cooldown_remaining <= 0.0)
+	if not ready:
+		return
+	# A rejected/buffered request must never turn an already committed attack.
+	if not is_zero_approx(_buffered_facing):
+		_facing = signf(_buffered_facing)
+	var action := _buffered_action
+	_buffered_action = &""
+	_action_buffer_remaining = 0.0
+	match action:
+		&"attack": _start_attack(_buffered_attack_type)
+		&"skill": _start_skill()
+		&"dash": _start_dash()
+
+
 func _get_directional_attack_type() -> int:
 	# Hollow Knight-style input: direction held when J is pressed selects the slash.
 	if InputMap.has_action(&"aim_up") and Input.is_action_pressed(&"aim_up"):
@@ -1066,7 +1131,7 @@ func _start_skill() -> void:
 	_skill_hit_emitted = false
 	_skill_hit_index = 0
 	_skill_last_emitted_index = -1
-	velocity.x = _facing * _get_skill_lunge_speed(0.0)
+	# Let the existing acceleration blend momentum into the skill's lunge.
 	action_started.emit(&"skill")
 
 
@@ -1287,6 +1352,7 @@ func _die(attacker_position: Vector2, reason: StringName = &"unknown") -> void:
 	if _is_dead:
 		return
 	_is_dead = true
+	clear_action_buffer()
 	_last_death_reason = reason if not reason.is_empty() else &"unknown"
 	_death_remaining = DEATH_DURATION
 	_dash_remaining = 0.0
@@ -1398,6 +1464,8 @@ func _update_dash_echoes(delta: float) -> void:
 	echo.material = hero_sprite.material
 	echo.z_index = hero_sprite.z_index - 1
 	echo.call(&"setup", hero_sprite.texture, _facing, hero_sprite.global_scale)
+	echo.rotation = hero_sprite.global_rotation
+	echo.offset = hero_sprite.offset
 
 
 func _emit_run_footstep(previous_cycle: float) -> void:
@@ -1444,14 +1512,18 @@ func _resolve_visual_state() -> int:
 		return VisualState.ATTACK
 	if _dash_remaining > 0.0:
 		return VisualState.DASH
+	# Moving players already have a follow-through inside the action itself.
+	# Rejoin the stride/air pose immediately instead of sliding in a frozen hold.
+	if not is_on_floor():
+		return VisualState.JUMP_RISE if velocity.y < 0.0 else VisualState.JUMP_FALL
+	if absf(velocity.x) >= 40.0 and (_dash_exit_blend_remaining > 0.0 or _attack_exit_blend_remaining > 0.0 or _skill_exit_blend_remaining > 0.0):
+		return VisualState.RUN
 	if _dash_exit_blend_remaining > 0.0:
 		return VisualState.DASH_RECOVERY
 	if _attack_exit_blend_remaining > 0.0:
 		return VisualState.ATTACK_RECOVERY
 	if _skill_exit_blend_remaining > 0.0:
 		return VisualState.SKILL_RECOVERY
-	if not is_on_floor():
-		return VisualState.JUMP_RISE if velocity.y < 0.0 else VisualState.JUMP_FALL
 	if _landing_squash_remaining > 0.0:
 		return VisualState.LAND
 	if _turn_remaining > 0.0:
@@ -1794,21 +1866,17 @@ func _animate_idle() -> void:
 
 
 func _animate_run() -> void:
+	var start_weight := 1.0
 	if _run_start_remaining > 0.0:
-		var start_weight: float = 1.0 - clampf(
+		start_weight = 1.0 - clampf(
 			_run_start_remaining / maxf(RUN_START_BLEND, 0.001),
 			0.0,
 			1.0
 		)
-		_set_texture(_weapon_pose_texture(&"hero_idle", HERO_IDLE))
-		hero_sprite.position.x += _facing * lerpf(0.0, 1.2, start_weight)
-		hero_sprite.rotation = -_facing * lerpf(0.0, 0.028, start_weight)
-		hero_sprite.scale = Vector2(HERO_SCALE, HERO_SCALE)
-		return
 	var current_frame := int(floor(_run_cycle))
 	_set_texture(_run_texture(current_frame))
-	hero_sprite.position.x += _facing * 1.2
-	hero_sprite.rotation = -_facing * 0.028
+	hero_sprite.position.x += _facing * 1.2 * start_weight
+	hero_sprite.rotation = -_facing * 0.028 * start_weight
 	hero_sprite.scale = Vector2(HERO_SCALE, HERO_SCALE)
 
 
@@ -2517,7 +2585,8 @@ func _update_skill_effect() -> void:
 
 func _draw() -> void:
 	if _dash_remaining > 0.0:
-		_draw_dash_afterimages()
+		# World-space echoes already use the current weapon, pose and sole offset.
+		# The former extra layer painted sword-run poses over every weapon's dash.
 		draw_line(_p(-58.0, -8.0), _p(-15.0, -8.0), Color(0.38, 0.92, 1.0, 0.50), 7.0)
 		draw_line(_p(-48.0, 7.0), _p(-12.0, 7.0), Color(0.38, 0.92, 1.0, 0.25), 4.0)
 
@@ -2526,23 +2595,6 @@ func _draw() -> void:
 		var dust_alpha: float = 0.28 * (1.0 - clampf(landing_time, 0.0, 1.0))
 		draw_circle(Vector2(-17.0, 24.0), 5.0 + landing_time * 5.0, Color(0.50, 0.78, 0.82, dust_alpha))
 		draw_circle(Vector2(17.0, 24.0), 4.0 + landing_time * 4.0, Color(0.50, 0.78, 0.82, dust_alpha))
-
-
-func _draw_dash_afterimages() -> void:
-	for ghost_index in range(1, 4):
-		var ghost_distance: float = float(ghost_index) * 18.0
-		var ghost_alpha: float = 0.18 / float(ghost_index)
-		draw_set_transform(
-			Vector2(-_facing * ghost_distance, -15.0),
-			0.0,
-			Vector2(HERO_SCALE * _facing, HERO_SCALE)
-		)
-		draw_texture(
-			HERO_RUN_4,
-			-HERO_FRAME_SIZE * 0.5,
-			Color(0.35, 0.92, 1.0, ghost_alpha)
-		)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _p(x: float, y: float) -> Vector2:

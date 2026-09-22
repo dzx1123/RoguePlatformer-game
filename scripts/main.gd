@@ -368,49 +368,18 @@ func _process_choice_shortcuts() -> bool:
 func _on_player_action_started(action: StringName) -> void:
 	if is_instance_valid(_tutorial):
 		_tutorial.notify_action(action)
-	if not is_instance_valid(_soundscape):
-		return
-	match action:
-		&"attack":
-			_soundscape.play_sword_swing(player.get_weapon_id())
-			_soundscape.play_player_attack_voice()
-		&"dash":
-			_soundscape.play_dash()
-		&"skill":
-			_soundscape.play_skill(player.get_weapon_id())
-			_soundscape.play_player_skill_voice()
-		&"jump":
-			_soundscape.play_jump()
-		&"land":
-			_soundscape.play_land()
-		&"footstep":
-			_soundscape.play_footstep()
+	if is_instance_valid(_soundscape):
+		_soundscape.handle_player_action(action, player.get_weapon_id())
 
 
 func _on_player_vocal_requested(cue: StringName) -> void:
-	if not is_instance_valid(_soundscape):
-		return
-	match cue:
-		&"hurt":
-			_soundscape.play_player_hurt_voice()
-		&"defeat":
-			_soundscape.play_player_defeat_voice()
+	if is_instance_valid(_soundscape):
+		_soundscape.handle_player_vocal(cue)
 
 
 func _on_enemy_sound_requested(cue: StringName, is_boss: bool) -> void:
-	if not is_instance_valid(_soundscape):
-		return
-	match cue:
-		&"goblin_attack":
-			_soundscape.play_enemy_attack_voice(false, is_boss)
-		&"night_bat_attack":
-			_soundscape.play_enemy_attack_voice(false, is_boss, true)
-		&"slime_attack":
-			_soundscape.play_enemy_attack_voice(true, is_boss)
-		&"bite":
-			_soundscape.play_enemy_bite(is_boss)
-		&"spit":
-			_soundscape.play_enemy_spit(is_boss)
+	if is_instance_valid(_soundscape):
+		_soundscape.handle_enemy_sound(cue, is_boss)
 
 
 func _configure_inputs() -> void:
@@ -4667,22 +4636,7 @@ func _present_death_recap(unlock_summary: String) -> void:
 
 
 func _apply_hitstop(enemy: RogueEnemy, is_skill_hit: bool) -> void:
-	if not is_instance_valid(player) or not is_instance_valid(enemy):
-		return
-	var duration: float = (
-		RoguePlayer.HITSTOP_SKILL if is_skill_hit else RoguePlayer.HITSTOP_ATTACK
-	)
-	player.apply_hitstop(duration, enemy.is_boss())
-	var enemy_duration: float = duration
-	if enemy.is_boss():
-		enemy_duration += RoguePlayer.HITSTOP_BOSS_BONUS
-	if player.get_reduced_effects_enabled():
-		enemy_duration *= 0.35
-	enemy.apply_hitstop(enemy_duration)
-	for other_enemy: RogueEnemy in _enemies:
-		if other_enemy == enemy or not is_instance_valid(other_enemy):
-			continue
-		other_enemy.apply_hitstop(enemy_duration * 0.62)
+	preload("res://scripts/combat_hit_feedback.gd").apply(player, enemy, _enemies, is_skill_hit)
 
 
 func _update_music_state() -> void:

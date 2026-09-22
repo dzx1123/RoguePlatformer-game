@@ -38,6 +38,8 @@ func _run_test() -> void:
 	var moon_effect := _player.get_node("MoonWheelEffect") as MoonWheelEffect
 	var weapon_effect := _player.get_node("WeaponSkillEffect") as WeaponSkillEffect
 	for weapon_id: StringName in WeaponCatalog.all_weapon_ids():
+		# Each case is a fresh cast; switching weapons intentionally preserves cooldown.
+		_player.respawn()
 		if not _player.configure_weapon(weapon_id):
 			_fail("Could not configure weapon %s" % weapon_id)
 			return

@@ -265,6 +265,8 @@ func _spawn_ember() -> void:
 	ember.landing = Vector2(point.x, best_y - 12)
 	ember.target = player
 	embers.add_child(ember)
+	if is_instance_valid(caster):
+		caster.sound_requested.emit(&"spit", caster.is_boss())
 
 func _attack_hit(origin: Vector2, facing: float) -> void:
 	if paused:

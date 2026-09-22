@@ -27,7 +27,10 @@ var reward_feedback: RewardFeedback
 func _open_choice(kind: StringName) -> void:
 	ritual_open = true
 	choice_kind = kind
+	player.clear_action_buffer()
 	player.set_physics_process(false)
+	for enemy in living_enemies():
+		enemy.set_physics_process(false)
 	if reward_view == null:
 		reward_view = RewardChoiceView.new()
 		campaign_hud.add_child(reward_view)
@@ -109,6 +112,8 @@ func _select_reward_card(index: int) -> void:
 
 func _close_choice() -> void:
 	super._close_choice()
+	for enemy in living_enemies():
+		enemy.set_physics_process(not paused)
 	if is_instance_valid(reward_view):
 		reward_view._upgrade_overlay.hide()
 
@@ -159,6 +164,10 @@ func _ready() -> void:
 	player.weapon_changed.connect(_on_journey_weapon_changed)
 	portal_sound = preload("res://scripts/soundscape.gd").new()
 	add_child(portal_sound)
+	player.action_started.connect(_on_shared_player_action)
+	player.vocal_requested.connect(portal_sound.handle_player_vocal)
+	for enemy in living_enemies():
+		_connect_enemy_audio(enemy)
 	if player.modulate.a > 0:
 		player.enter_room(Vector2(100, 580), 0)
 	_spawn_entry_beam()
@@ -255,6 +264,7 @@ func try_exit() -> bool:
 	var had_chest := claimed.has(&"chain_chest")
 	var result := super.try_exit()
 	if result and not had_chest and claimed.has(&"chain_chest"):
+		portal_sound.play_chest()
 		_save_checkpoint()
 	return result
 
@@ -392,6 +402,8 @@ func _sync_room_portal() -> void:
 
 func _spawn_enemy(spec: Dictionary) -> void:
 	super._spawn_enemy(spec)
+	if is_instance_valid(portal_sound):
+		_connect_enemy_audio(encounter.back())
 	if campaign.is_empty():
 		return
 	var enemy: RogueEnemy = encounter.back()
@@ -400,6 +412,25 @@ func _spawn_enemy(spec: Dictionary) -> void:
 	enemy._current_health = enemy._max_health
 	enemy._difficulty_damage_multiplier = float(profile.damage_multiplier)
 	enemy.defeated.connect(_campaign_enemy_defeated.bind(enemy))
+
+func _on_shared_player_action(action: StringName) -> void:
+	if not paused and not ritual_open:
+		portal_sound.handle_player_action(action, player.get_weapon_id())
+
+func _connect_enemy_audio(enemy: RogueEnemy) -> void:
+	if not enemy.sound_requested.is_connected(portal_sound.handle_enemy_sound):
+		enemy.sound_requested.connect(portal_sound.handle_enemy_sound)
+	var callback := _on_shared_enemy_defeat.bind(enemy)
+	if not enemy.defeated.is_connected(callback):
+		enemy.defeated.connect(callback)
+
+func _on_shared_enemy_defeat(enemy: RogueEnemy) -> void:
+	portal_sound.play_enemy_defeat(enemy.is_boss(), enemy.get_enemy_family() == RogueEnemy.EnemyFamily.SLIME)
+
+func _spawn_impact_slash(enemy: RogueEnemy, facing: float, strength: float) -> void:
+	super._spawn_impact_slash(enemy, facing, strength)
+	preload("res://scripts/combat_hit_feedback.gd").apply(player, enemy, living_enemies(), strength > 1.0)
+	portal_sound.play_impact(enemy.get_enemy_family() == RogueEnemy.EnemyFamily.SLIME, enemy.is_boss(), enemy.is_night_bat())
 
 func _spawn_ember() -> void:
 	super._spawn_ember()
@@ -514,6 +545,8 @@ func _create_campaign_hud() -> void:
 
 func _toggle_pause() -> void:
 	super._toggle_pause()
+	if is_instance_valid(portal_sound):
+		portal_sound.play_ui()
 	if is_instance_valid(reward_view) and ritual_open:
 		for index in range(reward_cards.size()):
 			reward_view._upgrade_buttons[index].disabled = paused or (choice_kind == &"shop" and gold < int(reward_cards[index].cost))

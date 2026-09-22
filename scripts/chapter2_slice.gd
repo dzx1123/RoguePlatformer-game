@@ -249,9 +249,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _toggle_pause() -> void:
 	paused = not paused
+	player.clear_action_buffer()
 	player.set_physics_process(not paused and not ritual_open and not route_complete and not player.is_dead())
 	for enemy in living_enemies():
-		enemy.set_physics_process(not paused and not player.is_dead())
+		enemy.set_physics_process(not paused and not ritual_open and not player.is_dead())
 	if ritual_open and ritual_panel.get_child_count() > 0:
 		for control in ritual_panel.get_child(0).get_children():
 			if control is Button:

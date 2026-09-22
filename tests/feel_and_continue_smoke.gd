@@ -136,6 +136,8 @@ func _verify_combat_feel_and_recap() -> bool:
 	if int(main.call(&"get_gold")) != gold_before_save:
 		return _fail_main(main, "Continue restore did not keep the saved gold total")
 
+	# Continue restore runs the entry beam; damage is intentionally blocked until arrival ends.
+	await create_timer(1.8).timeout
 	player.set("_hurt_invulnerability_remaining", 0.0)
 	player.receive_enemy_attack(player.global_position + Vector2(40.0, 0.0), 999)
 	await process_frame
