@@ -169,6 +169,7 @@ func _ready() -> void:
 	player.vocal_requested.connect(portal_sound.handle_player_vocal)
 	for enemy in living_enemies():
 		_connect_enemy_audio(enemy)
+	_update_shared_music_state()
 	if player.modulate.a > 0:
 		player.enter_room(Vector2(100, 580), 0)
 	_spawn_entry_beam()
@@ -551,6 +552,7 @@ func _toggle_pause() -> void:
 func _process(_delta: float) -> void:
 	if campaign_presenter == null:
 		return
+	_update_shared_music_state()
 	if Input.is_action_just_pressed(&"cycle_weapon"):
 		_cycle_journey_weapon()
 	campaign_presenter.update_health(player.get_current_health(), player.get_max_health())
@@ -567,6 +569,16 @@ func _process(_delta: float) -> void:
 		campaign_presenter.set_status(status)
 		last_campaign_status = status
 	campaign_presenter.set_obscured(paused or ritual_open)
+
+func _update_shared_music_state() -> void:
+	if not is_instance_valid(portal_sound):
+		return
+	var state := RogueSoundscape.MusicState.EXPLORE
+	if is_instance_valid(overseer) and not overseer.is_queued_for_deletion() and overseer.get_current_health() > 0:
+		state = RogueSoundscape.MusicState.BOSS
+	elif not living_enemies().is_empty() and not ritual_open:
+		state = RogueSoundscape.MusicState.COMBAT
+	portal_sound.set_music_state(state)
 
 func _cycle_journey_weapon() -> void:
 	if paused or ritual_open or route_complete or resolving_campaign or portal_delay >= 0 or player.is_dead():

@@ -227,6 +227,8 @@ var _next_sfx_player: int = 0
 var _swing_player: AudioStreamPlayer
 var _hit_player: AudioStreamPlayer
 var _playback: AudioStreamGeneratorPlayback
+var _effects_generator: AudioStreamPlayer
+var _effects_playback: AudioStreamGeneratorPlayback
 var _voices: Array[Dictionary] = []
 var _music_time: float = 0.0
 var _vocal_duck_remaining: float = 0.0
@@ -254,6 +256,8 @@ var _bgm_target_db: float = -6.0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	for bus_name in [&"Music", &"SFX", &"Voice"]:
+		_ensure_audio_bus(bus_name)
 	_player_attack_voices = _load_designed_list(PLAYER_ATTACK_VOICE_PATHS)
 	_player_skill_voices = _load_designed_list(PLAYER_SKILL_VOICE_PATHS)
 	_player_hurt_voices = _load_designed_list(PLAYER_HURT_VOICE_PATHS)
@@ -297,6 +301,18 @@ func _ready() -> void:
 	add_child(_player)
 	_player.play()
 	_playback = _player.get_stream_playback()
+	# Action transients must obey SFX volume and must not wait behind the music buffer.
+	_effects_generator = AudioStreamPlayer.new()
+	_effects_generator.name = "ActionTransients"
+	_effects_generator.bus = &"SFX"
+	var effects_stream := AudioStreamGenerator.new()
+	effects_stream.mix_rate = MIX_RATE
+	effects_stream.buffer_length = 0.04
+	_effects_generator.stream = effects_stream
+	_effects_generator.volume_db = -4.0
+	add_child(_effects_generator)
+	_effects_generator.play()
+	_effects_playback = _effects_generator.get_stream_playback()
 	# A small pool prevents a follow-up attack or a hurt reaction from cutting off
 	# the vocal that started one frame earlier. Voice playback never changes game time.
 	for vocal_index in range(6):
@@ -578,6 +594,12 @@ func get_loaded_combat_sample_count() -> int:
 
 
 func _process(delta: float) -> void:
+	if _effects_playback == null:
+		_effects_playback = _effects_generator.get_stream_playback()
+	if _effects_playback != null:
+		for frame in range(_effects_playback.get_frames_available()):
+			var transient := clampf(_mix_voices(1.0 / MIX_RATE), -MAX_SAMPLE_AMPLITUDE, MAX_SAMPLE_AMPLITUDE)
+			_effects_playback.push_frame(Vector2(transient, transient))
 	_music_time += delta
 	_vocal_duck_remaining = maxf(0.0, _vocal_duck_remaining - delta)
 	if _hurt_delay_remaining >= 0.0:
@@ -600,11 +622,10 @@ func _process(delta: float) -> void:
 		return
 	var frames: int = _playback.get_frames_available()
 	for _frame in range(frames):
-		var sample_time: float = 1.0 / MIX_RATE
 		var music_mix: float = _mix_music(_music_time)
 		if _vocal_duck_remaining > 0.0:
 			music_mix *= 0.72
-		var sample: float = music_mix + _mix_voices(sample_time)
+		var sample: float = music_mix
 		sample = clampf(sample, -MAX_SAMPLE_AMPLITUDE, MAX_SAMPLE_AMPLITUDE)
 		_playback.push_frame(Vector2(sample, sample))
 

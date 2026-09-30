@@ -1,4 +1,5 @@
 shader_type canvas_item;
+#include "res://assets/shaders/player_pose_compositing.gdshaderinc"
 // Neutral matte cleanup. Interior highlights retain their authored colour.
 uniform float matte_radius = 3.0;
 uniform bool violet_blade = false;
@@ -40,4 +41,5 @@ void fragment() {
 		source.rgb = mix(source.rgb, violet * max(source.b, 0.65), mask);
 	}
 	COLOR = source * sprite_tint;
+	COLOR.a = pose_blended_alpha(UV, COLOR.a);
 }

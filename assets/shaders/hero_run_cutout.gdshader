@@ -1,4 +1,5 @@
 shader_type canvas_item;
+#include "res://assets/shaders/player_pose_compositing.gdshaderinc"
 
 // The run atlas has neutral backdrop trapped inside arm/leg openings.
 // Hair is above this body band. Do not depend on connection to outer alpha:
@@ -27,4 +28,5 @@ void fragment() {
 	float fringe = (1.0 - adjacent_alpha) * neutral * smoothstep(0.30, 0.62, low) * body_band;
 	source.rgb = mix(source.rgb, vec3(0.07, 0.105, 0.16), fringe);
 	COLOR = source * sprite_tint;
+	COLOR.a = pose_blended_alpha(UV, COLOR.a);
 }

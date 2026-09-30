@@ -33,14 +33,14 @@ func run_test() -> void:
 			assert(p.get_weapon_id() == source and p._attack_remaining == 0.2)
 			p._attack_remaining = 0
 			p._attack_exit_blend_remaining = 0.1
-			assert(not p._can_switch_weapon_now())
+			assert(p._can_switch_weapon_now(), "Visual recovery must not block a completed action's weapon switch")
 			p._attack_exit_blend_remaining = 0
 			assert(p._can_switch_weapon_now())
 			p.configure_weapon(p._pending_weapon_id)
 			assert(p.get_weapon_id() == destination)
 			assert(p._run_cycle == 7.25 and p._skill_cooldown_remaining == 2.0)
 			assert(p._pending_weapon_id.is_empty() and not p.skill_pose_echo.visible)
-	for timer in ["_skill_remaining", "_dash_remaining", "_hurt_remaining", "_skill_exit_blend_remaining", "_dash_exit_blend_remaining"]:
+	for timer in ["_skill_remaining", "_dash_remaining", "_hurt_remaining"]:
 		p.configure_weapon(WeaponCatalog.SWORD)
 		p.set(timer, 0.2)
 		assert(p.request_weapon_switch(WeaponCatalog.GREATSWORD))

@@ -33,6 +33,8 @@ func _run_test() -> void:
 	var skill_duration: float = float(player.get("_skill_duration"))
 	player.set("_skill_remaining", skill_duration * 0.60)
 	player.call(&"_update_hero_visuals", 1.0 / 60.0)
+	# Let the neutral action-entry blend finish before inspecting internal skill trails.
+	player.call(&"_update_hero_visuals", 0.06)
 	var outgoing_texture: Texture2D = hero_sprite.texture
 	player.set("_skill_remaining", skill_duration * 0.50)
 	player.call(&"_update_hero_visuals", 1.0 / 60.0)

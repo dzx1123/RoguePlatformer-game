@@ -9,6 +9,7 @@ func run_test() -> void:
 	root.add_child(scene)
 	await create_timer(1.8).timeout
 	var sound: RogueSoundscape = scene.portal_sound
+	assert(sound.get_music_state() == RogueSoundscape.MusicState.EXPLORE, "Chapter entrance must not keep menu music")
 	assert(scene.player.action_started.is_connected(scene._on_shared_player_action))
 	assert(scene.player.vocal_requested.is_connected(sound.handle_player_vocal))
 	for weapon in WeaponCatalog.all_weapon_ids():
@@ -23,6 +24,7 @@ func run_test() -> void:
 	scene._load_layout(2)
 	await create_timer(1.8).timeout
 	assert(scene.caster.sound_requested.is_connected(sound.handle_enemy_sound))
+	assert(sound.get_music_state() == RogueSoundscape.MusicState.COMBAT)
 	scene.player.position = scene.caster.position - Vector2(45, 0)
 	Input.action_press(&"move_right")
 	await physics_frame
@@ -34,6 +36,10 @@ func run_test() -> void:
 	assert(sound._last_impact_msec > before and sound._hit_player.stream != null)
 	scene.player.vocal_requested.emit(&"hurt")
 	assert(not sound.get_current_player_voice_path().is_empty())
+	scene._load_layout(19)
+	await process_frame
+	await process_frame
+	assert(sound.get_music_state() == RogueSoundscape.MusicState.BOSS)
 	scene.queue_free()
 	await process_frame
 	print("chapter2_audio_smoke: PASS")

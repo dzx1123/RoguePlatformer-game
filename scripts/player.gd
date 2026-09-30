@@ -36,6 +36,7 @@ enum AttackType {
 
 const HERO_EDGE_SHADER := preload("res://assets/shaders/hero_edge_cleanup.gdshader")
 const HERO_RUN_CUTOUT_SHADER := preload("res://assets/shaders/hero_run_cutout.gdshader")
+const POSE_ANCHORS := preload("res://scripts/player_pose_anchors.gd")
 
 const HERO_IDLE: Texture2D = preload("res://assets/characters/frames_polished/hero_idle.png")
 const HERO_RUN_0: Texture2D = preload("res://assets/characters/frames_polished/hero_run_0.png")
@@ -260,8 +261,17 @@ var _sprite_pose_initialized: bool = false
 var _current_texture: Texture2D
 var _weapon_pose_cache: Dictionary = {}
 var _sole_cache: Dictionary = {}
+static var _shared_weapon_pose_cache: Dictionary = {}
+static var _shared_sole_cache: Dictionary = {}
 var _hero_edge_material: ShaderMaterial
 var _hero_run_material: ShaderMaterial
+var _pose_transition: Sprite2D
+var _pose_transition_remaining := 0.0
+var _pose_transition_duration := 0.075
+var _pose_boundary_remaining := 0.0
+var _pose_transition_origin := Vector2.ZERO
+var _pose_alignment_offset := Vector2.ZERO
+var _displayed_weapon_id: StringName = &""
 
 
 func _ready() -> void:
@@ -276,6 +286,13 @@ func _ready() -> void:
 	_hero_run_material.shader = HERO_RUN_CUTOUT_SHADER
 	hero_sprite.material = edge_material
 	skill_pose_echo.material = edge_material
+	_pose_transition = Sprite2D.new()
+	_pose_transition.name = "PoseTransition"
+	_pose_transition.z_index = hero_sprite.z_index
+	_pose_transition.texture_filter = hero_sprite.texture_filter
+	_pose_transition.hide()
+	add_child(_pose_transition)
+	_warm_weapon_poses()
 	_spawn_point = global_position
 	_base_max_health = maxi(1, max_health)
 	_base_attack_damage = maxi(1, attack_damage)
@@ -460,6 +477,11 @@ func _physics_process(delta: float) -> void:
 
 
 func respawn() -> void:
+	_pose_transition_remaining = 0.0
+	_pose_boundary_remaining = 0.0
+	_pose_alignment_offset = Vector2.ZERO
+	if is_instance_valid(_pose_transition):
+		_pose_transition.hide()
 	clear_action_buffer()
 	_coyote_remaining = 0.0
 	_pending_weapon_id = &""
@@ -673,7 +695,8 @@ func apply_run_upgrade(upgrade_id: StringName) -> bool:
 
 
 func _can_switch_weapon_now() -> bool:
-	return not _is_dead and _attack_remaining <= 0 and _skill_remaining <= 0 and _dash_remaining <= 0 and _hurt_remaining <= 0 and _attack_exit_blend_remaining <= 0 and _skill_exit_blend_remaining <= 0 and _dash_exit_blend_remaining <= 0
+	# Visual settling must not add input lock after the actual action has finished.
+	return not _is_dead and _attack_remaining <= 0 and _skill_remaining <= 0 and _dash_remaining <= 0 and _hurt_remaining <= 0
 
 func request_weapon_switch(weapon_id: StringName) -> bool:
 	if _is_dead or not WeaponCatalog.all_weapon_ids().has(weapon_id):
@@ -1461,7 +1484,7 @@ func _update_dash_echoes(delta: float) -> void:
 	var echo: Sprite2D = DASH_ECHO_SCRIPT.new() as Sprite2D
 	get_parent().add_child(echo)
 	echo.global_position = hero_sprite.global_position
-	echo.material = hero_sprite.material
+	echo.material = _snapshot_pose_material(hero_sprite.material)
 	echo.z_index = hero_sprite.z_index - 1
 	echo.call(&"setup", hero_sprite.texture, _facing, hero_sprite.global_scale)
 	echo.rotation = hero_sprite.global_rotation
@@ -1534,6 +1557,8 @@ func _resolve_visual_state() -> int:
 
 
 func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
+	_pose_transition_remaining = maxf(0.0, _pose_transition_remaining - delta)
+	_pose_boundary_remaining = maxf(0.0, _pose_boundary_remaining - delta)
 	_update_skill_pose_echo(delta)
 	var previous_visual_state: int = _visual_state
 	var next_visual_state: int = _resolve_visual_state()
@@ -1551,10 +1576,14 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 		_run_start_remaining = 0.0
 
 	var previous_position: Vector2 = hero_sprite.position
+	var previous_base_position := previous_position - _pose_alignment_offset
+	_pose_alignment_offset = Vector2.ZERO
 	var previous_scale: Vector2 = hero_sprite.scale
 	var previous_rotation: float = hero_sprite.rotation
 	var previous_texture: Texture2D = _current_texture
 	var previous_flip_h: bool = hero_sprite.flip_h
+	var previous_offset := hero_sprite.offset
+	var previous_material := hero_sprite.material
 	_reset_sprite_pose()
 
 	match _visual_state:
@@ -1621,7 +1650,8 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 			target_position = hero_sprite.position
 			target_scale = hero_sprite.scale
 			target_rotation = hero_sprite.rotation
-		hero_sprite.position = previous_position.lerp(target_position, pose_blend)
+		# Alignment belongs to this rendered transition, not the next pose's spring.
+		hero_sprite.position = previous_base_position.lerp(target_position, pose_blend)
 		hero_sprite.scale = previous_scale.lerp(target_scale, pose_blend)
 		hero_sprite.rotation = lerp_angle(previous_rotation, target_rotation, pose_blend)
 		if _weapon_id != WeaponCatalog.SWORD and _current_texture != null and _visual_state in [VisualState.IDLE, VisualState.LAND]:
@@ -1667,8 +1697,88 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 			1.0,
 			lerpf(minimum_alpha, 0.96, invulnerability_pulse)
 		)
+	# Transform smoothing cannot hide an instantaneous change of the entire painted
+	# silhouette. Blend only action/locomotion boundaries, never every running frame.
+	var weapon_changed_visually := not _displayed_weapon_id.is_empty() and _displayed_weapon_id != _weapon_id
+	if state_changed or weapon_changed_visually:
+		# Twin/greatsword keep the old frame for their first few windup ticks.
+		# Carry the boundary until their first actual texture change.
+		_pose_boundary_remaining = 0.08
+	if previous_texture != null and previous_texture != _current_texture and _pose_boundary_remaining > 0 and not _is_dead and _hurt_remaining <= 0 and previous_flip_h == hero_sprite.flip_h:
+		_pose_boundary_remaining = 0.0
+		_pose_transition.texture = previous_texture
+		_pose_transition.material = _snapshot_pose_material(previous_material)
+		_pose_transition.position = previous_position
+		_pose_transition_origin = previous_position
+		_pose_transition.scale = previous_scale
+		_pose_transition.rotation = previous_rotation
+		_pose_transition.flip_h = previous_flip_h
+		_pose_transition.offset = previous_offset
+		_pose_transition_duration = 0.05 if _visual_state in [VisualState.ATTACK, VisualState.SKILL, VisualState.DASH] else 0.075
+		_pose_transition_remaining = _pose_transition_duration
+		_pose_transition.show()
+	_displayed_weapon_id = _weapon_id
+	if _is_dead or _hurt_remaining > 0 or previous_flip_h != hero_sprite.flip_h:
+		_pose_transition_remaining = 0.0
+	if _pose_transition_remaining > 0:
+		var blend := smoothstep(0.0, 1.0, 1.0 - _pose_transition_remaining / _pose_transition_duration)
+		# Align the two painted heads along one path instead of showing two heads
+		# when source canvases use different silhouette centers.
+		_pose_transition.position = _pose_transition_origin
+		var outgoing_head := _pose_head_position(_pose_transition)
+		var incoming_head := _pose_head_position(hero_sprite)
+		var shared_head := outgoing_head.lerp(incoming_head, blend)
+		_pose_transition.position += shared_head - outgoing_head
+		_pose_alignment_offset = shared_head - incoming_head
+		hero_sprite.position += _pose_alignment_offset
+		_pose_transition.modulate = Color(visual_modulate, visual_modulate.a * (1.0 - blend))
+		visual_modulate.a *= blend
+		# Do not stack the coloured skill trail over the neutral pose transition.
+		skill_pose_echo.hide()
+	else:
+		_pose_transition.hide()
 	hero_sprite.modulate = visual_modulate
+	_update_transition_compositing()
 	_update_skill_effect()
+
+func _snapshot_pose_material(source: Material) -> Material:
+	var copy := source.duplicate() as ShaderMaterial if source is ShaderMaterial else null
+	if copy != null:
+		copy.set_shader_parameter(&"pose_blend_active", false)
+	return copy
+
+func _pose_uv_in_previous(uv: Vector2) -> Vector2:
+	var point := (uv - Vector2(0.5, 0.5)) * hero_sprite.texture.get_size()
+	if hero_sprite.flip_h: point.x *= -1
+	point += hero_sprite.offset
+	point = _pose_transition.transform.affine_inverse() * (hero_sprite.transform * point)
+	point -= _pose_transition.offset
+	if _pose_transition.flip_h: point.x *= -1
+	return point / _pose_transition.texture.get_size() + Vector2(0.5, 0.5)
+
+func _update_transition_compositing() -> void:
+	# Keep shared edge/run materials neutral when not used by the current pose.
+	_hero_edge_material.set_shader_parameter(&"pose_blend_active", false)
+	_hero_run_material.set_shader_parameter(&"pose_blend_active", false)
+	if not _pose_transition.visible or _pose_transition.texture == null:
+		return
+	var material := hero_sprite.material as ShaderMaterial
+	var origin := _pose_uv_in_previous(Vector2.ZERO)
+	material.set_shader_parameter(&"pose_blend_active", true)
+	material.set_shader_parameter(&"pose_from_texture", _pose_transition.texture)
+	material.set_shader_parameter(&"pose_from_uv_origin", origin)
+	material.set_shader_parameter(&"pose_from_uv_x", _pose_uv_in_previous(Vector2.RIGHT) - origin)
+	material.set_shader_parameter(&"pose_from_uv_y", _pose_uv_in_previous(Vector2.DOWN) - origin)
+	material.set_shader_parameter(&"pose_from_opacity", _pose_transition.modulate.a)
+	var outgoing := _pose_transition.material as ShaderMaterial
+	material.set_shader_parameter(&"pose_from_run_cutout", outgoing != null and outgoing.shader == HERO_RUN_CUTOUT_SHADER)
+
+func _pose_head_position(sprite: Sprite2D) -> Vector2:
+	var anchor: Vector2 = POSE_ANCHORS.HEADS.get(sprite.texture.resource_path, Vector2.ZERO)
+	if sprite.flip_h:
+		anchor.x *= -1
+	anchor += sprite.offset
+	return sprite.position + (anchor * sprite.scale).rotated(sprite.rotation)
 
 
 func _apply_weapon_pose_calibration() -> void:
@@ -1753,6 +1863,27 @@ func _set_texture(texture: Texture2D) -> void:
 	var run_cutout: bool = _weapon_id != WeaponCatalog.SWORD and texture.resource_path.get_file().begins_with("hero_run_")
 	hero_sprite.material = _hero_run_material if run_cutout else _hero_edge_material
 
+
+func _warm_weapon_poses() -> void:
+	# Do disk loads and sole scans during scene entry, never on a first swing or Q.
+	_weapon_pose_cache = _shared_weapon_pose_cache
+	_sole_cache = _shared_sole_cache
+	for weapon in WEAPON_POSE_DIRECTORIES:
+		var names: Array[String] = ["hero_idle", "hero_jump_takeoff", "hero_jump_rise", "hero_jump_apex", "hero_jump_fall", "hero_land", "hero_attack_recovery", "hero_skill_a", "hero_skill_b"]
+		for direction in ["forward", "up", "down"]:
+			for phase in ["windup", "strike", "follow"]:
+				names.append("hero_attack_%s_%s" % [direction, phase])
+		for index in range(12):
+			names.append("hero_run_%d" % index)
+			_get_boot_baseline(_run_reference_texture(index))
+			if weapon == WeaponCatalog.TWIN_BLADES:
+				names.append("hero_skill_%d" % index)
+		for name in names:
+			var path := "%s/%s.png" % [WEAPON_POSE_DIRECTORIES[weapon], name]
+			if not _weapon_pose_cache.has(path):
+				_weapon_pose_cache[path] = load(path)
+			if name.begins_with("hero_run_") or name in ["hero_idle", "hero_land"]:
+				_get_boot_baseline(_weapon_pose_cache[path])
 
 func _weapon_pose_texture(pose_name: StringName, fallback: Texture2D) -> Texture2D:
 	if _weapon_id == WeaponCatalog.SWORD:
@@ -2502,7 +2633,7 @@ func _start_skill_pose_echo(
 	if _reduced_effects_enabled:
 		return
 	skill_pose_echo.texture = texture
-	skill_pose_echo.material = _hero_run_material if texture.resource_path.contains("/weapon_sets/") and texture.resource_path.get_file().begins_with("hero_run_") else _hero_edge_material
+	skill_pose_echo.material = _snapshot_pose_material(_hero_run_material if texture.resource_path.contains("/weapon_sets/") and texture.resource_path.get_file().begins_with("hero_run_") else _hero_edge_material)
 	skill_pose_echo.region_enabled = false
 	skill_pose_echo.position = pose_position
 	skill_pose_echo.scale = pose_scale
