@@ -77,7 +77,9 @@ func run_test() -> void:
 					if scene.player.is_on_floor() and scene.player.position.y > heat.position.y - 35 and scene.player.position.x > heat.position.x - 55 and scene.player.position.x < heat.end.x + 55:
 						Input.action_press(&"jump")
 				if absf(offset.x) < 130 and absf(offset.y) < 65:
-					Input.action_press(&"attack")
+					# Release for whole physics ticks between taps; a held button is one swing.
+					if frame % 6 == 0:
+						Input.action_press(&"attack")
 					if frame % 60 == 0:
 						Input.action_press(&"skill")
 			await physics_frame

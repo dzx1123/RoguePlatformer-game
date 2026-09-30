@@ -17,9 +17,23 @@ var hit_spent := false
 var second_ember := false
 const LEFT := 180.0
 const RIGHT := 1100.0
+const CHARGE_SPEED := 420.0
+const CHARGE_DURATION := 0.65
+const CHARGE_CONTACT_REACH := 58.0
+
+func get_charge_warning_rect() -> Rect2:
+	var endpoint := clampf(position.x + locked_facing * CHARGE_SPEED * CHARGE_DURATION, LEFT, RIGHT)
+	var left := minf(position.x, endpoint) - position.x - CHARGE_CONTACT_REACH
+	# Same player-origin envelope as the real charge contact check, including height.
+	return Rect2(left, -52, absf(endpoint - position.x) + CHARGE_CONTACT_REACH * 2, 104)
 
 func _ready() -> void:
 	super._ready()
+	# Forge art uses local y=24 as its sole. The inherited boss capsule has
+	# half-height 52; leaving it centered suspends the visible feet 28 px above ground.
+	for child in get_children():
+		if child is CollisionShape2D and child.shape is CapsuleShape2D:
+			child.position.y = 24.0 - child.shape.height * 0.5
 	_max_health = 520
 	_current_health = 520
 
@@ -94,9 +108,9 @@ func _physics_process(delta: float) -> void:
 			if remaining <= 0:
 				state = State.CHARGE
 				sound_requested.emit(&"goblin_attack", true)
-				remaining = 0.65
+				remaining = CHARGE_DURATION
 		State.CHARGE:
-			velocity.x = locked_facing * 420
+			velocity.x = locked_facing * CHARGE_SPEED
 			if remaining <= 0 or (locked_facing < 0 and position.x <= LEFT) or (locked_facing > 0 and position.x >= RIGHT):
 				_recover()
 		State.RECOVER:
@@ -109,7 +123,7 @@ func _physics_process(delta: float) -> void:
 				_recover()
 	velocity.x = clampf(velocity.x, (LEFT - position.x) / maxf(delta, 0.001), (RIGHT - position.x) / maxf(delta, 0.001))
 	move_and_slide()
-	if state == State.CHARGE and not hit_spent and absf(_target.position.x - position.x) < 58 and absf(_target.position.y - position.y) < 52:
+	if state == State.CHARGE and not hit_spent and absf(_target.position.x - position.x) < CHARGE_CONTACT_REACH and absf(_target.position.y - position.y) < 52:
 		hit_spent = true
 		_target.receive_enemy_attack(position, _get_scaled_damage(18), &"forge_boss_charge")
 	queue_redraw()
@@ -137,6 +151,11 @@ func _recover() -> void:
 	remaining = 1.1
 	velocity.x = 0
 
+func _visual_state() -> Dictionary:
+	var pose := 3 if _is_defeated else (1 if state in [State.HAMMER_WARNING, State.CHARGE_WARNING, State.SHIFT] else (2 if state in [State.HAMMER_HIT, State.CHARGE, State.BARRAGE] or (state == State.RECOVER and remaining > 0.96) else 0))
+	var duration := 0.9 if state == State.HAMMER_WARNING else (1.2 if state == State.SHIFT else 0.8)
+	return {"pose": pose, "progress": clampf(1.0 - remaining / duration, 0, 1), "facing": locked_facing}
+
 func _draw() -> void:
 	var tint := Color("#a67a65")
 	if state == State.RECOVER:
@@ -147,8 +166,7 @@ func _draw() -> void:
 		tint = Color.WHITE
 	if _is_defeated:
 		tint.a = clampf(_death_remaining / DEATH_ANIMATION_DURATION, 0, 1)
-	var pose := 3 if _is_defeated else (1 if state in [State.HAMMER_WARNING, State.CHARGE_WARNING, State.SHIFT] else (2 if state in [State.HAMMER_HIT, State.CHARGE, State.BARRAGE] else 0))
-	ART.draw_actor(self, 3, pose, locked_facing, 140, _hurt_remaining > 0, _art_alpha())
+	_draw_actor(3)
 	_draw_forge_health()
 	if _is_defeated:
 		return
@@ -159,8 +177,11 @@ func _draw() -> void:
 		for x in range(0, 160, 20):
 			draw_line(area.position + Vector2(x, 75), area.position + Vector2(x + 16, 0), Color("#ffd085"), 2)
 	if state == State.CHARGE_WARNING:
-		draw_line(Vector2(0, 22), Vector2(locked_facing * 160, 22), Color("#ffd085"), 5)
-		draw_line(Vector2(locked_facing * 160, 22), Vector2(locked_facing * 140, 4), Color("#ffd085"), 4)
+		var warning := get_charge_warning_rect()
+		draw_rect(warning, Color(1, 0.65, 0.25, 0.10))
+		draw_line(Vector2(warning.position.x, 22), Vector2(warning.end.x, 22), Color("#ffd085"), 4)
+		var tip := Vector2(warning.end.x if locked_facing > 0 else warning.position.x, 22)
+		draw_line(tip, tip + Vector2(-locked_facing * 18, -18), Color("#ffd085"), 4)
 	if state in [State.SHIFT, State.RECOVER]:
 		draw_string(ThemeDB.fallback_font, Vector2(-60, -112), "核心过载 · 换位" if state == State.SHIFT else "反击窗口", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, tint)
 

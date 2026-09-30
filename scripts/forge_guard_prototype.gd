@@ -68,6 +68,10 @@ func _begin_recovery() -> void:
 	state_time = 1.1
 	velocity.x = 0
 
+func _visual_state() -> Dictionary:
+	var pose := 3 if _is_defeated else (1 if charge_state == ChargeState.WINDUP else (2 if charge_state == ChargeState.CHARGE or (charge_state == ChargeState.RECOVER and state_time > 0.96) else 0))
+	return {"pose": pose, "progress": clampf(1.0 - state_time / 0.8, 0, 1), "facing": charge_facing if charge_state != ChargeState.WAIT else _art_facing()}
+
 func _draw() -> void:
 	var color := Color("#94664f")
 	if charge_state == ChargeState.WINDUP:
@@ -78,8 +82,7 @@ func _draw() -> void:
 		color = Color.WHITE
 	if _is_defeated:
 		color.a = clampf(_death_remaining / DEATH_ANIMATION_DURATION, 0, 1)
-	var pose := 3 if _is_defeated else (1 if charge_state == ChargeState.WINDUP else (2 if charge_state == ChargeState.CHARGE else 0))
-	ART.draw_actor(self, 1, pose, charge_facing if charge_state in [ChargeState.CHARGE, ChargeState.WINDUP] else _art_facing(), 106, _hurt_remaining > 0, _art_alpha(), _pose_motion(pose, clampf(1.0 - state_time / 0.8, 0, 1)))
+	_draw_actor(1)
 	_draw_forge_health()
 	if charge_state == ChargeState.WINDUP and not _is_defeated:
 		var warning := get_charge_warning_rect()

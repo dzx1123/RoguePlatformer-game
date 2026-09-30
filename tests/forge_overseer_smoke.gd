@@ -47,6 +47,11 @@ func run_test() -> void:
 	boss.position = Vector2(870, 590)
 	target.position = Vector2(700, 590)
 	boss._begin_attack(2)
+	var warning: Rect2 = boss.get_charge_warning_rect()
+	var start_x: float = boss.position.x
+	var end_x: float = clampf(start_x + boss.locked_facing * boss.CHARGE_SPEED * boss.CHARGE_DURATION, boss.LEFT, boss.RIGHT)
+	assert(warning.position.x <= minf(start_x, end_x) - start_x - boss.CHARGE_CONTACT_REACH)
+	assert(warning.end.x >= maxf(start_x, end_x) - start_x + boss.CHARGE_CONTACT_REACH)
 	var facing: float = boss.locked_facing
 	target.position = Vector2(1000, 590)
 	boss._physics_process(0.79)
@@ -61,6 +66,14 @@ func run_test() -> void:
 	boss.position.x = boss.LEFT
 	boss._physics_process(0.01)
 	assert(boss.state == boss.State.RECOVER and boss.position.x >= boss.LEFT)
+	for x in [boss.LEFT + 10, 640.0, boss.RIGHT - 10]:
+		for direction in [-1.0, 1.0]:
+			boss.position.x = x
+			boss.locked_facing = direction
+			var area: Rect2 = boss.get_charge_warning_rect()
+			for sample in range(40):
+				var future_x: float = clampf(x + direction * boss.CHARGE_SPEED * minf(float(sample) / 60, boss.CHARGE_DURATION), boss.LEFT, boss.RIGHT)
+				assert(area.has_point(Vector2(future_x - x - 57.9, 0)) and area.has_point(Vector2(future_x - x + 57.9, 0)), "Warning must cover the complete charge, including edge clamping")
 	boss._begin_attack(1)
 	assert(scene.embers.get_child_count() == 1)
 	boss._physics_process(0.46)

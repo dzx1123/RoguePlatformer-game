@@ -42,7 +42,7 @@ func _run_test() -> void:
 
 	main.call(&"_show_upgrade_choice")
 	await process_frame
-	var choice_overlay: Control = main.get_node("HUD/UpgradeChoice") as Control
+	var choice_overlay: Control = main.get("_upgrade_overlay") as Control
 	var choice_hint: Label = main.get("_upgrade_hint") as Label
 	var choice_buttons: Array = main.get("_upgrade_buttons") as Array
 	if (
@@ -133,8 +133,11 @@ func _run_test() -> void:
 		if root.gui_get_focus_owner() != start_button:
 			return _fail("D-pad could not navigate from Continue to Start Game")
 	await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
+	if root.gui_get_focus_owner() != entry.get_node("Chapter2Direct"):
+		return _fail("D-pad could not navigate from Start Game to the chapter-two development entry")
+	await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
 	if root.gui_get_focus_owner() != entry.get_node("EntrySettings"):
-		return _fail("D-pad could not navigate from Start Game to Settings")
+		return _fail("D-pad could not navigate from the development entry to Settings")
 	await _tap_joy_button(JOY_BUTTON_A)
 	if not (main.get_node("HUD/SettingsMenu") as Control).visible:
 		return _fail("A did not confirm the focused Settings button")
@@ -171,7 +174,7 @@ func _run_test() -> void:
 
 	main.call(&"_clear_enemies")
 	var ground_deadline: int = 120
-	while not player.is_on_floor() and ground_deadline > 0:
+	while (not player.is_on_floor() or player._arrival_remaining > 0.0) and ground_deadline > 0:
 		await physics_frame
 		ground_deadline -= 1
 	if not player.is_on_floor():
@@ -223,7 +226,7 @@ func _run_test() -> void:
 	if bool(main.get("_flow_state").shopping):
 		return _fail("RB did not leave the shop")
 
-	main.call(&"_complete_run")
+	main.call(&"_finish_campaign_run")
 	await process_frame
 	var victory_button: Button = main.get("_victory_restart_button") as Button
 	if (
@@ -236,7 +239,7 @@ func _run_test() -> void:
 	await _tap_joy_button(JOY_BUTTON_A)
 	if (
 		bool(main.get("_flow_state").run_complete)
-		or (main.get_node("HUD/UpgradeChoice") as Control).visible
+		or (main.get("_upgrade_overlay") as Control).visible
 	):
 		return _fail("A did not start a new run from the focused victory action")
 

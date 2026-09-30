@@ -1,6 +1,6 @@
 extends RefCounted
 
-## Settings-only layout. Keep control names and callbacks owned by main.gd.
+## Shared settings layout for every chapter.
 static func apply(page: Control) -> void:
 	var font := SystemFont.new()
 	font.font_names = PackedStringArray(["Microsoft YaHei", "Noto Sans CJK SC", "sans-serif"])
@@ -63,6 +63,7 @@ static func apply(page: Control) -> void:
 		"DisplayStatus": Rect2(544, 334, 652, 20),
 		"OperationGuide": Rect2(700, 412, 250, 256),
 		"OperationGuideCombat": Rect2(976, 412, 236, 256),
+		"TutorialToggle": Rect2(1042, 374, 170, 32),
 		"ResetBindings": Rect2(48, 678, 252, 38),
 		"CloseSettings": Rect2(980, 678, 252, 38),
 		"SettingsAbout": Rect2(350, 676, 580, 22),

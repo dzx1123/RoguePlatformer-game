@@ -79,6 +79,10 @@ func _try_burn() -> void:
 		burn_spent = true
 		_target.receive_enemy_attack(position, _get_scaled_damage(8), &"ember_beetle_burn")
 
+func _visual_state() -> Dictionary:
+	var pose := 3 if _is_defeated else (1 if state == State.WARN else (2 if state in [State.POUNCE, State.BURN] else 0))
+	return {"pose": pose, "progress": clampf(1.0 - remaining / 0.45, 0, 1), "facing": direction}
+
 func _draw() -> void:
 	var color := Color("#a35730")
 	if state == State.WARN:
@@ -87,8 +91,7 @@ func _draw() -> void:
 		color = Color.WHITE
 	if _is_defeated:
 		color.a = clampf(_death_remaining / DEATH_ANIMATION_DURATION, 0, 1)
-	var pose := 3 if _is_defeated else (1 if state == State.WARN else (2 if state in [State.POUNCE, State.BURN] else 0))
-	ART.draw_actor(self, 2, pose, direction, 48, _hurt_remaining > 0, _art_alpha(), _pose_motion(pose, clampf(1.0 - remaining / 0.45, 0, 1)))
+	_draw_actor(2)
 	if state == State.BURN and not _is_defeated:
 		var warning := remaining > BURN_DURATION
 		var ring_color := Color("#ffdf85") if warning else Color("#ff743c")

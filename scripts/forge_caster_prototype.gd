@@ -7,11 +7,16 @@ var animation_time := 0.0
 var walk_direction := -1.0
 var walk_origin := 0.0
 var _ledge_turn_remaining := 0.0
+var actor_motion := preload("res://scripts/forge_actor_motion.gd").new()
+var _cast_facing := 1.0
+var _was_casting := false
 
 func _process(delta: float) -> void:
 	# Follow combat processing so menu pauses and event choices freeze animation too.
 	if is_physics_processing() and _hitstop_remaining <= 0.0:
 		animation_time += delta
+		var visual := _visual_state()
+		actor_motion.advance(delta, velocity.x, is_on_floor(), int(visual.pose) == 0 and not _is_defeated and _hurt_remaining <= 0, _pose_motion(int(visual.pose), float(visual.progress)), float(visual.facing), get_impact_height() * 0.65)
 		queue_redraw()
 
 func _pose_motion(pose: int, progress: float = 0.0) -> Vector2:
@@ -23,11 +28,17 @@ func _pose_motion(pose: int, progress: float = 0.0) -> Vector2:
 		return Vector2(1.0 + 0.08 * progress, 1.0 - 0.08 * progress)
 	if pose == 2:
 		return Vector2(1.05, 0.96)
-	if absf(velocity.x) > 10 and is_on_floor():
-		var stride := sin(animation_time * 12.0) * 0.025
-		return Vector2(1.0 + stride, 1.0 - stride)
 	var breath := sin(animation_time * 3.0) * 0.015
 	return Vector2(1.0 - breath, 1.0 + breath)
+
+func _visual_state() -> Dictionary:
+	var pose := 3 if _is_defeated else (1 if cast_pose_time > 0.8 else (2 if cast_pose_time > 0.18 else 0))
+	return {"pose": pose, "progress": clampf((1.52 - cast_pose_time) / 0.72, 0, 1), "facing": _cast_facing if cast_pose_time > 0 else _art_facing()}
+
+func _draw_actor(row: int) -> void:
+	var visual := _visual_state()
+	ART.draw_actor(self, row, int(visual.pose), float(visual.facing), get_impact_height(), _hurt_remaining > 0, _art_alpha(), actor_motion.shape, actor_motion.phase, actor_motion.weight)
+
 func _ready() -> void:
 	super._ready()
 	walk_origin = position.x
@@ -51,7 +62,12 @@ func _physics_process(delta: float) -> void:
 	if _consume_forge_hitstop(delta):
 		return
 	_hurt_remaining = maxf(0, _hurt_remaining - delta)
+	if cast_pose_time > 0 and not _was_casting:
+		_cast_facing = signf(_target.position.x - position.x) if is_instance_valid(_target) else _art_facing()
+		if is_zero_approx(_cast_facing):
+			_cast_facing = actor_motion.facing
 	cast_pose_time = maxf(0, cast_pose_time - delta)
+	_was_casting = cast_pose_time > 0
 	_hurt_invulnerability_remaining = maxf(0, _hurt_invulnerability_remaining - delta)
 	if cast_pose_time <= 0 and _hurt_remaining <= 0:
 		velocity.x = _walk_velocity(walk_origin - 140, walk_origin + 140, 52)
@@ -68,8 +84,7 @@ func _consume_forge_hitstop(delta: float) -> bool:
 	return true
 
 func _draw() -> void:
-	var pose := 3 if _is_defeated else (1 if cast_pose_time > 0.8 else (2 if cast_pose_time > 0 else 0))
-	ART.draw_actor(self, 0, pose, _art_facing(), 90, _hurt_remaining > 0, _art_alpha(), _pose_motion(pose, clampf((1.52 - cast_pose_time) / 0.72, 0, 1)))
+	_draw_actor(0)
 	_draw_forge_health()
 
 func get_health_bar_rect() -> Rect2:
@@ -112,7 +127,9 @@ func _walk_velocity(left: float, right: float, speed: float) -> float:
 func _art_facing() -> float:
 	if absf(velocity.x) > 1:
 		return signf(velocity.x)
-	return signf(_target.position.x - position.x) if is_instance_valid(_target) else 1.0
+	if is_instance_valid(_target) and absf(_target.position.x - position.x) > 8:
+		return signf(_target.position.x - position.x)
+	return actor_motion.facing
 
 func _art_alpha() -> float:
 	return clampf(_death_remaining / DEATH_ANIMATION_DURATION, 0, 1) if _is_defeated else 1.0

@@ -14,7 +14,8 @@ var campaign_runtime: Dictionary = {}
 var resolving_campaign := false
 var campaign_hud: CanvasLayer
 var campaign_presenter: RunHUDPresenter
-var campaign_pause: PanelContainer
+var campaign_pause: Control
+var chapter_menu: Node
 var last_campaign_status := ""
 var room_portal: RoomExitPortal
 var entry_beam: RoomEntryBeam
@@ -292,8 +293,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"pause") and not event.is_echo():
 		_toggle_pause()
 		return
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		return_to_menu()
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode in [KEY_ESCAPE, KEY_P]:
+		# Only the shared pause binding may open menus; suppress prototype shortcuts.
 		return
 	super._unhandled_key_input(event)
 
@@ -324,7 +325,7 @@ func _gameplay_prompt() -> String:
 func _journey_prompt() -> String:
 	if not campaign.is_empty():
 		return input_settings.get_action_prompt(&"pause", using_controller) + " 暂停 · 死亡扣除命数并重开整局"
-	return input_settings.get_action_prompt(&"restart", using_controller) + " 重试检查点 · " + (input_settings.get_action_prompt(&"pause", true) if using_controller else "P") + " 暂停 · Esc / 右上按钮 返回菜单"
+	return input_settings.get_action_prompt(&"restart", using_controller) + " 重试检查点 · " + input_settings.get_action_prompt(&"pause", using_controller) + " 暂停 · 暂停菜单可返回主菜单"
 
 func _objective_text() -> String:
 	if not campaign.is_empty() and not route_complete:
@@ -480,6 +481,7 @@ func return_to_menu() -> void:
 		if save_error != OK:
 			last_reward = "保存失败，已保留在当前场景，请稍后重试"
 			return
+	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/Main.tscn")
 
 func _choice_title(kind: StringName) -> String:
@@ -518,32 +520,16 @@ func _create_campaign_hud() -> void:
 		preview_progression.load_progress()
 		preview_progression._unlocked_weapons = WeaponCatalog.all_weapon_ids()
 		campaign_runtime.progression = preview_progression
-	var ui := preload("res://scripts/ui_theme.gd")
-	campaign_pause = PanelContainer.new()
-	campaign_pause.position = Vector2(390, 210)
-	campaign_pause.custom_minimum_size = Vector2(500, 280)
-	campaign_pause.add_theme_stylebox_override("panel", ui.surface(ui.BG_PANEL, ui.ACCENT_MOON, 16, 2, 18))
-	campaign_hud.add_child(campaign_pause)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 22)
-	campaign_pause.add_child(column)
-	var label := Label.new()
-	label.text = "旅程暂停 · 余烬铸庭"
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", ui.TITLE)
-	column.add_child(label)
-	for caption in ["继续旅程", "返回主菜单（保留进度）"]:
-		var button := Button.new()
-		button.text = caption
-		button.custom_minimum_size.y = 68
-		button.add_theme_stylebox_override("normal", ui.card(ui.ACCENT_MOON))
-		button.add_theme_stylebox_override("focus", ui.card(ui.ACCENT_GOLD, true))
-		column.add_child(button)
-		button.pressed.connect(_toggle_pause if caption == "继续旅程" else return_to_menu)
-	campaign_pause.hide()
+	campaign_hud.process_mode = Node.PROCESS_MODE_ALWAYS
+	chapter_menu = preload("res://scripts/chapter_menu_controller.gd").new()
+	add_child(chapter_menu)
+	chapter_menu.setup(self)
+	campaign_pause = chapter_menu._pause_overlay
 	return_panel.hide()
 
 func _toggle_pause() -> void:
+	if route_complete or player.is_dead() or resolving_campaign:
+		return
 	super._toggle_pause()
 	if is_instance_valid(portal_sound):
 		portal_sound.play_ui()
@@ -552,10 +538,15 @@ func _toggle_pause() -> void:
 			reward_view._upgrade_buttons[index].disabled = paused or (choice_kind == &"shop" and gold < int(reward_cards[index].cost))
 	if portal_delay >= 0:
 		player.set_physics_process(false)
-	if is_instance_valid(campaign_pause):
-		campaign_pause.visible = paused
-		if paused:
-			campaign_pause.get_child(0).get_child(1).grab_focus()
+	get_tree().paused = paused
+	if is_instance_valid(chapter_menu):
+		chapter_menu.show_pause(paused)
+	if not paused and ritual_open and is_instance_valid(reward_view):
+		for button in reward_view._upgrade_buttons:
+			if button.visible and not button.disabled:
+				button.grab_focus()
+				break
+	campaign_presenter.set_obscured(paused or ritual_open)
 
 func _process(_delta: float) -> void:
 	if campaign_presenter == null:
