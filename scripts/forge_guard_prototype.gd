@@ -8,7 +8,9 @@ var hit_this_charge := false
 var lane_left := 490.0
 var lane_right := 630.0
 const CHARGE_SPEED := 300.0
+const WINDUP_DURATION := 0.8
 const CHARGE_DURATION := 0.4
+const RECOVERY_DURATION := 1.1
 
 func get_charge_warning_rect() -> Rect2:
 	var endpoint := clampf(position.x + charge_facing * CHARGE_SPEED * CHARGE_DURATION, lane_left, lane_right)
@@ -38,7 +40,7 @@ func _physics_process(delta: float) -> void:
 					charge_facing = 1.0 if _target.position.x >= position.x else -1.0
 					charge_state = ChargeState.WINDUP
 					velocity.x = 0
-					state_time = 0.8
+					state_time = WINDUP_DURATION
 			ChargeState.WINDUP:
 				if _hurt_remaining > 0:
 					_begin_recovery()
@@ -65,12 +67,22 @@ func _physics_process(delta: float) -> void:
 
 func _begin_recovery() -> void:
 	charge_state = ChargeState.RECOVER
-	state_time = 1.1
+	state_time = RECOVERY_DURATION
 	velocity.x = 0
 
 func _visual_state() -> Dictionary:
-	var pose := 3 if _is_defeated else (1 if charge_state == ChargeState.WINDUP else (2 if charge_state == ChargeState.CHARGE or (charge_state == ChargeState.RECOVER and state_time > 0.96) else 0))
-	return {"pose": pose, "progress": clampf(1.0 - state_time / 0.8, 0, 1), "facing": charge_facing if charge_state != ChargeState.WAIT else _art_facing()}
+	if _is_defeated:
+		return _action_visual(3, MOTION.Clip.IDLE, 0.0, charge_facing)
+	match charge_state:
+		ChargeState.WINDUP:
+			return _action_visual(1, MOTION.Clip.SHIELD_LIFT, 1.0 - state_time / WINDUP_DURATION, charge_facing)
+		ChargeState.CHARGE:
+			return _action_visual(2, MOTION.Clip.SHIELD_DRIVE, 1.0 - state_time / CHARGE_DURATION, charge_facing)
+		ChargeState.RECOVER:
+			var elapsed := RECOVERY_DURATION - state_time
+			var pose := 2 if elapsed < 0.14 else 0
+			return _action_visual(pose, MOTION.Clip.SHIELD_BRAKE, elapsed / 0.36, charge_facing)
+	return _action_visual(0, MOTION.Clip.IDLE, 0.0, _art_facing())
 
 func _draw() -> void:
 	var color := Color("#94664f")

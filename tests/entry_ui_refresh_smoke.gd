@@ -22,8 +22,11 @@ func _run() -> void:
 	var fade: TextureRect = entry.get_node("BottomGradient")
 	if resume.visible or start.text != "开启新局" or root.gui_get_focus_owner() != start:
 		return _fail("Fresh entry must focus new game without a continue button")
-	if profile.position != Vector2(48, 616) or profile.size != Vector2(1184, 88):
-		return _fail("Entry gradient and low-priority bottom progression rail differ from U2")
+	if profile.get_rect().end.x >= fade.size.x * 0.75:
+		return _fail("Profile summary should leave the right side of the title artwork visible")
+	var developer_entry := entry.get_node("Chapter2Direct") as Button
+	if developer_entry.get_rect().position.x <= profile.get_rect().end.x:
+		return _fail("Developer entry should stay separate from the title actions and player profile")
 	if (entry.get_node("EntryFrame") as Control).visible or back.visible:
 		return _fail("Legacy entry box or difficulty-only return button leaked into title")
 	for index in range(3):
@@ -37,6 +40,8 @@ func _run() -> void:
 	await create_timer(0.65).timeout
 	if not resume.visible or resume.text != "继续旅程" or root.gui_get_focus_owner() != resume:
 		return _fail("Saved entry must prioritize Continue Journey")
+	if not (entry.get_node("EntryFooter") as Label).text.contains("第 1 房"):
+		return _fail("Saved room should be visible beside Continue Journey")
 	if resume.position.y >= start.position.y or resume.size.y <= start.size.y:
 		return _fail("Continue and New Game do not have the specified primary/secondary hierarchy")
 	if start.position.y < resume.position.y + resume.size.y + 12.0:

@@ -89,6 +89,9 @@ func _spawn_enemy(spec: Dictionary) -> void:
 			enemy.lane_right = spec.right
 		_:
 			enemy = preload("res://scripts/rogue_enemy.gd").new()
+			enemy.directional_melee = bool(spec.get("directional_melee", false))
+			if enemy.directional_melee:
+				enemy.directional_melee_floor_y = platforms[0].position.y
 	enemy.position = spec.position
 	enemy.setup(0, 0, spec.left, spec.right)
 	add_child(enemy)
@@ -99,6 +102,9 @@ func _spawn_enemy(spec: Dictionary) -> void:
 
 func _heat_damage_enabled() -> bool:
 	return bool(rooms[room_index].heat_damage)
+
+func _display_vents() -> Array:
+	return rooms[room_index].heat
 
 func _spawn_ember() -> void:
 	# The entry and distant platforms are outside the caster's engagement range.
@@ -287,12 +293,6 @@ func _draw_hud() -> void:
 
 func _draw_forge_background() -> void:
 	preload("res://scripts/forge_background_art.gd").draw_background(self, rooms[room_index].layout)
-	# Recessed vent grilles identify the hazard even during the inactive phase.
-	for heat: Rect2 in rooms[room_index].get("heat", []):
-		var floor_y := heat.end.y
-		draw_rect(Rect2(heat.position.x, floor_y - 9, heat.size.x, 9), Color("#07111b"))
-		for x in range(int(heat.position.x) + 5, int(heat.end.x) - 3, 12):
-			draw_line(Vector2(x, floor_y - 8), Vector2(x, floor_y - 1), Color("#996c46"), 3)
 	if rooms[room_index].reward == &"ritual":
 		# A cooling vessel beside the interaction point gives the event a world landmark.
 		var center := Vector2(1130, 602)

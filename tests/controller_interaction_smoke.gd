@@ -18,7 +18,7 @@ func _run_test() -> void:
 	player.action_started.connect(_on_player_action_started)
 	var input_bridge: Node = main.get("_pause_input_handler") as Node
 	var weapon_switch_label: Label = main.get_node(
-		"HUD/WeaponPanel/WeaponSwitch/Label"
+		"HUD/BottomHUD/WeaponPanel/WeaponSwitch/Label"
 	) as Label
 	# Keep device switching deterministic even when this test is run on a host
 	# that already has a controller attached.
@@ -57,15 +57,56 @@ func _run_test() -> void:
 	if focus_owner == null or not choice_overlay.is_ancestor_of(focus_owner):
 		return _fail("Card-choice overlay did not acquire controller focus")
 
+	var pause_menu := main.get_node("HUD/PauseMenu") as Control
+	var resume_button := pause_menu.get_node("Resume") as Button
+	var pause_overview := pause_menu.get_node("PauseBuildOverview") as Button
+	var card := choice_buttons[1] as Button
+	await _tap_joy_button(JOY_BUTTON_DPAD_RIGHT)
+	if root.gui_get_focus_owner() != card:
+		return _fail("Right did not focus the second reward card")
+	var reward_room: int = main.call(&"get_current_room_number")
+	await _tap_joy_button(JOY_BUTTON_START)
+	if not paused or root.gui_get_focus_owner() != resume_button:
+		return _fail("Pause over a reward must take focus from the selected card")
+	card.pressed.emit()
+	await _tap_joy_button(JOY_BUTTON_Y)
+	await _tap_key(KEY_1)
+	if not choice_overlay.visible or int(main.call(&"get_current_room_number")) != reward_room:
+		return _fail("Paused reward accepted a button or a shortcut")
+	var settings_panel := main.get_node("HUD/SettingsMenu") as Control
+	await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
+	await _tap_joy_button(JOY_BUTTON_A)
+	if not settings_panel.visible or not settings_panel.is_ancestor_of(root.gui_get_focus_owner()):
+		return _fail("Settings must take focus above a paused reward")
+	await _tap_joy_button(JOY_BUTTON_B)
+	if not paused or not pause_menu.visible or root.gui_get_focus_owner() != resume_button:
+		return _fail("Back from settings must restore the pause menu")
+	var overview := main.get("_build_overview") as Control
+	await _tap_joy_button(JOY_BUTTON_RIGHT_STICK)
+	if not paused or not overview.visible or not overview.is_ancestor_of(root.gui_get_focus_owner()):
+		return _fail("Build overview must take focus above a paused reward")
+	await _tap_key(KEY_SHIFT)
+	if not overview.is_ancestor_of(root.gui_get_focus_owner()):
+		return _fail("Input device switching stole build overview focus")
+	await _tap_joy_button(JOY_BUTTON_B)
+	if not paused or not pause_menu.visible or root.gui_get_focus_owner() != resume_button:
+		return _fail("Back from a nested build overview must restore the pause menu")
+	await _tap_joy_button(JOY_BUTTON_B)
+	if paused or not choice_overlay.visible or root.gui_get_focus_owner() != card:
+		return _fail("Resuming with B must restore the original card without choosing the third")
+	await _tap_joy_button(JOY_BUTTON_RIGHT_STICK)
+	if not paused or not overview.visible:
+		return _fail("Build overview did not open from the reward")
+	await _tap_key(KEY_ESCAPE)
+	if paused or not choice_overlay.visible or root.gui_get_focus_owner() != card:
+		return _fail("Closing the direct build overview must restore the selected card")
+
 	await _tap_joy_button(JOY_BUTTON_Y)
 	await process_frame
 	if bool(main.get("_flow_state").choosing_upgrade):
 		return _fail("Y did not directly choose the second reward card")
 
 	await _tap_joy_button(JOY_BUTTON_START)
-	var pause_menu := main.get_node("HUD/PauseMenu") as Control
-	var resume_button := pause_menu.get_node("Resume") as Button
-	var pause_overview := pause_menu.get_node("PauseBuildOverview") as Button
 	if not paused or not pause_menu.visible:
 		return _fail("Menu/Start did not open and pause the game")
 	var pause_focus: Control = root.gui_get_focus_owner()
@@ -133,14 +174,18 @@ func _run_test() -> void:
 		if root.gui_get_focus_owner() != start_button:
 			return _fail("D-pad could not navigate from Continue to Start Game")
 	await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
-	if root.gui_get_focus_owner() != entry.get_node("Chapter2Direct"):
-		return _fail("D-pad could not navigate from Start Game to the chapter-two development entry")
-	await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
 	if root.gui_get_focus_owner() != entry.get_node("EntrySettings"):
-		return _fail("D-pad could not navigate from the development entry to Settings")
+		return _fail("D-pad could not navigate from Start Game to Settings")
 	await _tap_joy_button(JOY_BUTTON_A)
 	if not (main.get_node("HUD/SettingsMenu") as Control).visible:
 		return _fail("A did not confirm the focused Settings button")
+	var settings := main.get_node("HUD/SettingsMenu") as Control
+	await _tap_joy_button(JOY_BUTTON_DPAD_RIGHT)
+	if root.gui_get_focus_owner() != settings.get_node("DisplayTab"):
+		return _fail("D-pad did not switch focus between settings sections")
+	await _tap_joy_button(JOY_BUTTON_A)
+	if not (settings.get_node("ResolutionSelector") as Control).visible:
+		return _fail("A did not open the focused settings section")
 	await _tap_joy_button(JOY_BUTTON_B)
 	if (main.get_node("HUD/SettingsMenu") as Control).visible:
 		return _fail("B did not return from Settings to the main menu")
@@ -218,13 +263,40 @@ func _run_test() -> void:
 	if player.get_current_health() != player.get_max_health():
 		return _fail("Controller View did not restart the active run")
 
+	main.set("_gold", 100)
 	main.call(&"_show_shop")
 	await process_frame
-	if not (main.get("_upgrade_hint") as Label).text.contains("RB 离开"):
+	var leave_button := (main.get("_reward_view") as RewardChoiceView).shop_exit_button
+	if not leave_button.visible or not leave_button.text.contains("[RB]"):
 		return _fail("Shop did not show the controller interaction prompt")
+	await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
+	if root.gui_get_focus_owner() != leave_button:
+		return _fail("D-pad down did not reach the Leave Shop button")
+	await _tap_joy_button(JOY_BUTTON_DPAD_UP)
+	if root.gui_get_focus_owner() != choice_buttons[0]:
+		return _fail("D-pad up did not return to the shop offers")
+	await _tap_joy_button(JOY_BUTTON_DPAD_DOWN)
+	await _tap_joy_button(JOY_BUTTON_START)
+	main.call(&"_leave_shop")
+	leave_button.pressed.emit()
 	await _tap_joy_button(JOY_BUTTON_RIGHT_SHOULDER)
-	if bool(main.get("_flow_state").shopping):
+	await _tap_key(KEY_E)
+	if not paused or not bool(main.get("_flow_state").shopping) or not leave_button.disabled:
+		return _fail("Shop accepted an exit while paused")
+	await _tap_joy_button(JOY_BUTTON_B)
+	if paused or not bool(main.get("_flow_state").shopping) or root.gui_get_focus_owner() != leave_button or leave_button.disabled:
+		return _fail("Resuming from the shop must restore Leave Shop focus")
+	await _tap_joy_button(JOY_BUTTON_RIGHT_SHOULDER)
+	if bool(main.get("_flow_state").shopping) or leave_button.visible:
 		return _fail("RB did not leave the shop")
+	main.set("_gold", 0)
+	main.call(&"_show_shop")
+	await process_frame
+	if root.gui_get_focus_owner() != leave_button:
+		return _fail("An unaffordable shop did not focus Leave Shop")
+	await _tap_joy_button(JOY_BUTTON_A)
+	if bool(main.get("_flow_state").shopping):
+		return _fail("Controller A on Leave Shop did not advance without buying")
 
 	main.call(&"_finish_campaign_run")
 	await process_frame

@@ -12,6 +12,7 @@ var _activating: bool = false
 var _prompt_root: Control
 var prompt_offset_x := -142.0
 var _prompt_label: Label
+var _prompt_badge: Label
 var _opener_near: bool = false
 var _beam_texture: ImageTexture
 
@@ -47,10 +48,17 @@ func _create_beam_texture() -> ImageTexture:
 	return ImageTexture.create_from_image(image)
 
 
-func set_prompt_text(prompt_text: String) -> void:
+func set_prompt_text(prompt_text: String, badge_text: String = "下一房") -> void:
 	set_meta(&"prompt_text", prompt_text)
+	set_meta(&"badge_text", badge_text)
 	if is_instance_valid(_prompt_label):
+		_prompt_badge.text = badge_text
 		_refresh_prompt()
+
+
+func set_prompt_visible(should_show: bool) -> void:
+	if is_instance_valid(_prompt_root):
+		_prompt_root.visible = should_show
 
 
 func is_in_range(opener_position: Vector2) -> bool:
@@ -112,17 +120,17 @@ func _create_prompt_bubble() -> void:
 	prompt_panel.add_theme_stylebox_override("panel", prompt_style)
 	_prompt_root.add_child(prompt_panel)
 
-	var badge := Label.new()
-	badge.name = "ExitBadge"
-	badge.position = Vector2(9.0, 7.0)
-	badge.size = Vector2(54.0, 30.0)
-	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	badge.text = "下一房"
-	badge.add_theme_font_size_override("font_size", 12)
-	badge.add_theme_color_override("font_color", Color(0.76, 0.96, 1.0, 1.0))
-	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_prompt_root.add_child(badge)
+	_prompt_badge = Label.new()
+	_prompt_badge.name = "ExitBadge"
+	_prompt_badge.position = Vector2(9.0, 7.0)
+	_prompt_badge.size = Vector2(54.0, 30.0)
+	_prompt_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_prompt_badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_prompt_badge.text = String(get_meta(&"badge_text", "下一房"))
+	_prompt_badge.add_theme_font_size_override("font_size", 12)
+	_prompt_badge.add_theme_color_override("font_color", Color(0.76, 0.96, 1.0, 1.0))
+	_prompt_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_prompt_root.add_child(_prompt_badge)
 
 	_prompt_label = Label.new()
 	_prompt_label.name = "PromptText"

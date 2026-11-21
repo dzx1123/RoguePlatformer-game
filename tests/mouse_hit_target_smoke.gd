@@ -45,6 +45,10 @@ func _run_test() -> void:
 		return
 	if not settings.visible:
 		return _fail("Clicking the title Settings button did not open Settings")
+	if not await _click_target(settings.get_node("ControlsTab") as Button, "settings.controls_tab"):
+		return
+	if not settings.get_node("Bind_attack").visible:
+		return _fail("Clicking the Controls tab did not show the input bindings")
 	if not await _click_target(settings.get_node("CloseSettings") as Button, "settings.back_to_title"):
 		return
 	if settings.visible or not entry.visible:
@@ -92,6 +96,14 @@ func _run_test() -> void:
 	if bool(main.get("_flow_state").choosing_upgrade):
 		return _fail("Clicking a reward card did not close the choice state")
 
+	main.set("_gold", 0)
+	main.call(&"_show_shop")
+	var main_reward := main.get("_reward_view") as RewardChoiceView
+	if not await _click_target(main_reward.shop_exit_button, "chapter_one.shop_leave"):
+		return
+	if bool(main.get("_flow_state").shopping) or int(main.get("_gold")) != 0:
+		return _fail("Clicking Leave Shop did not advance without purchasing in chapter one")
+
 	main.call(&"_on_player_died")
 	await process_frame
 	if not death_recap.visible or not paused:
@@ -113,7 +125,7 @@ func _run_test() -> void:
 		return
 	if not await _click_target(entry.get_node("Difficulty_1") as Button, "difficulty.normal_after_death"):
 		return
-	main.call(&"_complete_run")
+	main.call(&"_finish_campaign_run")
 	await process_frame
 	var victory_restart := main.get("_victory_restart_button") as Button
 	if victory_restart == null or not victory_restart.visible:
@@ -124,6 +136,18 @@ func _run_test() -> void:
 		return _fail("Clicking Victory Restart did not start a fresh run")
 
 	main.queue_free()
+	await process_frame
+	var journey = load("res://scenes/Chapter2Journey.tscn").instantiate()
+	journey.persistence_enabled = false
+	root.add_child(journey)
+	journey._load_layout(13)
+	journey.gold = 0
+	journey._open_choice(&"shop")
+	if not await _click_target(journey.reward_view.shop_exit_button, "chapter_two.shop_leave"):
+		return
+	if journey.room_index != 14 or journey.gold != 0 or journey.ritual_open:
+		return _fail("Clicking Leave Shop did not advance without purchasing in chapter two")
+	journey.queue_free()
 	await process_frame
 	_write_report(true, "")
 	print(

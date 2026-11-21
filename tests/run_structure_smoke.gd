@@ -10,6 +10,7 @@ func _run_test() -> void:
 	var main: Node2D = main_scene.instantiate() as Node2D
 	main.set("save_enabled", false)
 	root.add_child(main)
+	current_scene = main
 	var player: RoguePlayer = main.get_node("Player") as RoguePlayer
 	await _wait_physics_frames(12)
 
@@ -61,6 +62,10 @@ func _run_test() -> void:
 		return
 
 	_disable_current_enemies(main)
+	for _arrival_frame in range(120):
+		if float(player.get("_arrival_remaining")) <= 0.0:
+			break
+		await physics_frame
 	player.set("_hurt_invulnerability_remaining", 0.0)
 	var generation_before_death: int = int(main.get("_run_generation"))
 	player.receive_enemy_attack(player.global_position + Vector2(60.0, 0.0), 999)
@@ -83,6 +88,8 @@ func _run_test() -> void:
 		_fail("Run upgrades were not reset after death")
 		return
 
+	var restarted_seed := int(main.call(&"get_run_seed"))
+	var restarted_lives := int(main.get("_lives_remaining"))
 	for room_number in range(1, 21):
 		if bool(main.call(&"is_event_active")):
 			if not bool(main.call(&"choose_upgrade", 0)):
@@ -103,35 +110,41 @@ func _run_test() -> void:
 				return
 		_defeat_current_room(main)
 		await _wait_physics_frames(32)
+		if room_number == 20:
+			var journey := current_scene
+			if journey == null or not journey.scene_file_path.ends_with("Chapter2Journey.tscn"):
+				_fail("Clearing room 20 did not automatically enter Chapter 2")
+				return
+			var campaign: Dictionary = journey.get("campaign")
+			if int(journey.get("room_index")) != 0 or campaign.get("seed") != restarted_seed or campaign.get("lives") != restarted_lives:
+				_fail("Chapter 2 did not start in room 21 with the same run and remaining lives")
+				return
+			break
 		if bool(main.call(&"is_awaiting_chest")):
 			if not bool(main.call(&"open_current_chest_for_test")):
 				_fail("Treasure room chest could not be opened")
 				return
 			await _wait_physics_frames(5)
-		if room_number < 20:
-			if bool(main.call(&"is_awaiting_exit")) and not await _enter_room_exit(main):
-				return
-			if not bool(main.call(&"is_choosing_upgrade")):
-				_fail("Room %d did not lead to an upgrade choice" % room_number)
-				return
-			var advanced: bool = true
-			if bool(main.call(&"is_shopping")):
-				main.call(&"_leave_shop")
-			else:
-				advanced = bool(main.call(&"choose_upgrade", 0))
-			if not advanced:
-				_fail("Room %d upgrade choice failed" % room_number)
-				return
-			await _wait_physics_frames(5)
-			if int(main.call(&"get_current_room_number")) != room_number + 1:
-				_fail("Run did not advance after room %d" % room_number)
-				return
+		if bool(main.call(&"is_awaiting_exit")) and not await _enter_room_exit(main):
+			return
+		if not bool(main.call(&"is_choosing_upgrade")):
+			_fail("Room %d did not lead to an upgrade choice" % room_number)
+			return
+		var advanced: bool = true
+		if bool(main.call(&"is_shopping")):
+			main.call(&"_leave_shop")
 		else:
-			if not bool(main.call(&"is_run_complete")):
-				_fail("Clearing the twentieth room did not complete the run")
-				return
+			advanced = bool(main.call(&"choose_upgrade", 0))
+		if not advanced:
+			_fail("Room %d upgrade choice failed" % room_number)
+			return
+		await _wait_physics_frames(5)
+		if int(main.call(&"get_current_room_number")) != room_number + 1:
+			_fail("Run did not advance after room %d" % room_number)
+			return
 
-	main.queue_free()
+	current_scene.queue_free()
+	await process_frame
 	print("run_structure_smoke: PASS")
 	quit(0)
 

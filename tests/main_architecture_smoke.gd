@@ -46,7 +46,7 @@ func _run_test() -> void:
 	):
 		_fail("Main did not enter a consistent combat flow state")
 		return
-	if presenter.status_label != main.get_node("HUD/CombatStatus"):
+	if presenter.status_label != main.get_node("HUD/StatusToast/CombatStatus"):
 		_fail("HUD presenter changed the public node contract")
 		return
 	if main.get_node_or_null("HUD/BottomHUD") == null:

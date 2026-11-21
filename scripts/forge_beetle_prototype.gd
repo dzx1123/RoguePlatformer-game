@@ -7,6 +7,8 @@ var direction := 1.0
 var burn_spent := false
 const LEFT := 500.0
 const RIGHT := 780.0
+const CROUCH_DURATION := 0.45
+const POUNCE_DURATION := 0.45
 var lane_left := LEFT
 var lane_right := RIGHT
 const LANDING_WARNING := 0.30
@@ -42,7 +44,7 @@ func _physics_process(delta: float) -> void:
 					direction = 1.0 if _target.position.x >= position.x else -1.0
 					state = State.WARN
 					velocity.x = 0
-					remaining = 0.45
+					remaining = CROUCH_DURATION
 			State.WARN:
 				if _hurt_remaining > 0:
 					state = State.REST
@@ -50,7 +52,7 @@ func _physics_process(delta: float) -> void:
 				elif remaining <= 0:
 					state = State.POUNCE
 					sound_requested.emit(&"bite", is_boss())
-					remaining = 0.45
+					remaining = POUNCE_DURATION
 					velocity.y = -240
 			State.POUNCE:
 				velocity.x = direction * 340
@@ -80,8 +82,17 @@ func _try_burn() -> void:
 		_target.receive_enemy_attack(position, _get_scaled_damage(8), &"ember_beetle_burn")
 
 func _visual_state() -> Dictionary:
-	var pose := 3 if _is_defeated else (1 if state == State.WARN else (2 if state in [State.POUNCE, State.BURN] else 0))
-	return {"pose": pose, "progress": clampf(1.0 - remaining / 0.45, 0, 1), "facing": direction}
+	if _is_defeated:
+		return _action_visual(3, MOTION.Clip.IDLE, 0.0, direction)
+	match state:
+		State.WARN:
+			return _action_visual(1, MOTION.Clip.BEETLE_CROUCH, 1.0 - remaining / CROUCH_DURATION, direction)
+		State.POUNCE:
+			return _action_visual(2, MOTION.Clip.BEETLE_POUNCE, 1.0 - remaining / POUNCE_DURATION, direction)
+		State.BURN:
+			var elapsed := LANDING_WARNING + BURN_DURATION - remaining
+			return _action_visual(2 if elapsed < LANDING_WARNING else 0, MOTION.Clip.BEETLE_LAND, elapsed / LANDING_WARNING, direction)
+	return _action_visual(0, MOTION.Clip.IDLE, 0.0, direction)
 
 func _draw() -> void:
 	var color := Color("#a35730")

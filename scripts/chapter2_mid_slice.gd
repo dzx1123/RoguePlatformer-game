@@ -4,6 +4,11 @@ const MID := preload("res://scripts/chapter2_mid_catalog.gd")
 const UPGRADES := preload("res://scripts/upgrade_catalog.gd")
 const SHOP := preload("res://scripts/run_upgrade_service.gd")
 const TOLL_COST := 20
+const TRIAL_FALLBACK_GOLD := 20
+const CHEST_REACH := 70.0
+const CHEST_GOLD := 15
+const WAVE_WARNING_SECONDS := 1.2
+const WAVE_CLEARANCE := 90.0
 var next_wave := 0
 var wave_delay := -1.0
 var trial_active := false
@@ -29,7 +34,7 @@ func _physics_process(delta: float) -> void:
 			heat_zones = [rooms[room_index].heat[int(floor((elapsed + delta) / HEAT_PERIOD)) % 2]]
 		if living_enemies().is_empty() and _waves_pending() and (rooms[room_index].goal != &"trial" or trial_active):
 			if wave_delay < 0:
-				wave_delay = 1.2
+				wave_delay = WAVE_WARNING_SECONDS
 			else:
 				wave_delay = maxf(0, wave_delay - delta)
 				if wave_delay == 0 and _spawn_points_clear():
@@ -42,18 +47,21 @@ func _physics_process(delta: float) -> void:
 
 func _spawn_points_clear() -> bool:
 	for spec: Dictionary in rooms[room_index].waves[next_wave]:
-		if player.position.distance_to(spec.position) < 90:
+		if _wave_point_occupied(spec.position):
 			return false
 	return true
+
+func _wave_point_occupied(point: Vector2) -> bool:
+	return player.position.distance_squared_to(point) < WAVE_CLEARANCE * WAVE_CLEARANCE
 
 func try_exit() -> bool:
 	if paused or ritual_open or route_complete or player.is_dead():
 		return false
 	var room := rooms[room_index]
-	if room.has("chest") and not claimed.has(&"chain_chest") and player.position.distance_to(room.chest) < 70:
+	if room.has("chest") and not claimed.has(&"chain_chest") and _at_side_chest(room.chest):
 		claimed[&"chain_chest"] = true
-		gold += 15
-		last_reward = "链架宝箱：金币 +15"
+		gold += CHEST_GOLD
+		last_reward = "链架宝箱 · 金币 +%d" % CHEST_GOLD
 		return true
 	if not _at_exit() or not living_enemies().is_empty():
 		return false
@@ -93,21 +101,24 @@ func _choice_options(kind: StringName) -> Array:
 		rng.seed = 2034
 		offered = SHOP.create_shop_offers(player.get_weapon_id(), player.get_run_upgrade_counts(), rng)
 	else:
-		for upgrade: Dictionary in UPGRADES.create_available_pool(player.get_weapon_id(), player.get_run_upgrade_counts()):
-			if upgrade.get("weapon", &"") == player.get_weapon_id() and int(upgrade.rarity) == UPGRADES.Rarity.RARE:
-				offered.append(upgrade)
-				if offered.size() == 2:
-					break
+		offered = _available_weapon_rares().slice(0, 2)
 	var options: Array = []
 	for offer: Dictionary in offered:
 		var cost := "%d 金币 · " % offer.cost if kind == &"shop" else ("20 生命 · " if kind == &"toll" else "")
 		options.append(cost + str(offer.name) + " · " + str(offer.description))
 	if kind == &"rare":
 		if offered.is_empty():
-			options.append("稀有强化已满 · 改领 20 金币")
+			options.append("稀有强化已满 · 改领 %d 金币" % TRIAL_FALLBACK_GOLD)
 	else:
 		options.append("不交易 · 直接离开")
 	return options
+
+func _available_weapon_rares() -> Array[Dictionary]:
+	var weapon: StringName = player.get_weapon_id()
+	var pool := UPGRADES.create_available_pool(weapon, player.get_run_upgrade_counts())
+	return pool.filter(func(upgrade: Dictionary) -> bool:
+		return upgrade.weapon == weapon and int(upgrade.rarity) == UPGRADES.Rarity.RARE
+	)
 
 func _select_option(index: int) -> void:
 	if choice_kind in [&"toll", &"trial", &"rare", &"shop"]:
@@ -128,7 +139,7 @@ func choose_mid_option(index: int) -> bool:
 			_advance_room()
 		else:
 			trial_active = true
-			wave_delay = 1.2
+			wave_delay = WAVE_WARNING_SECONDS
 			player.set_physics_process(true)
 			last_reward = "挑战已接受 · 避开标记落点，等待第一波"
 		return true
@@ -137,8 +148,10 @@ func choose_mid_option(index: int) -> bool:
 		_close_choice()
 		_advance_room()
 		return true
+	var outcome := "交易 / 奖励已结算一次"
 	if kind == &"rare" and offered.is_empty() and index == 0:
-		gold += 20
+		gold += TRIAL_FALLBACK_GOLD
+		outcome = "稀有强化已满层 · 金币 +%d" % TRIAL_FALLBACK_GOLD
 	elif index >= offered.size():
 		return false
 	else:
@@ -155,8 +168,10 @@ func choose_mid_option(index: int) -> bool:
 			player.apply_event_cost(TOLL_COST)
 		elif kind == &"shop":
 			gold -= int(offer.cost)
+		elif kind == &"rare":
+			outcome = "已获得「%s」" % offer.name
 	claimed[rooms[room_index].id] = true
-	last_reward = "交易 / 奖励已结算一次"
+	last_reward = outcome
 	_close_choice()
 	_advance_room()
 	return true
@@ -170,29 +185,70 @@ func _objective_text() -> String:
 	if room.goal == &"trial" and not trial_active:
 		return "前往出口接受或拒绝挑战"
 	if wave_delay >= 0:
-		return "下一波即将出现 · 请让开地面圆环标记"
+		return "下一波即将出现 · 请让开增援落点"
 	return "清理所有波次后前往出口" if room.get("waves", []).size() > 0 else "清理敌人后前往出口"
 
 func _draw() -> void:
 	super._draw()
 	var room := rooms[room_index]
 	if room.has("chest"):
-		var opened := claimed.has(&"chain_chest")
-		var chest_base: Vector2 = room.chest + Vector2(0, 32)
-		var edge := Color("#5e8290") if opened else Color("#e8b45a")
-		draw_rect(Rect2(chest_base - Vector2(23, 28), Vector2(46, 28)), Color("#132a3a"))
-		draw_rect(Rect2(chest_base - Vector2(23, 28), Vector2(46, 28)), edge, false, 2)
-		var lid_y := -39.0 if opened else -28.0
-		draw_rect(Rect2(chest_base + Vector2(-25, lid_y), Vector2(50, 9)), Color("#29495a"))
-		draw_line(chest_base + Vector2(-25, lid_y), chest_base + Vector2(25, lid_y), edge, 2)
-		for x in [-14, 14]:
-			draw_line(chest_base + Vector2(x, -26), chest_base + Vector2(x, -2), edge, 2)
-		if not opened:
-			draw_rect(Rect2(chest_base + Vector2(-4, -21), Vector2(8, 10)), edge)
-		draw_string(ThemeDB.fallback_font, room.chest + Vector2(-75, -25), "已领取" if opened else "交互：金币 +15", HORIZONTAL_ALIGNMENT_LEFT, -1, 15)
+		_draw_side_chest(room.chest)
 	if wave_delay >= 0 and _waves_pending():
 		for spec: Dictionary in room.waves[next_wave]:
-			draw_arc(spec.position + Vector2(0, 20), 35, 0, TAU, 24, Color("#ffda85"), 3)
+			_draw_wave_warning(spec.position, platforms[0].position.y)
+
+func _at_side_chest(point: Vector2) -> bool:
+	return is_instance_valid(player) and player.position.distance_squared_to(point) < CHEST_REACH * CHEST_REACH
+
+func _side_chest_prompt(point: Vector2) -> String:
+	if claimed.has(&"chain_chest"):
+		return "宝箱已领取"
+	if _at_side_chest(point):
+		return "%s 打开 · 金币 +%d" % [input_settings.get_action_prompt(&"interact", using_controller), CHEST_GOLD]
+	return "高处宝箱 · 金币 +%d" % CHEST_GOLD
+
+func _draw_side_chest(point: Vector2) -> void:
+	var opened := claimed.has(&"chain_chest")
+	var chest_base := point + Vector2(0, 32)
+	var edge := Color("#7390a0") if opened else Color("#e8b45a")
+	var body := Rect2(chest_base - Vector2(23, 28), Vector2(46, 28))
+	draw_rect(body, Color("#132a3a"))
+	draw_rect(body, edge, false, 2.0)
+	var lid_y := -39.0 if opened else -28.0
+	draw_rect(Rect2(chest_base + Vector2(-25, lid_y), Vector2(50, 9)), Color("#29495a"))
+	draw_line(chest_base + Vector2(-24, lid_y), chest_base + Vector2(24, lid_y), edge, 2.0)
+	for x in [-14, 14]:
+		draw_line(chest_base + Vector2(x, -26), chest_base + Vector2(x, -2), edge, 2.0)
+	if not opened:
+		draw_rect(Rect2(chest_base + Vector2(-4, -21), Vector2(8, 10)), edge)
+	var plate := Rect2(point - Vector2(115, 83), Vector2(230, 30))
+	draw_rect(plate, Color("#111e26"))
+	draw_rect(plate, edge, false, 1.0)
+	draw_string(ThemeDB.fallback_font, plate.position + Vector2(5, 21), _side_chest_prompt(point), HORIZONTAL_ALIGNMENT_CENTER, plate.size.x - 10.0, 16, edge)
+
+func _wave_warning_label(point: Vector2) -> String:
+	return "让开落点" if wave_delay == 0.0 and _wave_point_occupied(point) else "增援落点"
+
+func _draw_wave_warning(point: Vector2, floor_y: float) -> void:
+	# Draw the same exclusion circle checked at spawn, clipped to the playable floor.
+	var allowance := asin(clampf((floor_y - point.y) / WAVE_CLEARANCE, -1.0, 1.0))
+	var outline := PackedVector2Array()
+	var is_clipped := floor_y < point.y + WAVE_CLEARANCE
+	for index in range(41 if is_clipped else 40):
+		var angle := lerpf(PI - allowance, TAU + allowance, float(index) / 40.0)
+		outline.append(point + WAVE_CLEARANCE * Vector2.from_angle(angle))
+	var color := Color("#ffad65") if wave_delay == 0.0 else Color("#ffda85")
+	draw_colored_polygon(outline, Color(color, 0.10))
+	outline.append(outline[0])
+	draw_polyline(outline, Color(color, 0.78), 2.0, true)
+	var marker := PackedVector2Array([point - Vector2(0, 13), point + Vector2(13, 0), point + Vector2(0, 13), point - Vector2(13, 0), point - Vector2(0, 13)])
+	draw_polyline(marker, color, 2.0, true)
+	var plate := Rect2(point - Vector2(58, 103), Vector2(116, 29))
+	draw_rect(plate, Color("#201a23"))
+	draw_string(ThemeDB.fallback_font, plate.position + Vector2(4, 20), _wave_warning_label(point), HORIZONTAL_ALIGNMENT_CENTER, plate.size.x - 8.0, 15, color)
+	var progress := 1.0 - clampf(wave_delay / WAVE_WARNING_SECONDS, 0.0, 1.0)
+	if progress > 0.0:
+		draw_rect(Rect2(plate.position.x, plate.end.y - 2.0, plate.size.x * progress, 2.0), color)
 
 func _draw_forge_background() -> void:
 	super._draw_forge_background()
@@ -201,6 +257,14 @@ func _draw_forge_background() -> void:
 		for x in [280, 560, 740, 1040]:
 			for y in range(180, 450, 24):
 				draw_arc(Vector2(x, y), 8, 0, TAU, 10, Color("#5a5259"), 2)
+	elif layout == &"walkway":
+		for surface in platforms.slice(1):
+			for x in [surface.position.x + 18, surface.end.x - 18]:
+				draw_line(Vector2(x, 0), Vector2(x, surface.position.y), Color("#221b1b"), 2.0)
+				for y in range(4, int(surface.position.y) - 8, 16):
+					var link_width := 7.0 if y % 32 == 4 else 3.0
+					var link := Rect2(x - link_width * 0.5, y, link_width, 10)
+					draw_rect(link, Color("#51403a"), false, 1.0)
 
 func _uses_hall_background() -> bool:
 	return rooms[room_index].layout != &"bridge"

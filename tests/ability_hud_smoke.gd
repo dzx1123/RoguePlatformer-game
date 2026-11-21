@@ -13,9 +13,9 @@ func _run_test() -> void:
 	for _settle_frame in range(12):
 		await physics_frame
 
-	var attack_slot: Control = main.get_node("HUD/AbilityBar/AttackAbility") as Control
-	var dash_slot: Control = main.get_node("HUD/AbilityBar/DashAbility") as Control
-	var skill_slot: Control = main.get_node("HUD/AbilityBar/SkillAbility") as Control
+	var attack_slot: Control = main.get_node("HUD/BottomHUD/AbilityBar/AttackAbility") as Control
+	var dash_slot: Control = main.get_node("HUD/BottomHUD/AbilityBar/DashAbility") as Control
+	var skill_slot: Control = main.get_node("HUD/BottomHUD/AbilityBar/SkillAbility") as Control
 	if attack_slot == null or dash_slot == null or skill_slot == null:
 		_fail("The center ability HUD did not create J, K, and L combat icons")
 		return
@@ -26,9 +26,11 @@ func _run_test() -> void:
 	):
 		_fail("Ability icons did not expose their hover descriptions")
 		return
-	var active_weapon_label: Label = main.get_node("HUD/WeaponPanel/WeaponSlot_0/Label") as Label
-	var locked_weapon_label: Label = main.get_node("HUD/WeaponPanel/WeaponSlot_1/Label") as Label
-	if not active_weapon_label.text.contains("装备中") or not locked_weapon_label.text.contains("未解锁"):
+	var weapons := main.get_node("HUD/BottomHUD/WeaponPanel") as Control
+	var active_weapon := weapons.get_node("ActiveWeapon") as Label
+	var active_slot := weapons.get_node("WeaponSlot_0") as ColorRect
+	var locked_slot := weapons.get_node("WeaponSlot_1") as ColorRect
+	if active_weapon.text != "月弧长剑" or active_slot.color == locked_slot.color or not locked_slot.tooltip_text.contains("未解锁"):
 		_fail("The right weapon rack did not distinguish active and locked weapons")
 		return
 

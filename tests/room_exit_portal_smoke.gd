@@ -56,9 +56,10 @@ func _run_test() -> void:
 	main.call(&"_on_always_key_pressed", key_event)
 	await create_timer(0.32).timeout
 	var next_flow: Dictionary = main.call(&"get_run_flow_snapshot") as Dictionary
-	var upgrade_overlay: Control = main.get_node("HUD/UpgradeChoice") as Control
+	var upgrade_overlay: Control = main.get("_upgrade_overlay") as Control
 	if (
 		not bool(next_flow.get("choosing_upgrade", false))
+		or upgrade_overlay == null
 		or not upgrade_overlay.visible
 		or main.get_node_or_null("RoomExitPortal") != null
 	):

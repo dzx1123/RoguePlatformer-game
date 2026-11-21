@@ -26,8 +26,10 @@ func present(summary: Dictionary, continue_prompt: String) -> void:
 	_title.text = "陨落"
 	_body.text = "[center]死因 · %s[/center]" % _cause_label(String(summary.get("reason", "unknown")))
 	_hint.text = continue_prompt
-	_values[0].text = "第 %d / 20 房" % int(summary.get("room_number", 1))
+	_values[0].text = "第 %d / %d 房" % [summary.get("room_number", 1), summary.get("room_total", 40)]
 	_details[0].text = "%s · %s" % [summary.get("room_title", ""), summary.get("encounter", "")]
+	if int(summary.get("seed", 0)) > 0:
+		_details[0].text += "\n种子 S%06d" % int(summary.seed)
 	var sources: Dictionary = summary.get("damage_sources", {}) as Dictionary
 	var keys: Array = sources.keys()
 	keys.sort_custom(func(left: Variant, right: Variant) -> bool: return int(sources[left]) > int(sources[right]))

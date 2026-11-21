@@ -6,11 +6,30 @@ const BLAST_RADIUS := 44.0
 var origin := Vector2.ZERO
 var landing := Vector2.ZERO
 var target: Node2D
+var caster: Node2D:
+	set(value):
+		caster = value
+		_has_caster = value != null
 var age := 0.0
 var impacted := false
 var damage := 12
+var _has_caster := false
 
 func advance(delta: float) -> void:
+	if is_queued_for_deletion():
+		return
+	# The warning belongs to its caster. After release, the ember keeps its flight.
+	# Boss embers have no attached caster and are cleared by the boss's phase logic.
+	if age < WARNING and _has_caster:
+		if not is_instance_valid(caster) or caster.is_queued_for_deletion() or caster._is_defeated or caster.get_current_health() <= 0:
+			hide()
+			queue_free()
+			return
+		if caster.get_hitstop_remaining() > 0.0:
+			return
+		if age + delta >= WARNING:
+			origin = caster.get_ember_release_point()
+			caster.sound_requested.emit(&"spit", caster.is_boss())
 	age += delta
 	if age >= WARNING + FLIGHT and not impacted:
 		impacted = true

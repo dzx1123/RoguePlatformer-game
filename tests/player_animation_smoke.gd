@@ -97,13 +97,13 @@ func _run_test() -> void:
 	var turn_duration: float = float(player.get("_turn_remaining"))
 	player.call(&"_reset_sprite_pose")
 	player.call(&"_animate_turn")
-	if hero_sprite.flip_h or not hero_sprite.texture.resource_path.ends_with("hero_run_0.png"):
+	if hero_sprite.flip_h or not hero_sprite.texture.resource_path.ends_with("hero_sprint_pivot.png"):
 		_fail("Turn anticipation did not retain the planted outgoing-facing pose")
 		return
 	player.set("_turn_remaining", turn_duration * 0.40)
 	player.call(&"_reset_sprite_pose")
 	player.call(&"_animate_turn")
-	if not hero_sprite.flip_h or not hero_sprite.texture.resource_path.ends_with("hero_run_6.png"):
+	if not hero_sprite.flip_h or not hero_sprite.texture.resource_path.ends_with("hero_sprint_push.png"):
 		_fail("Turn completion did not switch to the opposite planted pose")
 		return
 	player.set("_turn_remaining", 0.0)

@@ -1,5 +1,7 @@
 extends RefCounted
 
+const SETTINGS_LAYOUT := preload("res://scripts/settings_page_layout.gd")
+
 ## Canonical chapter-one pause/settings construction and settings actions.
 ## Hosts own navigation, scene suspension and HUD presentation.
 
@@ -347,7 +349,9 @@ static func _create_settings_ui(host: Node) -> void:
 	about.add_theme_color_override("font_color", host.UI.TEXT_SECONDARY)
 	about.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	host._settings_overlay.add_child(about)
-	preload("res://scripts/settings_page_layout.gd").apply(host._settings_overlay)
+	SETTINGS_LAYOUT.apply(host._settings_overlay)
+	for tab_name in SETTINGS_LAYOUT.TAB_NAMES:
+		host._settings_overlay.get_node(tab_name).pressed.connect(_cancel_rebind.bind(host))
 	host._refresh_settings_operation_guide()
 	host._refresh_display_status()
 	host._settings_overlay.visible = false
@@ -629,6 +633,11 @@ static func _close_settings(host: Node) -> void:
 static func _begin_rebind(host: Node, action_name: StringName) -> void:
 	host._awaiting_rebind_action = action_name
 	host._refresh_settings_key_buttons()
+
+static func _cancel_rebind(host: Node) -> void:
+	if not host._awaiting_rebind_action.is_empty():
+		host._awaiting_rebind_action = &""
+		host._refresh_settings_key_buttons()
 
 
 static func _refresh_settings_key_buttons(host: Node) -> void:

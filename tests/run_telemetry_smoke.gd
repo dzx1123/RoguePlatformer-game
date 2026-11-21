@@ -25,6 +25,10 @@ func _verify_aggregation_and_persistence() -> bool:
 	telemetry.begin_room(5, &"moon_gate", "月门", "首领房")
 	telemetry.tick(12.5)
 	telemetry.record_damage(18, &"boss_slam")
+	telemetry.resume_room(5, &"moon_gate", "月门", "首领房")
+	var active: Dictionary = telemetry.get_current_run_snapshot()
+	if not telemetry.tracks_seed(246810) or not active.rooms.is_empty() or active.current_room.damage_taken != 18:
+		return _fail_bool("Returning to the same checkpoint must keep the in-progress telemetry room")
 	var offers: Array[Dictionary] = [
 		{"id": &"tempered_edge"},
 		{"id": &"vitality_rune"},
@@ -86,6 +90,7 @@ func _verify_main_signal_integration() -> bool:
 	await _wait_physics_frames(4)
 	main.call(&"_clear_enemies")
 	var player := main.get_node("Player") as RoguePlayer
+	await _wait_physics_frames(100)
 	player.set_physics_process(false)
 	player.set("_hurt_invulnerability_remaining", 0.0)
 	if not player.receive_enemy_attack(player.global_position + Vector2.RIGHT, 7, &"enemy_melee"):

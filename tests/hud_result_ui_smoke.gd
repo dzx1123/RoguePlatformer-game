@@ -13,13 +13,13 @@ func _run_test() -> void:
 	main.call(&"_clear_enemies")
 	var player := main.get_node("Player") as RoguePlayer
 	player.set_physics_process(false)
-	var dock := main.get_node("HUD/BottomHUD") as Panel
+	var dock := main.get_node("HUD/BottomHUD") as Control
 	var presenter := main.get("_hud_presenter") as RunHUDPresenter
 	presenter.set_status("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十")
 	if presenter.status_label.text.length() != 28 or not presenter.status_label.text.ends_with("…"):
 		return _fail("Status chip did not enforce a readable single-line limit")
 	await create_timer(3.2).timeout
-	if presenter.status_label.modulate.a > 0.01:
+	if (presenter.status_label.get_parent() as Control).modulate.a > 0.01:
 		return _fail("Status chip did not fade after three seconds")
 	presenter.update_health(100, 100)
 	presenter.update_health(80, 100)

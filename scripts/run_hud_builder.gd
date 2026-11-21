@@ -1,12 +1,11 @@
 class_name RunHUDBuilder
 extends RefCounted
 
-## Builds the compact moonlit combat rail. Gameplay state is still supplied by
-## RunHUDPresenter; this class only owns the stable visual layout.
+## A compact set of player, action, and equipment readouts shared by both chapters.
 
-const DISPLAY_SIZE := Vector2(1280.0, 720.0)
+const HEALTH_FILL_WIDTH := 230.0
+const BOSS_FILL_WIDTH := 472.0
 const HUD_DOCK_TOP := 640.0
-const HEALTH_FILL_WIDTH := 316.0
 const ABILITY_SLOT_SCRIPT := preload("res://scripts/ability_slot.gd")
 const UI := preload("res://scripts/ui_theme.gd")
 
@@ -14,273 +13,121 @@ const UI := preload("res://scripts/ui_theme.gd")
 static func build(hud: CanvasLayer, title_label: Label, controls_label: Label) -> void:
 	if hud.has_node("BottomHUD"):
 		return
-	title_label.text = ""
-	title_label.visible = false
-	controls_label.text = ""
-	controls_label.visible = false
+	title_label.hide()
+	controls_label.hide()
 
-	var bottom_hud := Panel.new()
-	bottom_hud.name = "BottomHUD"
-	bottom_hud.position = Vector2(0.0, HUD_DOCK_TOP)
-	bottom_hud.size = Vector2(DISPLAY_SIZE.x, DISPLAY_SIZE.y - HUD_DOCK_TOP)
-	bottom_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var bottom_style := StyleBoxFlat.new()
-	bottom_style.bg_color = Color("#071321", 0.97)
-	bottom_style.border_color = UI.ACCENT_MOON
-	bottom_style.border_width_top = 3
-	bottom_style.shadow_color = Color(0.0, 0.0, 0.0, 0.66)
-	bottom_style.shadow_size = 14
-	bottom_style.shadow_offset = Vector2(0.0, -4.0)
-	bottom_hud.add_theme_stylebox_override("panel", bottom_style)
-	hud.add_child(bottom_hud)
+	var dock := Control.new()
+	dock.name = "BottomHUD"
+	dock.position = Vector2(104, 650)
+	dock.size = Vector2(1072, 58)
+	dock.pivot_offset = Vector2(dock.size.x * 0.5, dock.size.y)
+	dock.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(dock)
+	_create_vitals(dock)
+	_create_abilities(dock)
+	_create_weapon_hud(dock)
 
-	var top_rune := ColorRect.new()
-	top_rune.position = Vector2(24.0, 6.0)
-	top_rune.size = Vector2(1232.0, 1.0)
-	top_rune.color = Color.TRANSPARENT
-	top_rune.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bottom_hud.add_child(top_rune)
+	var room := _panel(hud, "RoomCard", Rect2(24, 22, 298, 55), UI.ACCENT_MOON)
+	_label(room, "RoomProgress", Rect2(12, 4, 274, 21), UI.CAPTION, UI.TEXT_SECONDARY)
+	_label(room, "RoomName", Rect2(12, 25, 274, 25), UI.BODY, UI.TEXT_PRIMARY)
 
-	_create_hud_panel(
-		hud, "VitalsPanel", Vector2(24.0, 644.0), Vector2(376.0, 72.0), Color("#53d8f0")
-	)
-	_create_hud_panel(
-		hud, "AbilityPanel", Vector2(416.0, 644.0), Vector2(448.0, 72.0), Color("#9b8cff")
-	)
-	var weapon_panel := _create_hud_panel(
-		hud, "WeaponPanel", Vector2(888.0, 644.0), Vector2(368.0, 72.0), Color("#e2ae55")
-	)
-
-	var health_background := ColorRect.new()
-	health_background.name = "HealthBackground"
-	health_background.position = Vector2(48.0, 670.0)
-	health_background.size = Vector2(328.0, 26.0)
-	health_background.color = Color(0.004, 0.018, 0.036, 0.84)
-	health_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(health_background)
-
-	var health_fill := ColorRect.new()
-	health_fill.name = "HealthFill"
-	health_fill.position = Vector2(6.0, 4.0)
-	health_fill.size = Vector2(HEALTH_FILL_WIDTH, 18.0)
-	health_fill.color = Color(0.18, 0.82, 0.50, 0.96)
-	health_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	health_background.add_child(health_fill)
-
-	var health_label := Label.new()
-	health_label.name = "HealthLabel"
-	health_label.position = Vector2(6.0, 0.0)
-	health_label.size = Vector2(HEALTH_FILL_WIDTH, 26.0)
-	health_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	health_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	health_label.add_theme_font_size_override("font_size", UI.BODY)
-	health_label.add_theme_color_override("font_color", Color(0.94, 1.0, 1.0, 1.0))
-	health_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.82))
-	health_label.add_theme_constant_override("outline_size", 2)
-	health_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	health_background.add_child(health_label)
-
-	_create_hud_panel(
-		hud, "RoomCard", Vector2(40.0, 40.0), Vector2(280.0, 32.0), Color("#69d9ed")
-	)
-	var status_toast_pos := Vector2(440.0, HUD_DOCK_TOP - 20.0 - 32.0)
-	var status_toast := _create_hud_panel(
-		hud, "StatusToast", status_toast_pos, Vector2(400.0, 32.0), Color("#e6bd70")
-	)
-	status_toast.add_theme_stylebox_override(
-		"panel",
-		UI.surface(Color(UI.BG_PANEL, 0.88), Color(UI.ACCENT_GOLD, 0.35), UI.CHIP_RADIUS, 1)
-	)
-	status_toast.z_index = 90
-
-	var status_label := Label.new()
-	status_label.name = "CombatStatus"
-	status_label.position = status_toast_pos + Vector2(12.0, 4.0)
-	status_label.size = Vector2(376.0, 24.0)
+	var status := _panel(hud, "StatusToast", Rect2(402, 72, 476, 34), UI.ACCENT_GOLD)
+	status.pivot_offset.x = status.size.x * 0.5
+	status.z_index = 90
+	var status_label := _label(status, "CombatStatus", Rect2(12, 2, 452, 30), UI.CAPTION, UI.ACCENT_GOLD)
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	status_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	status_label.clip_text = true
-	status_label.add_theme_font_size_override("font_size", UI.CAPTION)
-	status_label.add_theme_color_override("font_color", Color(1.0, 0.84, 0.54, 1.0))
-	status_label.add_theme_color_override("font_outline_color", Color(0.025, 0.045, 0.07, 0.96))
-	status_label.add_theme_constant_override("outline_size", 1)
-	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	status_label.z_index = 91
-	hud.add_child(status_label)
+	status.hide()
 
-	var room_label := Label.new()
-	room_label.name = "RoomProgress"
-	room_label.position = Vector2(40.0, 28.0)
-	room_label.size = Vector2(360.0, 22.0)
-	room_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	room_label.add_theme_font_size_override("font_size", UI.CAPTION)
-	room_label.add_theme_color_override("font_color", UI.TEXT_SECONDARY)
-	room_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(room_label)
-
-	var currency_label := Label.new()
-	currency_label.name = "Currency"
-	currency_label.position = Vector2(48.0, 698.0)
-	currency_label.size = Vector2(328.0, 16.0)
-	currency_label.clip_text = true
-	currency_label.add_theme_font_size_override("font_size", 12)
-	currency_label.add_theme_color_override("font_color", Color(1.0, 0.83, 0.47, 1.0))
-	currency_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(currency_label)
-
-	var equipment_label := Label.new()
-	equipment_label.name = "Equipment"
-	equipment_label.position = Vector2(908.0, 646.0)
-	equipment_label.size = Vector2(326.0, 18.0)
-	equipment_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	equipment_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	equipment_label.clip_text = true
-	equipment_label.add_theme_font_size_override("font_size", 12)
-	equipment_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.56, 1.0))
-	equipment_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	equipment_label.visible = false
-	hud.add_child(equipment_label)
-
-	var lives_label := Label.new()
-	lives_label.name = "Lives"
-	lives_label.position = Vector2(48.0, 646.0)
-	lives_label.size = Vector2(328.0, 18.0)
-	lives_label.add_theme_font_size_override("font_size", 12)
-	lives_label.clip_text = true
-	lives_label.add_theme_color_override("font_color", Color(0.94, 0.78, 0.49, 1.0))
-	lives_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(lives_label)
-
-	var boss_health_background := ColorRect.new()
-	boss_health_background.name = "BossHealth"
-	boss_health_background.position = Vector2(390.0, 44.0)
-	boss_health_background.size = Vector2(500.0, 28.0)
-	boss_health_background.color = Color(0.04, 0.015, 0.030, 0.74)
-	boss_health_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(boss_health_background)
-
-	var boss_health_fill := ColorRect.new()
-	boss_health_fill.position = Vector2(4.0, 4.0)
-	boss_health_fill.size = Vector2(492.0, 20.0)
-	boss_health_fill.color = Color(0.88, 0.18, 0.22, 0.96)
-	boss_health_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	boss_health_background.add_child(boss_health_fill)
-
-	var boss_health_label := Label.new()
-	boss_health_label.position = Vector2(8.0, 1.0)
-	boss_health_label.size = Vector2(484.0, 26.0)
-	boss_health_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	boss_health_label.add_theme_font_size_override("font_size", 15)
-	boss_health_label.add_theme_color_override("font_color", Color.WHITE)
-	boss_health_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	boss_health_background.add_child(boss_health_label)
-	boss_health_background.visible = false
-
-	var ability_heading := Label.new()
-	ability_heading.position = Vector2(422.0, HUD_DOCK_TOP + 4.0)
-	ability_heading.size = Vector2(436.0, 16.0)
-	ability_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ability_heading.text = ""
-	ability_heading.add_theme_font_size_override("font_size", 11)
-	ability_heading.add_theme_color_override("font_color", Color(0.70, 0.84, 1.0, 0.88))
-	ability_heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(ability_heading)
-
-	_create_weapon_hud(weapon_panel)
-	_create_ability_hud(hud)
+	var boss := _panel(hud, "BossHealth", Rect2(396, 22, 488, 34), UI.ACCENT_RISK)
+	boss.pivot_offset.x = boss.size.x * 0.5
+	var boss_label := _label(boss, "BossLabel", Rect2(8, 1, 472, 23), UI.CAPTION, UI.TEXT_PRIMARY)
+	boss_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_meter(boss, "BossFill", Rect2(8, 24, BOSS_FILL_WIDTH, 4), UI.ACCENT_RISK)
+	boss.hide()
 
 
-static func _create_hud_panel(
-	hud: CanvasLayer,
-	panel_name: String,
-	panel_position: Vector2,
-	panel_size: Vector2,
-	accent_color: Color
-) -> Panel:
+static func _create_vitals(parent: Control) -> void:
+	var panel := _panel(parent, "VitalsPanel", Rect2(0, 0, 260, 58), UI.ACCENT_MOON)
+	_label(panel, "Lives", Rect2(12, 4, 156, 23), UI.CAPTION, UI.TEXT_PRIMARY)
+	var currency := _label(panel, "Currency", Rect2(169, 4, 79, 23), UI.CAPTION, UI.ACCENT_GOLD)
+	currency.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+
+	var track := _meter(panel, "HealthBackground", Rect2(12, 27, 236, 25), Color(UI.BG_DEEP, 0.92))
+	_meter(track, "HealthFill", Rect2(3, 20, HEALTH_FILL_WIDTH, 4), UI.ACCENT_MOON)
+	var health := _label(track, "HealthLabel", Rect2(3, -1, HEALTH_FILL_WIDTH, 21), UI.BODY, UI.TEXT_PRIMARY)
+	health.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	health.add_theme_color_override("font_outline_color", UI.BG_DEEP)
+	health.add_theme_constant_override("outline_size", 3)
+
+
+static func _create_abilities(parent: Control) -> void:
+	var bar := Control.new()
+	bar.name = "AbilityBar"
+	bar.position = Vector2(388, 0)
+	bar.size = Vector2(296, 58)
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(bar)
+
+	var slot_names := ["AttackAbility", "DashAbility", "SkillAbility"]
+	for index: int in range(slot_names.size()):
+		var slot := ABILITY_SLOT_SCRIPT.new() as Control
+		slot.name = slot_names[index]
+		slot.position = Vector2(index * 100.0, 0)
+		slot.size = Vector2(96, 58)
+		bar.add_child(slot)
+
+
+static func _create_weapon_hud(parent: Control) -> void:
+	var panel := _panel(parent, "WeaponPanel", Rect2(812, 0, 260, 58), UI.ACCENT_GOLD)
+	_label(panel, "ActiveWeapon", Rect2(12, 5, 143, 24), UI.BODY, UI.TEXT_PRIMARY)
+
+	var switch_box := _panel(panel, "WeaponSwitch", Rect2(160, 12, 90, 34), UI.ACCENT_GOLD)
+	var switch_prompt := _label(switch_box, "Label", Rect2(5, 1, 80, 32), UI.CAPTION, UI.TEXT_SECONDARY)
+	switch_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	for index: int in range(WeaponCatalog.all_weapon_ids().size()):
+		var marker := _meter(panel, "WeaponSlot_%d" % index, Rect2(12 + index * 34.0, 38, 26, 5), UI.STROKE_QUIET)
+		marker.mouse_filter = Control.MOUSE_FILTER_PASS
+
+
+static func panel_style(accent: Color, high_contrast: bool = false) -> StyleBoxFlat:
+	var fill := UI.BG_DEEP if high_contrast else Color(UI.BG_PANEL, 0.91)
+	var edge := Color(UI.TEXT_PRIMARY, 0.72) if high_contrast else Color(accent, 0.36)
+	return UI.surface(fill, edge, 7, 1)
+
+
+static func _panel(parent: Node, node_name: String, bounds: Rect2, accent: Color) -> Panel:
 	var panel := Panel.new()
-	panel.name = panel_name
-	panel.position = panel_position
-	panel.size = panel_size
+	panel.name = node_name
+	panel.position = bounds.position
+	panel.size = bounds.size
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var decorative: bool = panel_name in ["VitalsPanel", "AbilityPanel", "WeaponPanel", "RoomCard"]
-	panel.add_theme_stylebox_override("panel",
-		UI.surface(Color(0.02, 0.08, 0.14, 0.62) if decorative else Color(UI.BG_DEEP, 0.90),
-			Color.TRANSPARENT if decorative else Color(UI.STROKE_QUIET, 0.65), UI.CHIP_RADIUS, 0 if decorative else 1))
-	hud.add_child(panel)
+	panel.add_theme_stylebox_override("panel", panel_style(accent))
+	parent.add_child(panel)
 	return panel
 
 
-static func _create_weapon_hud(weapon_panel: Panel) -> void:
-	for weapon_index: int in range(WeaponCatalog.all_weapon_ids().size()):
-		var slot := Panel.new()
-		slot.name = "WeaponSlot_%d" % weapon_index
-		slot.position = Vector2(8.0 + float(weapon_index) * 94.0, 18.0)
-		slot.size = Vector2(88.0, 50.0)
-		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		weapon_panel.add_child(slot)
-
-		var slot_label := Label.new()
-		slot_label.name = "Label"
-		slot_label.position = Vector2(2.0, 2.0)
-		slot_label.size = Vector2(84.0, 44.0)
-		slot_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		slot_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		slot_label.add_theme_font_size_override("font_size", 9)
-		slot_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		slot.add_child(slot_label)
-
-	var switch_panel := Panel.new()
-	switch_panel.name = "WeaponSwitch"
-	switch_panel.position = Vector2(294.0, 18.0)
-	switch_panel.size = Vector2(66.0, 48.0)
-	switch_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var switch_style := StyleBoxFlat.new()
-	switch_style.bg_color = Color(0.025, 0.080, 0.112, 0.42)
-	switch_style.border_color = Color(0.42, 0.82, 0.91, 0.58)
-	switch_style.set_border_width_all(1)
-	switch_style.corner_radius_top_left = 8
-	switch_style.corner_radius_top_right = 8
-	switch_style.corner_radius_bottom_left = 8
-	switch_style.corner_radius_bottom_right = 8
-	switch_panel.add_theme_stylebox_override("panel", switch_style)
-	weapon_panel.add_child(switch_panel)
-
-	var switch_label := Label.new()
-	switch_label.name = "Label"
-	switch_label.position = Vector2(3.0, 2.0)
-	switch_label.size = Vector2(60.0, 44.0)
-	switch_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	switch_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	switch_label.text = "Q\n切换"
-	switch_label.add_theme_font_size_override("font_size", 11)
-	switch_label.add_theme_color_override("font_color", Color(0.72, 0.94, 0.98, 1.0))
-	switch_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	switch_panel.add_child(switch_label)
+static func _meter(parent: Control, node_name: String, bounds: Rect2, color: Color) -> ColorRect:
+	var meter := ColorRect.new()
+	meter.name = node_name
+	meter.position = bounds.position
+	meter.size = bounds.size
+	meter.color = color
+	meter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(meter)
+	return meter
 
 
-static func _create_ability_hud(hud: CanvasLayer) -> void:
-	var ability_bar := Control.new()
-	ability_bar.name = "AbilityBar"
-	ability_bar.position = Vector2(500.0, 644.0)
-	ability_bar.size = Vector2(360.0, 72.0)
-	ability_bar.mouse_filter = Control.MOUSE_FILTER_PASS
-	hud.add_child(ability_bar)
-
-	var attack_slot := ABILITY_SLOT_SCRIPT.new() as Control
-	attack_slot.name = "AttackAbility"
-	attack_slot.position = Vector2(0.0, 0.0)
-	attack_slot.size = Vector2(104.0, 72.0)
-	ability_bar.add_child(attack_slot)
-
-	var dash_slot := ABILITY_SLOT_SCRIPT.new() as Control
-	dash_slot.name = "DashAbility"
-	dash_slot.position = Vector2(128.0, 0.0)
-	dash_slot.size = Vector2(104.0, 72.0)
-	ability_bar.add_child(dash_slot)
-
-	var skill_slot := ABILITY_SLOT_SCRIPT.new() as Control
-	skill_slot.name = "SkillAbility"
-	skill_slot.position = Vector2(256.0, 0.0)
-	skill_slot.size = Vector2(104.0, 72.0)
-	ability_bar.add_child(skill_slot)
+static func _label(parent: Control, node_name: String, bounds: Rect2, font_size: int, color: Color) -> Label:
+	var label := Label.new()
+	label.name = node_name
+	label.position = bounds.position
+	label.size = bounds.size
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.clip_text = true
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	parent.add_child(label)
+	return label

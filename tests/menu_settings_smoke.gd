@@ -17,6 +17,13 @@ func _run_test() -> void:
 	(entry.get_node("EntrySettings") as Button).emit_signal("pressed")
 	await process_frame
 	var settings_menu: Control = menu_main.get_node("HUD/SettingsMenu") as Control
+	if not settings_menu.get_node("MasterVolume").visible or settings_menu.get_node("ResolutionSelector").visible:
+		_fail("Settings did not initially show only the audio section")
+		return
+	settings_menu.get_node("ControlsTab").pressed.emit()
+	if not settings_menu.get_node("Bind_dash").visible or settings_menu.get_node("MasterVolume").visible:
+		_fail("Switching to Controls did not reveal only the input controls")
+		return
 	var operation_guide: RichTextLabel = settings_menu.get_node("OperationGuide") as RichTextLabel
 	if (
 		not settings_menu.visible
@@ -101,14 +108,14 @@ func _run_test() -> void:
 		game_main.get_node_or_null("HUD/RoomCard") == null
 		or game_main.get_node_or_null("HUD/StatusToast") == null
 		or game_main.get_node_or_null("HUD/BottomHUD") == null
-		or game_main.get_node_or_null("HUD/WeaponPanel") == null
+		or game_main.get_node_or_null("HUD/BottomHUD/WeaponPanel") == null
 	):
 		_fail("Redesigned top cards and dedicated bottom combat dock were not created")
 		return
 	var input_bridge: Node = game_main.get("_pause_input_handler") as Node
 	input_bridge.call(&"set_initial_device", true)
 	await process_frame
-	var attack_slot: Control = game_main.get_node("HUD/AbilityBar/AttackAbility") as Control
+	var attack_slot: Control = game_main.get_node("HUD/BottomHUD/AbilityBar/AttackAbility") as Control
 	if not attack_slot.tooltip_text.contains("[X]"):
 		_fail("Combat HUD did not switch to the controller attack prompt")
 		return

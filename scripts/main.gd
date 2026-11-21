@@ -21,7 +21,7 @@ const RUN_HUD_BUILDER_SCRIPT := preload("res://scripts/run_hud_builder.gd")
 const RUN_HUD_PRESENTER_SCRIPT := preload("res://scripts/run_hud_presenter.gd")
 const RUN_BUILD_OVERVIEW_SCRIPT := preload("res://scripts/run_build_overview.gd")
 const EVENT_CATALOG_SCRIPT := preload("res://scripts/event_catalog.gd")
-const CONTINUE_STORE_SCRIPT := preload("res://scripts/run_continue_store.gd")
+const CONTINUE_STORE_SCRIPT := preload("res://scripts/campaign_continue_store.gd")
 const DEATH_RECAP_SCRIPT := preload("res://scripts/death_recap.gd")
 const TUTORIAL_SCRIPT := preload("res://scripts/run_tutorial.gd")
 const REWARD_FEEDBACK_SCRIPT := preload("res://scripts/reward_feedback.gd")
@@ -151,14 +151,15 @@ var _upgrade_title: Label
 var _upgrade_hint: Label
 var _upgrade_buttons: Array[Button] = []
 var _upgrade_choices: Array[Dictionary] = []
-var _upgrade_tween: Tween
+var _reward_focus_before_pause: Button
+var _skip_reward_shortcuts_on_resume := false
 var _upgrade_victory_summary: Control
 var _victory_restart_button: Button
 var _victory_title_button: Button
 var _chapter2_button: Button
 var _chapter2_menu_button: Button
 const CHAPTER2_STORE := preload("res://scripts/chapter2_continue_store.gd")
-var chapter2_save_path := CHAPTER2_STORE.CHAPTER2_PATH
+var continue_save_path := RunContinueStore.DEFAULT_SAVE_PATH
 var _campaign_transitioning := false
 var _chapter_transition_pending := false
 var _reward_layer_mode: int = RewardLayerMode.RELIC
@@ -224,8 +225,14 @@ func _set_run_phase(next_phase: int) -> void:
 
 
 func _ready() -> void:
+	if get_tree().has_meta(&"title_continue_path"):
+		continue_save_path = str(get_tree().get_meta(&"title_continue_path"))
+		get_tree().remove_meta(&"title_continue_path")
 	if get_tree().has_meta(&"campaign_result"):
-		save_enabled = bool(get_tree().get_meta(&"campaign_result").runtime.save_enabled)
+		var result: Dictionary = get_tree().get_meta(&"campaign_result")
+		save_enabled = bool(result.runtime.save_enabled)
+		if not str(result.path).is_empty():
+			continue_save_path = str(result.path)
 	# The gameplay root must be pausable. HUD owns the always-processing input bridge.
 	process_mode = Node.PROCESS_MODE_PAUSABLE
 	hud.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -290,8 +297,9 @@ func _ready() -> void:
 	player.died.connect(_on_player_died)
 	_progression = ProgressionStore.new()
 	_continue_store = CONTINUE_STORE_SCRIPT.new(
-		CONTINUE_STORE_SCRIPT.DEFAULT_SAVE_PATH,
-		save_enabled
+		continue_save_path,
+		save_enabled,
+		CHAPTER2_STORE.CHAPTER2_PATH if continue_save_path == RunContinueStore.DEFAULT_SAVE_PATH else ""
 	)
 	_telemetry = RUN_TELEMETRY_SCRIPT.new(
 		RUN_TELEMETRY_SCRIPT.DEFAULT_SAVE_PATH,
@@ -300,7 +308,7 @@ func _ready() -> void:
 	if save_enabled:
 		_progression.load_progress()
 		_continue_store.load_snapshot()
-		if _telemetry.load_data() and _telemetry.is_run_active() and not _campaign_waiting():
+		if _telemetry.load_data() and _telemetry.is_run_active() and not _continue_matches_telemetry():
 			var interrupted_run: Dictionary = _telemetry.get_current_run_snapshot()
 			var interrupted_weapon := StringName(String(
 				interrupted_run.get("ending_weapon_id", WeaponCatalog.SWORD)
@@ -333,7 +341,9 @@ func _process(_delta: float) -> void:
 		_telemetry.tick(_delta)
 	if _flow_state.run_active:
 		_update_room_objective(_delta)
-	if _flow_state.choosing_upgrade and _process_choice_shortcuts():
+	var accept_reward_shortcuts := not _skip_reward_shortcuts_on_resume
+	_skip_reward_shortcuts_on_resume = false
+	if _flow_state.choosing_upgrade and accept_reward_shortcuts and _process_choice_shortcuts():
 		return
 	if not _entry_flow_active and Input.is_action_just_pressed(&"restart"):
 		_start_new_run()
@@ -343,7 +353,7 @@ func _process(_delta: float) -> void:
 			_activate_room_exit()
 		elif _flow_state.awaiting_chest:
 			_open_current_chest()
-		elif _flow_state.shopping:
+		elif _flow_state.shopping and accept_reward_shortcuts:
 			_leave_shop()
 	if Input.is_action_just_pressed(&"cycle_weapon"):
 		_cycle_weapon()
@@ -470,6 +480,8 @@ func _on_controller_pause_pressed() -> void:
 		return
 	if _settings_overlay.visible:
 		_close_settings()
+	elif _build_overview.visible:
+		_close_build_overview()
 	elif _entry_flow_active:
 		return
 	elif _is_game_paused:
@@ -484,6 +496,8 @@ func _on_controller_cancel_pressed() -> void:
 		_on_death_title_requested()
 	elif _settings_overlay.visible:
 		_close_settings()
+	elif _build_overview.visible:
+		_close_build_overview()
 	elif _entry_flow_active and (_entry_overlay.get_node("DifficultyBack") as Button).visible:
 		_show_start_screen()
 	elif _is_game_paused:
@@ -559,7 +573,15 @@ func _ensure_context_focus() -> void:
 		return
 	if is_instance_valid(_settings_overlay) and _settings_overlay.visible:
 		if focus_owner == null or not _settings_overlay.is_ancestor_of(focus_owner):
-			_settings_resolution_selector.grab_focus()
+			preload("res://scripts/settings_page_layout.gd").focus_active_tab(_settings_overlay)
+		return
+	if is_instance_valid(_build_overview) and _build_overview.visible:
+		if focus_owner == null or not _build_overview.is_ancestor_of(focus_owner):
+			_build_overview.focus_close_button()
+		return
+	if is_instance_valid(_pause_overlay) and _pause_overlay.visible:
+		if focus_owner == null or not _pause_overlay.is_ancestor_of(focus_owner):
+			(_pause_overlay.get_node("Resume") as Button).grab_focus()
 		return
 	if is_instance_valid(_upgrade_overlay) and _upgrade_overlay.visible:
 		if _flow_state.run_complete and is_instance_valid(_victory_restart_button):
@@ -573,16 +595,10 @@ func _ensure_context_focus() -> void:
 			if not on_victory_cta:
 				_victory_restart_button.grab_focus()
 			return
-		if focus_owner != null and _upgrade_overlay.is_ancestor_of(focus_owner):
+		if _reward_view.is_choice_action(focus_owner) and focus_owner.is_visible_in_tree() and not (focus_owner as Button).disabled:
 			return
-		for button in _upgrade_buttons:
-			if button.visible and not button.disabled:
-				button.grab_focus()
-				return
-	if is_instance_valid(_pause_overlay) and _pause_overlay.visible:
-		if focus_owner == null or not _pause_overlay.is_ancestor_of(focus_owner):
-			(_pause_overlay.get_node("Resume") as Button).grab_focus()
-		return
+		if _reward_view.focus_choice(_reward_focus_before_pause):
+			return
 	if is_instance_valid(_entry_overlay) and _entry_overlay.visible:
 		if focus_owner != null and _entry_overlay.is_ancestor_of(focus_owner) and focus_owner.visible:
 			return
@@ -692,14 +708,6 @@ func _fit_to_viewport() -> void:
 			if child_name.ends_with("Dimmer") or child_name.begins_with("Menu"):
 				(child as Control).position = Vector2.ZERO
 				(child as Control).size = DISPLAY_SIZE
-	var bottom := hud.get_node_or_null("BottomHUD") as Control
-	if bottom != null:
-		var dock_top: float = RUN_HUD_BUILDER_SCRIPT.HUD_DOCK_TOP
-		var vitals := hud.get_node_or_null("VitalsPanel") as Control
-		if vitals != null:
-			dock_top = minf(dock_top, vitals.position.y)
-		bottom.position = Vector2(0.0, dock_top)
-		bottom.size = Vector2(DISPLAY_SIZE.x, DISPLAY_SIZE.y - dock_top)
 	if is_instance_valid(_entry_overlay):
 		var fade := _entry_overlay.get_node_or_null("BottomGradient") as Control
 		if fade != null:
@@ -719,6 +727,7 @@ func _create_upgrade_ui() -> void:
 	_reward_view.build(_settings, _soundscape)
 	_reward_view._flow_state = _flow_state
 	_reward_view.selected.connect(_on_upgrade_button_pressed)
+	_reward_view.shop_exit_requested.connect(_leave_shop)
 	_upgrade_overlay = _reward_view._upgrade_overlay
 	_upgrade_dimmer = _reward_view._upgrade_dimmer
 	_upgrade_panel = _reward_view._upgrade_panel
@@ -728,6 +737,7 @@ func _create_upgrade_ui() -> void:
 	_upgrade_hint = _reward_view._upgrade_hint
 	_upgrade_buttons = _reward_view._upgrade_buttons
 	_create_victory_summary()
+	_reward_view._upgrade_victory_summary = _upgrade_victory_summary
 	_configure_reward_layer(RewardLayerMode.RELIC)
 	_hide_upgrade_overlay()
 
@@ -1012,64 +1022,8 @@ func _set_upgrade_card_content(
 	_reward_view._set_upgrade_card_content(button, shortcut, rarity_name, card_name, description, footer_text)
 
 
-func _on_upgrade_card_hovered(button: Button, emphasized: bool) -> void:
-	_reward_view._on_upgrade_card_hovered(button, emphasized)
-
-
 func _play_upgrade_overlay_intro() -> void:
-	if not is_instance_valid(_upgrade_overlay) or not _upgrade_overlay.visible:
-		return
-	if _upgrade_tween != null and _upgrade_tween.is_valid():
-		_upgrade_tween.kill()
-	var dimmer: ColorRect = _upgrade_overlay.get_node("UpgradeDimmer") as ColorRect
-	var panel: Panel = _upgrade_overlay.get_node("UpgradePanel") as Panel
-	if dimmer == null or panel == null:
-		return
-	panel.position = Vector2(
-		(DISPLAY_SIZE.x - panel.size.x) * 0.5,
-		(DISPLAY_SIZE.y - panel.size.y) * 0.5
-	)
-	var reduced: bool = _settings != null and _settings.get_reduced_effects_enabled()
-	var enter_offset: float = 0.0 if reduced else 8.0
-	dimmer.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	panel.pivot_offset = panel.size * 0.5
-	panel.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	panel.scale = Vector2.ONE
-	_upgrade_title.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	_upgrade_hint.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	if is_instance_valid(_upgrade_victory_summary) and _upgrade_victory_summary.visible:
-		_upgrade_victory_summary.position = Vector2(50.0, 180.0 + enter_offset)
-		_upgrade_victory_summary.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	for choice_index in range(_upgrade_buttons.size()):
-		var button: Button = _upgrade_buttons[choice_index]
-		if not button.visible:
-			continue
-		var resting_position := Vector2(50.0 + float(choice_index) * 340.0, 180.0)
-		button.position = resting_position + Vector2(0.0, enter_offset)
-		button.scale = Vector2.ONE
-		button.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	_upgrade_tween = create_tween().set_parallel(true)
-	if is_instance_valid(_soundscape):
-		_soundscape.play_card()
-	_upgrade_tween.tween_property(dimmer, "modulate:a", 1.0, 0.22)
-	_upgrade_tween.tween_property(panel, "modulate:a", 1.0, 0.20)
-	_upgrade_tween.tween_property(_upgrade_title, "modulate:a", 1.0, 0.24).set_delay(0.06)
-	_upgrade_tween.tween_property(_upgrade_hint, "modulate:a", 1.0, 0.20).set_delay(0.16)
-	if is_instance_valid(_upgrade_victory_summary) and _upgrade_victory_summary.visible:
-		_upgrade_tween.tween_property(
-			_upgrade_victory_summary, "modulate:a", 1.0, 0.26
-		).set_delay(0.12)
-		_upgrade_tween.tween_property(
-			_upgrade_victory_summary, "position", Vector2(50.0, 180.0), 0.34
-		).set_delay(0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	for choice_index in range(_upgrade_buttons.size()):
-		var button: Button = _upgrade_buttons[choice_index]
-		if not button.visible:
-			continue
-		var resting_position := Vector2(50.0 + float(choice_index) * 340.0, 180.0)
-		var delay: float = 0.08 + float(choice_index) * 0.04
-		_upgrade_tween.tween_property(button, "modulate:a", 1.0, 0.20).set_delay(delay)
-		_upgrade_tween.tween_property(button, "position", resting_position, 0.30).set_delay(delay)
+	_reward_view._play_upgrade_overlay_intro()
 
 
 func _create_entry_ui() -> void:
@@ -1087,10 +1041,17 @@ func _create_entry_ui() -> void:
 	artwork.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	artwork.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_entry_overlay.add_child(artwork)
-	var vignette := ColorRect.new()
+	var scrim := Gradient.new()
+	scrim.offsets = PackedFloat32Array([0.0, 0.34, 0.66, 1.0])
+	scrim.colors = PackedColorArray([Color(UI.BG_DEEP, 0.94), Color(UI.BG_DEEP, 0.69), Color(UI.BG_DEEP, 0.15), Color(UI.BG_DEEP, 0.02)])
+	var scrim_texture := GradientTexture2D.new()
+	scrim_texture.gradient = scrim
+	scrim_texture.fill_to = Vector2.RIGHT
+	var vignette := TextureRect.new()
 	vignette.name = "MenuVignette"
 	vignette.size = DISPLAY_SIZE
-	vignette.color = Color(UI.BG_DEEP, 0.36)
+	vignette.texture = scrim_texture
+	vignette.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_entry_overlay.add_child(vignette)
 	var gradient := Gradient.new()
@@ -1113,19 +1074,18 @@ func _create_entry_ui() -> void:
 	frame.visible = false
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_entry_overlay.add_child(frame)
-	_entry_label(_entry_overlay, "EntryKicker", "踏入月夜 · 循回不息",
-		Vector2(300, 132), Vector2(680, 24), UI.CAPTION, UI.ACCENT_MOON)
 	_entry_title = _entry_label(_entry_overlay, "EntryTitle", "月蚀回廊",
-		Vector2(250, 170), Vector2(780, 76), UI.DISPLAY, UI.TEXT_PRIMARY)
+		Vector2(104, 132), Vector2(780, 76), UI.DISPLAY, UI.TEXT_PRIMARY)
 	_entry_subtitle = _entry_label(_entry_overlay, "EntrySubtitle", "月桥与铸庭 · 四十房连续旅程",
-		Vector2(270, 254), Vector2(740, 44), UI.CAPTION, UI.TEXT_SECONDARY)
+		Vector2(106, 208), Vector2(740, 36), UI.BODY, UI.TEXT_SECONDARY)
 
 	_start_button = _create_menu_button("StartGame", "开启新局", Vector2(432, 318), Vector2(416, 68))
 	_entry_overlay.add_child(_start_button)
 	_start_button.pressed.connect(_show_difficulty_selection)
-	_chapter2_menu_button = _create_menu_button("Chapter2Direct", "开发测试 · 第二章", Vector2(440, 400), Vector2(400, 52))
+	_chapter2_menu_button = _create_menu_button("Chapter2Direct", "第二章测试", Vector2(1028, 652), Vector2(204, 40))
 	_entry_overlay.add_child(_chapter2_menu_button)
 	_style_entry_button(_chapter2_menu_button, UI.ACCENT_GOLD, false)
+	_chapter2_menu_button.tooltip_text = "从第 21 房开始临时试玩"
 	_chapter2_menu_button.pressed.connect(_open_chapter2_direct)
 	_continue_button = _create_menu_button("ContinueRun", "继续旅程", Vector2(432, 318), Vector2(416, 68))
 	_entry_overlay.add_child(_continue_button)
@@ -1140,40 +1100,38 @@ func _create_entry_ui() -> void:
 	_entry_overlay.add_child(quit_button)
 	quit_button.pressed.connect(_quit_game)
 	_style_entry_button(quit_button, UI.TEXT_SECONDARY, false)
-	for button: Button in [_continue_button, _start_button, settings_button, quit_button]:
+	for button: Button in [_continue_button, _start_button, settings_button, quit_button, _chapter2_menu_button]:
 		button.gui_input.connect(_on_entry_button_input.bind(button))
 	_entry_label(_entry_overlay, "EntryFooter", "", Vector2(240, 588),
 		Vector2(800, 24), UI.CAPTION, UI.TEXT_SECONDARY)
 
 	_entry_progress_panel = Panel.new()
 	_entry_progress_panel.name = "ProfileSummary"
-	_entry_progress_panel.position = Vector2(48, 616)
-	_entry_progress_panel.size = Vector2(1184, 88)
+	_entry_progress_panel.position = Vector2(104, 610)
+	_entry_progress_panel.size = Vector2(738, 82)
 	_entry_progress_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_entry_progress_panel.add_theme_stylebox_override("panel",
 		UI.surface(Color(UI.BG_PANEL, 0.78), Color(UI.STROKE_QUIET, 0.50), UI.PANEL_RADIUS))
 	_entry_overlay.add_child(_entry_progress_panel)
-	_entry_label(_entry_progress_panel, "Heading", "局外星屑",
-		Vector2(24, 10), Vector2(144, 20), UI.CAPTION, UI.TEXT_SECONDARY)
 	_entry_label(_entry_progress_panel, "Value", "星屑 0",
-		Vector2(24, 33), Vector2(144, 40), UI.HEADLINE, UI.ACCENT_MOON)
+		Vector2(22, 14), Vector2(106, 54), UI.BODY, UI.ACCENT_MOON)
 	var divider := ColorRect.new()
-	divider.position = Vector2(192, 16)
-	divider.size = Vector2(1, 56)
+	divider.position = Vector2(144, 14)
+	divider.size = Vector2(1, 54)
 	divider.color = UI.STROKE_QUIET
 	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_entry_progress_panel.add_child(divider)
-	_entry_label(_entry_progress_panel, "Progress", "", Vector2(224, 8),
-		Vector2(924, 24), UI.CAPTION, UI.TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT)
+	_entry_label(_entry_progress_panel, "Progress", "", Vector2(164, 8),
+		Vector2(554, 24), UI.CAPTION, UI.TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT)
 	for index in range(3):
 		var chip := Panel.new()
 		chip.name = "Weapon_%d" % index
-		chip.position = Vector2(224 + index * 304, 40)
-		chip.size = Vector2(284, 32)
+		chip.position = Vector2(164 + index * 186, 40)
+		chip.size = Vector2(174, 29)
 		chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		chip.add_theme_stylebox_override("panel", UI.surface(UI.BG_DEEP, UI.STROKE_QUIET, UI.CHIP_RADIUS))
 		_entry_progress_panel.add_child(chip)
-		_entry_label(chip, "Name", "", Vector2(8, 2), Vector2(268, 28), UI.CAPTION, UI.TEXT_SECONDARY)
+		_entry_label(chip, "Name", "", Vector2(4, 1), Vector2(166, 27), UI.CAPTION, UI.TEXT_SECONDARY)
 
 	var difficulty_data := [
 		["简单", "敌人攻击欲望较低\n预警更充分\n适合初次探索", "前五房熟悉操作 · 后续逐步加压", UI.ACCENT_MOON],
@@ -1250,27 +1208,34 @@ func _style_entry_button(button: Button, accent: Color, prominent: bool) -> void
 
 
 func _reset_entry_layout() -> void:
-	_entry_title.position = Vector2(250, 170)
+	_entry_title.position = Vector2(104, 132)
+	_entry_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_entry_title.add_theme_font_size_override("font_size", UI.DISPLAY)
-	_entry_subtitle.position = Vector2(270, 254)
-	(_entry_overlay.get_node("EntryKicker") as Label).position = Vector2(300, 132)
-	(_entry_overlay.get_node("EntryFooter") as Label).position = Vector2(240, 588)
+	_entry_subtitle.position = Vector2(106, 208)
+	_entry_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	var footer := _entry_overlay.get_node("EntryFooter") as Label
+	footer.position = Vector2(106, 353)
+	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	var has_continue: bool = is_instance_valid(_continue_button) and _continue_button.visible
-	_start_button.position = Vector2(440, 402) if has_continue else Vector2(432, 318)
-	_start_button.size = Vector2(400, 60) if has_continue else Vector2(416, 68)
+	footer.visible = has_continue
+	_start_button.position = Vector2(104, 386 if has_continue else 282)
+	_start_button.size = Vector2(352, 52 if has_continue else 66)
 	_style_entry_button(_start_button, UI.ACCENT_MOON, not has_continue)
-	_start_button.add_theme_color_override("font_color", UI.ACCENT_MOON)
-	if has_continue:
-		_continue_button.position = Vector2(432, 318)
+	_continue_button.position = Vector2(104, 282)
+	_continue_button.size = Vector2(352, 66)
 	var settings_button: Button = _entry_overlay.get_node("EntrySettings") as Button
 	var quit_button: Button = _entry_overlay.get_node("EntryQuit") as Button
-	_chapter2_menu_button.position = Vector2(440, 470 if has_continue else 400)
-	_chapter2_menu_button.visible = true
-	settings_button.position = Vector2(290, 532 if has_continue else 466)
-	quit_button.position = Vector2(670, 532 if has_continue else 466)
+	_chapter2_menu_button.position = Vector2(1028, 652)
+	_chapter2_menu_button.show()
+	settings_button.position = Vector2(104, 458 if has_continue else 368)
+	settings_button.size = Vector2(168, 42)
+	quit_button.position = Vector2(288, settings_button.position.y)
+	quit_button.size = Vector2(168, 42)
 	(_entry_overlay.get_node("EntryFrame") as Panel).visible = false
-	_entry_progress_panel.position = Vector2(48, 616)
-	var focus_buttons: Array = [_start_button, _chapter2_menu_button, settings_button, quit_button]
+	_entry_progress_panel.position = Vector2(104, 610)
+	var focus_buttons: Array = [_start_button, settings_button, quit_button]
+	if _chapter2_menu_button.visible:
+		focus_buttons.append(_chapter2_menu_button)
 	if has_continue:
 		focus_buttons.push_front(_continue_button)
 	_configure_vertical_focus(focus_buttons)
@@ -1278,6 +1243,8 @@ func _reset_entry_layout() -> void:
 		var button: Button = focus_buttons[index]
 		button.focus_next = button.get_path_to(focus_buttons[(index + 1) % focus_buttons.size()])
 		button.focus_previous = button.get_path_to(focus_buttons[posmod(index - 1, focus_buttons.size())])
+	settings_button.focus_neighbor_right = settings_button.get_path_to(quit_button)
+	quit_button.focus_neighbor_left = quit_button.get_path_to(settings_button)
 	for index in range(_difficulty_buttons.size()):
 		_difficulty_buttons[index].position = Vector2(100 + index * 368, 250)
 
@@ -1287,8 +1254,7 @@ func _play_entry_transition(showing_difficulty: bool) -> void:
 		_entry_tween.kill()
 	var reduced: bool = _settings != null and _settings.get_reduced_effects_enabled()
 	var offset: float = 0.0 if reduced else 8.0
-	var controls: Array[Control] = [_entry_title, _entry_subtitle,
-		_entry_overlay.get_node("EntryKicker"), _entry_overlay.get_node("EntryFooter")]
+	var controls: Array[Control] = [_entry_title, _entry_subtitle, _entry_overlay.get_node("EntryFooter")]
 	if showing_difficulty:
 		for button in _difficulty_buttons:
 			button.call(&"set_reduced_motion", reduced)
@@ -1347,6 +1313,8 @@ func _open_build_overview(from_pause: bool = false) -> void:
 	):
 		return
 	_build_overview_opened_from_pause = from_pause
+	if not from_pause:
+		_suspend_reward_focus()
 	player.clear_action_buffer()
 	_refresh_build_overview()
 	_build_overview.visible = true
@@ -1368,8 +1336,7 @@ func _close_build_overview() -> void:
 		_pause_overlay.visible = true
 		_ensure_context_focus()
 	else:
-		get_tree().paused = false
-		_is_game_paused = false
+		_resume_game()
 
 
 func _create_settings_ui() -> void:
@@ -1442,6 +1409,7 @@ func _configure_vertical_focus(controls: Array) -> void:
 func _pause_game() -> void:
 	if _entry_flow_active or _flow_state.run_complete or _flow_state.death_restart_pending:
 		return
+	_suspend_reward_focus()
 	player.clear_action_buffer()
 	_is_game_paused = true
 	_pause_overlay.visible = true
@@ -1450,6 +1418,9 @@ func _pause_game() -> void:
 
 
 func _resume_game() -> void:
+	if _is_game_paused and _flow_state.choosing_upgrade:
+		# B closes the pause menu and is also the third reward shortcut.
+		_skip_reward_shortcuts_on_resume = true
 	get_tree().paused = false
 	_is_game_paused = false
 	_pause_overlay.visible = false
@@ -1458,6 +1429,19 @@ func _resume_game() -> void:
 		_build_overview.visible = false
 	_build_overview_opened_from_pause = false
 	_awaiting_rebind_action = &""
+	for button in _upgrade_buttons:
+		button.focus_mode = Control.FOCUS_ALL
+	_reward_view.shop_exit_button.disabled = false
+	_ensure_context_focus()
+	_reward_focus_before_pause = null
+
+
+func _suspend_reward_focus() -> void:
+	var focus_owner := get_viewport().gui_get_focus_owner() as Button
+	_reward_focus_before_pause = focus_owner if _reward_view.is_choice_action(focus_owner) else null
+	for button in _upgrade_buttons:
+		button.focus_mode = Control.FOCUS_NONE
+	_reward_view.shop_exit_button.disabled = true
 
 
 func _return_to_main_menu() -> void:
@@ -1608,12 +1592,6 @@ func _show_start_screen(play_opening: bool = false) -> void:
 	(_entry_overlay.get_node("DifficultyBack") as Button).visible = false
 	_entry_title.text = "月蚀回廊"
 	_entry_subtitle.text = "月桥与铸庭 · 四十房连续旅程"
-	(_entry_overlay.get_node("EntryKicker") as Label).text = "踏入月夜 · 循回不息"
-	(_entry_overlay.get_node("EntryFooter") as Label).text = (
-		"可继续未完成的路线，或开始新的月蚀路线"
-		if _has_continue_snapshot()
-		else "选择难度后开始新的月蚀路线 · 操作说明与无障碍选项位于设置"
-	)
 	_start_button.text = "开启新局"
 	_start_button.visible = true
 	_refresh_continue_button()
@@ -1654,7 +1632,6 @@ func _hold_entry_chrome() -> void:
 	var chrome: Array[Control] = [
 		_entry_title,
 		_entry_subtitle,
-		_entry_overlay.get_node("EntryKicker") as Control,
 		_entry_overlay.get_node("EntryFooter") as Control,
 		_start_button,
 		_chapter2_menu_button,
@@ -1694,13 +1671,16 @@ func _show_difficulty_selection() -> void:
 	(_entry_overlay.get_node("EntryFrame") as Panel).visible = false
 	_entry_title.text = "选择难度"
 	_entry_title.position = Vector2(250, 100)
+	_entry_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_entry_title.add_theme_font_size_override("font_size", UI.TITLE)
 	_entry_subtitle.position = Vector2(270, 182)
+	_entry_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_entry_subtitle.text = "选择适合你的挑战节奏 · 三种难度均随房间深入逐步加强"
-	(_entry_overlay.get_node("EntryKicker") as Label).position = Vector2(300, 76)
-	(_entry_overlay.get_node("EntryKicker") as Label).text = "选择你的旅程"
-	(_entry_overlay.get_node("EntryFooter") as Label).text = "键鼠与手柄可切换焦点 · Enter / A 确认 · Esc / B 返回"
-	(_entry_overlay.get_node("EntryFooter") as Label).position = Vector2(240, 628)
+	var footer := _entry_overlay.get_node("EntryFooter") as Label
+	footer.text = "Enter / A 确认 · Esc / B 返回"
+	footer.position = Vector2(240, 628)
+	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	footer.show()
 	(_entry_overlay.get_node("DifficultyBack") as Button).visible = true
 	_start_button.visible = false
 	_chapter2_menu_button.hide()
@@ -1741,7 +1721,7 @@ func _refresh_entry_progress_summary() -> void:
 		)
 	value_label.text = "星屑  %d" % shards
 	var progress_label: Label = _entry_progress_panel.get_node("Progress") as Label
-	progress_label.text = "武器解锁 %d/3 · 通关 %d · 首领 %d    /    %s" % [unlocked.size(), completed, bosses, next_goal]
+	progress_label.text = "通关 %d · 首领 %d  /  %s" % [completed, bosses, next_goal]
 	var weapon_ids: Array[StringName] = WeaponCatalog.all_weapon_ids()
 	for index in range(weapon_ids.size()):
 		var chip: Panel = _entry_progress_panel.get_node("Weapon_%d" % index) as Panel
@@ -1754,8 +1734,6 @@ func _refresh_entry_progress_summary() -> void:
 
 
 func _start_game_with_difficulty(difficulty: int) -> void:
-	if save_enabled:
-		CHAPTER2_STORE.new(chapter2_save_path).clear_snapshot()
 	_selected_difficulty = clampi(difficulty, Difficulty.EASY, Difficulty.HARD)
 	_lives_remaining = MAX_RUN_LIVES
 	_entry_flow_active = false
@@ -1763,7 +1741,6 @@ func _start_game_with_difficulty(difficulty: int) -> void:
 		_entry_tween.kill()
 	_entry_overlay.visible = false
 	_fit_to_viewport()
-	_clear_continue_snapshot()
 	_start_new_run()
 
 
@@ -1914,7 +1891,6 @@ func _load_room(pool_index: int) -> void:
 	_enemy_entry_lock_remaining = 1.15
 	_configure_room_objective()
 	_spawn_room_enemies()
-	var room_title: String = _current_room_data.get("title", "未知房间")
 	if _current_encounter == EncounterType.SHOP:
 		player.set_input_enabled(false)
 		_show_shop()
@@ -1931,16 +1907,11 @@ func _load_room(pool_index: int) -> void:
 			if _current_objective in [RoomObjective.TIME_TRIAL, RoomObjective.HOLDOUT]:
 				_set_status(_get_objective_status_text())
 			elif _current_encounter == EncounterType.CHALLENGE:
-				_set_status("进入 %s·挑战房——高压敌群，胜利获得额外金币与星屑" % room_title)
+				_set_status("挑战房 · 击败敌群可获得额外金币与星屑")
 			elif _last_upgrade_name.is_empty():
-				_set_status("%s  ·  %s  ·  进入 %s·%s——清除全部敌人" % [
-					_get_chapter_title(_current_room_index),
-					_get_chapter_phase(_current_room_index),
-					room_title,
-					_get_encounter_name(_current_encounter),
-				])
+				_set_status("%s · 清除全部敌人" % _get_encounter_name(_current_encounter))
 			else:
-				_set_status("已获得「%s」；进入 %s" % [_last_upgrade_name, room_title])
+				_set_status("已获得「%s」" % _last_upgrade_name)
 				_last_upgrade_name = ""
 	_maybe_begin_tutorial()
 	_update_controls()
@@ -2601,7 +2572,7 @@ func _spawn_room_entry_beam() -> void:
 	add_child(beam)
 	beam.global_position = player.global_position + Vector2(0.0, -8.0)
 	beam.z_index = 12
-	beam.call(&"play", 1.0)
+	beam.call(&"play", 1.0, _settings != null and _settings.get_reduced_effects_enabled())
 
 
 func _on_room_cleared() -> void:
@@ -2797,22 +2768,14 @@ func _refresh_choice_overlay_prompts() -> void:
 			if _using_controller_input
 			else str(choice_index + 1)
 		)
-	if _using_controller_input:
-		_upgrade_hint.text = (
-			"X / Y / B 直接购买 · 左摇杆或十字键切换 · A 确认 · %s 离开"
-			% _get_action_prompt(&"interact")
-			if _flow_state.shopping
-			else ("代价预览 · " if _flow_state.event_active else "") + "X / Y / B 直接选牌 · 方向键切换 · A 确认"
-		)
-	elif _flow_state.shopping:
-		_upgrade_hint.text = "金币不足时按 %s 离开；数字键 1 / 2 / 3 购买" % _get_action_prompt(&"interact")
+	if _flow_state.shopping:
+		_reward_view.set_shop_exit_prompt(_get_action_prompt(&"interact"))
+	elif _using_controller_input:
+		_upgrade_hint.text = ("代价预览 · " if _flow_state.event_active else "") + "X / Y / B 直接选牌 · 方向键切换 · A 确认"
 	elif _flow_state.event_active:
 		_upgrade_hint.text = "代价预览 · 生命恢复不超过上限 · 点击卡片或按 1 / 2 / 3"
 	else:
 		_upgrade_hint.text = "点击卡片，或按数字键 1 / 2 / 3"
-	if _flow_state.shopping:
-		_upgrade_hint.text = "金币 %d · %s" % [_gold, _upgrade_hint.text]
-
 	for choice_index in range(_upgrade_buttons.size()):
 		var button: Button = _upgrade_buttons[choice_index]
 		var choice: Dictionary = _upgrade_choices[choice_index]
@@ -2839,17 +2802,18 @@ func _refresh_choice_overlay_prompts() -> void:
 		elif _flow_state.event_active:
 			button.disabled = false
 			rarity_name = "事件"
-			footer_text = "选择此回应"
+			footer_text = ""
 			cost_label.add_theme_color_override("font_color", UI.ACCENT_RISK)
+			var missing_health := player.get_max_health() - player.get_current_health()
 			match StringName(choice.get("effect", &"")):
 				&"rest":
-					description = "收益 · 恢复至多 %d 生命" % int(choice.get("heal", 0))
-					cost_label.text = "代价 · 金币 %d（最低为 0）" % int(choice.get("gold", 0))
+					description = "收益 · 恢复 %d 生命" % mini(missing_health, int(choice.get("heal", 0)))
+					cost_label.text = "代价 · %d 金币" % mini(_gold, absi(int(choice.get("gold", 0))))
 				&"gold":
 					description = "收益 · 金币 +%d" % int(choice.get("amount", 0))
 					cost_label.text = "代价 · 受到 %d 点伤害" % int(choice.get("damage", 0))
 				&"shards":
-					description = "收益 · 星屑 +%d\n恢复至多 %d 生命" % [choice.get("amount", 0), choice.get("heal", 0)]
+					description = "收益 · 星屑 +%d\n恢复 %d 生命" % [choice.get("amount", 0), mini(missing_health, int(choice.get("heal", 0)))]
 					cost_label.text = "代价 · 本局最大生命 %d" % int(choice.get("max_health", 0))
 		else:
 			button.disabled = false
@@ -2862,6 +2826,11 @@ func _refresh_choice_overlay_prompts() -> void:
 			footer_text
 		)
 		_style_upgrade_card(button, choice)
+	if _flow_state.shopping:
+		var purchase_hint := "方向键切换 · A 确认" if _using_controller_input else "点击商品或按 1 / 2 / 3 购买"
+		if not _upgrade_buttons.any(func(button: Button) -> bool: return not button.disabled):
+			purchase_hint = "当前商品均无法购买"
+		_upgrade_hint.text = "金币 %d · %s" % [_gold, purchase_hint]
 
 
 func _pick_upgrade_choices() -> Array[Dictionary]:
@@ -2878,7 +2847,8 @@ func _on_upgrade_button_pressed(choice_index: int) -> void:
 
 func choose_upgrade(choice_index: int) -> bool:
 	if (
-		not _flow_state.choosing_upgrade
+		_is_game_paused
+		or not _flow_state.choosing_upgrade
 		or choice_index < 0
 		or choice_index >= _upgrade_choices.size()
 	):
@@ -3041,7 +3011,7 @@ func _format_signed_event_delta(label_text: String, delta: int) -> String:
 
 
 func _leave_shop() -> void:
-	if not _flow_state.shopping:
+	if _is_game_paused or not _flow_state.shopping:
 		return
 	_last_upgrade_name = "未购物"
 	_present_reward_feedback(
@@ -3083,8 +3053,7 @@ func _start_chapter2_journey() -> void:
 		return
 	var data := CHAPTER2_STORE.from_player(player, _gold)
 	data.campaign = {"seed": _run_seed, "difficulty": _selected_difficulty, "lives": _lives_remaining, "run_shards": _run_shards, "run_number": _run_number}
-	var store := CHAPTER2_STORE.new(chapter2_save_path, save_enabled)
-	var error := store.save_snapshot(data)
+	var error: Error = _continue_store.save_snapshot(data)
 	if error != OK:
 		_chapter_transition_pending = true
 		player.set_input_enabled(true)
@@ -3092,14 +3061,18 @@ func _start_chapter2_journey() -> void:
 		return
 	_chapter_transition_pending = false
 	_campaign_transitioning = true
-	if _telemetry != null:
-		_telemetry.complete_room(&"chapter_complete")
 	_clear_projectiles()
 	player.set_input_enabled(false)
 	get_tree().set_meta(&"campaign_runtime", {"telemetry": _telemetry, "progression": _progression, "save_enabled": save_enabled})
-	get_tree().set_meta(&"chapter2_initial", data)
-	_clear_continue_snapshot()
-	_launch_chapter2_scene()
+	if not _launch_chapter2_scene(_continue_store):
+		get_tree().remove_meta(&"campaign_runtime")
+		_campaign_transitioning = false
+		_chapter_transition_pending = true
+		player.set_input_enabled(true)
+		_set_status("第二章载入失败，按交互键重试")
+		return
+	if _telemetry != null:
+		_telemetry.complete_room(&"chapter_complete")
 
 func _complete_run() -> void:
 	# Room 20 ends a chapter, not the run. Settlement belongs to room 40.
@@ -3108,36 +3081,37 @@ func _complete_run() -> void:
 func _open_chapter2_direct() -> void:
 	if not _entry_flow_active:
 		return
-	var store := CHAPTER2_STORE.new(chapter2_save_path + ".test")
-	store.load_snapshot()
-	if not store.can_resume():
-		var data := CHAPTER2_STORE.from_player(player, 10)
-		data.weapon_id = str(_progression.get_selected_weapon())
-		data.health = 100
-		data.max_health = 100
-		data.upgrade_counts = {}
-		var error := store.save_snapshot(data)
-		if error != OK:
-			_entry_subtitle.text = "第二章存档创建失败：%d" % error
-			return
-	_launch_chapter2_scene(chapter2_save_path + ".test")
+	var store := CHAPTER2_STORE.new("", false)
+	var data := CHAPTER2_STORE.from_player(player, 10)
+	data.weapon_id = str(_progression.get_selected_weapon())
+	data.health = 100
+	data.max_health = 100
+	data.upgrade_counts = {}
+	if store.save_snapshot(data) != OK or not _launch_chapter2_scene(store):
+		_entry_subtitle.text = "第二章测试载入失败"
 
-func _launch_chapter2_scene(path: String = "") -> void:
-	get_tree().set_meta(&"chapter2_save_path", chapter2_save_path if path.is_empty() else path)
-	get_tree().change_scene_to_file("res://scenes/Chapter2Journey.tscn")
+func _launch_chapter2_scene(store: RunContinueStore) -> bool:
+	var tree := get_tree()
+	tree.set_meta(&"chapter2_entry", {"store": store, "title_path": continue_save_path, "persistent": save_enabled and store == _continue_store})
+	if tree.change_scene_to_file("res://scenes/Chapter2Journey.tscn") == OK:
+		return true
+	tree.remove_meta(&"chapter2_entry")
+	return false
 
-func _campaign_waiting() -> bool:
+func _continue_matches_telemetry() -> bool:
 	if get_tree().has_meta(&"campaign_result"):
 		return true
-	var store := CHAPTER2_STORE.new(chapter2_save_path)
-	return store.load_snapshot() and store.can_resume() and store.get_snapshot().has("campaign")
+	if not _has_continue_snapshot():
+		return false
+	var saved: Dictionary = _continue_store.get_snapshot()
+	var seed_value := int(saved.campaign.seed) if _continue_store.has_chapter2() else int(saved.seed)
+	return _telemetry.tracks_seed(seed_value)
 
 func _restore_campaign_result() -> void:
 	var result: Dictionary = get_tree().get_meta(&"campaign_result")
 	get_tree().remove_meta(&"campaign_result")
 	var data: Dictionary = result.data
 	var campaign: Dictionary = data.campaign
-	chapter2_save_path = result.path
 	_progression = result.runtime.progression
 	_telemetry = result.runtime.telemetry
 	_selected_difficulty = int(campaign.difficulty)
@@ -3197,10 +3171,9 @@ func _finish_campaign_run() -> void:
 
 
 func _hide_upgrade_overlay() -> void:
-	if _upgrade_tween != null and _upgrade_tween.is_valid():
-		_upgrade_tween.kill()
-	if is_instance_valid(_upgrade_overlay):
-		_upgrade_overlay.visible = false
+	_reward_focus_before_pause = null
+	if is_instance_valid(_reward_view):
+		_reward_view._hide_upgrade_overlay()
 	for button in _upgrade_buttons:
 		button.disabled = true
 	if is_instance_valid(_victory_restart_button):
@@ -3538,12 +3511,11 @@ func _update_room_label() -> void:
 	if _hud_presenter == null:
 		return
 	var room_title: String = _current_room_data.get("title", "未知房间")
-	var chapter_name: String = _get_chapter_name(_current_room_index)
+	var chapter_name := _get_chapter_title(_current_room_index)
 	_hud_presenter.update_room(
 		not _current_room_data.is_empty(),
 		_flow_state.run_complete,
 		_run_number,
-		_run_seed,
 		_current_room_index + 1,
 		40,
 		_get_encounter_name(_current_encounter),
@@ -3555,11 +3527,7 @@ func _update_room_label() -> void:
 func _update_economy_hud() -> void:
 	if _hud_presenter == null or _progression == null:
 		return
-	_hud_presenter.update_economy(
-		_gold,
-		_progression.get_meta_shards(),
-		_run_shards
-	)
+	_hud_presenter.update_economy(_gold)
 
 
 func _update_equipment_hud() -> void:
@@ -3991,6 +3959,8 @@ func _present_death_recap(unlock_summary: String) -> void:
 		"room_title": String(current_room.get("room_title", _current_room_data.get("title", "未知房间"))),
 		"encounter": String(current_room.get("encounter", _get_encounter_name(_current_encounter))),
 		"room_number": int(current_room.get("room_number", _current_room_index + 1)),
+		"room_total": 40,
+		"seed": _run_seed,
 		"lives_remaining": _lives_remaining,
 		"room_damage": int(current_room.get("damage_taken", 0)),
 		"run_damage": int(telemetry_snapshot.get("damage_taken", 0)),
@@ -4050,26 +4020,19 @@ func _refresh_continue_button() -> void:
 	)
 	var has_continue: bool = _has_continue_snapshot()
 	_continue_button.visible = has_continue and _entry_flow_active and _start_button.visible
+	_continue_button.tooltip_text = ""
 	if has_continue:
 		_continue_button.text = "继续旅程"
+		var in_chapter2: bool = _continue_store.has_chapter2()
 		_continue_button.tooltip_text = "继续第 %d 房 · %s" % [
-			int(snapshot.get("room_index", 0)) + 1,
-			WeaponCatalog.get_weapon_name(StringName(String(snapshot.get("weapon_id", "")))),
+			int(snapshot.get("room_index", 0)) + (21 if in_chapter2 else 1),
+			"余烬铸庭" if in_chapter2 else WeaponCatalog.get_weapon_name(StringName(String(snapshot.get("weapon_id", "")))),
 		]
-	var chapter2 := CHAPTER2_STORE.new(chapter2_save_path)
-	if save_enabled and chapter2.load_snapshot() and chapter2.can_resume():
-		_continue_button.visible = _entry_flow_active and _start_button.visible
-		_continue_button.text = "继续旅程 · 第二章" if chapter2.get_snapshot().has("campaign") else "继续第二章 · 旧试玩"
-		_continue_button.tooltip_text = "从第 %d 房继续同一局旅程" % (21 + int(chapter2.get_snapshot().room_index))
-	elif save_enabled and not has_continue:
-		var test_store := CHAPTER2_STORE.new(chapter2_save_path + ".test")
-		if test_store.load_snapshot() and test_store.can_resume():
-			_continue_button.visible = _entry_flow_active and _start_button.visible
-			_continue_button.text = "继续第二章 · 开发测试"
+	(_entry_overlay.get_node("EntryFooter") as Label).text = _continue_button.tooltip_text
 
 
 func _has_continue_snapshot() -> bool:
-	return _continue_store != null and _continue_store.has_snapshot()
+	return _continue_store != null and _continue_store.can_resume()
 
 
 func _clear_continue_snapshot() -> void:
@@ -4083,6 +4046,8 @@ func _persist_continue_snapshot() -> void:
 		return
 	if (
 		_entry_flow_active
+		or _campaign_transitioning
+		or _chapter_transition_pending
 		or _flow_state.run_complete
 		or _flow_state.death_restart_pending
 		or _current_room_index < 0
@@ -4174,17 +4139,10 @@ func _deserialize_room_data(serialized: Dictionary) -> Dictionary:
 
 
 func _continue_saved_run() -> bool:
-	var chapter2 := CHAPTER2_STORE.new(chapter2_save_path)
-	if save_enabled and chapter2.load_snapshot() and chapter2.can_resume():
-		_launch_chapter2_scene()
-		return true
-	if not _has_continue_snapshot() and save_enabled:
-		var test_store := CHAPTER2_STORE.new(chapter2_save_path + ".test")
-		if test_store.load_snapshot() and test_store.can_resume():
-			_launch_chapter2_scene(chapter2_save_path + ".test")
-			return true
 	if not _has_continue_snapshot():
 		return false
+	if _continue_store.has_chapter2():
+		return _launch_chapter2_scene(_continue_store)
 	var snapshot: Dictionary = _continue_store.get_snapshot()
 	_entry_flow_active = false
 	if _entry_tween != null and _entry_tween.is_valid():
@@ -4243,8 +4201,9 @@ func _continue_saved_run() -> bool:
 	_current_objective = _get_room_objective(_current_encounter)
 	_current_combat_profile = _get_combat_profile()
 	if _telemetry != null:
-		_telemetry.begin_run(_run_seed, get_selected_difficulty_name(), player.get_weapon_id())
-		_telemetry.begin_room(
+		if not _telemetry.tracks_seed(_run_seed):
+			_telemetry.begin_run(_run_seed, get_selected_difficulty_name(), player.get_weapon_id())
+		_telemetry.resume_room(
 			_current_room_index + 1,
 			StringName(String(_current_room_data.get("id", "unknown_room"))),
 			String(_current_room_data.get("title", "未知房间")),

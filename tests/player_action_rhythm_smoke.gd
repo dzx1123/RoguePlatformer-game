@@ -100,7 +100,8 @@ func run_test() -> void:
 		await reset(weapon)
 		Input.action_press(&"move_right")
 		await frames(4)
-		check(player.hero_sprite.texture.resource_path.get_file().begins_with("hero_run_"), "%s: idle pose slides at run start" % weapon)
+		var start_pose := player.hero_sprite.texture.resource_path.get_file()
+		check(start_pose.begins_with("hero_run_") or start_pose == "hero_sprint_push.png", "%s: idle pose slides at run start" % weapon)
 		await press(&"attack")
 		while player._attack_remaining > 0.0:
 			await physics_frame
@@ -149,19 +150,29 @@ func run_test() -> void:
 	Input.action_release(&"move_right")
 	check(counts.get(&"jump", 0) == 1 and player._air_jumps_used == 0, "Ledge grace jump consumed aerial jump")
 	floor_body.position.x = 0
-	await reset(WeaponCatalog.SWORD)
-	Input.action_press(&"move_right")
-	await frames(20)
-	Input.action_release(&"move_right")
-	await frames(9)
-	check(absf(player.velocity.x) < 1, "Ground braking exceeds 150 ms")
-	Input.action_press(&"move_right")
-	await frames(20)
-	Input.action_release(&"move_right")
-	Input.action_press(&"move_left")
-	await frames(9)
-	check(player.velocity.x < 0, "Reversal did not change travel direction within 150 ms")
-	Input.action_release(&"move_left")
+	for weapon in WeaponCatalog.all_weapon_ids():
+		await reset(weapon)
+		await check_moving_slash(weapon)
+		await reset(weapon)
+		Input.action_press(&"move_right")
+		await frames(20)
+		Input.action_release(&"move_right")
+		await frames(5)
+		check(player._visual_state == RoguePlayer.VisualState.BRAKE, "%s: stop missed its bracing pose" % weapon)
+		if weapon == WeaponCatalog.SWORD:
+			check(player.hero_sprite.texture == RoguePlayer.HERO_SPRINT_BRACE, "Moon sword stop missed its authored frame")
+		else:
+			var brace_pose := player.hero_sprite.texture.resource_path
+			check(brace_pose.begins_with(RoguePlayer.WEAPON_POSE_DIRECTORIES[weapon]) and brace_pose.get_file() in ["hero_run_0.png", "hero_run_6.png"], "%s: stop missed its own contact frame" % weapon)
+		await frames(4)
+		check(absf(player.velocity.x) < 1, "%s: ground braking exceeds 150 ms" % weapon)
+		Input.action_press(&"move_right")
+		await frames(20)
+		Input.action_release(&"move_right")
+		Input.action_press(&"move_left")
+		await frames(9)
+		check(player.velocity.x < 0, "%s: reversal did not change travel direction within 150 ms" % weapon)
+		Input.action_release(&"move_left")
 	player.queue_free()
 	floor_body.queue_free()
 	await process_frame
@@ -169,3 +180,54 @@ func run_test() -> void:
 		push_error(failure)
 	print("player_action_rhythm_smoke: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+
+
+func check_moving_slash(weapon: StringName) -> void:
+	var hit_progress: Array[float] = []
+	var capture_hit := func(_origin: Vector2, _facing: float) -> void:
+		hit_progress.append(player._attack_elapsed / player.attack_duration)
+	player.attack_hit.connect(capture_hit)
+	Input.action_press(&"move_right")
+	await frames(22)
+	Input.action_press(&"attack")
+	await frames(1)
+	Input.action_release(&"attack")
+	check(player._moving_ground_slash, "%s: moving attack did not select the grounded slash" % weapon)
+	var exit_frame := player._moving_slash_exit_frame()
+	var visible_poses := {}
+	var minimum_speed := player.velocity.x
+	var planted_positions: Array[Vector2] = []
+	while player._attack_remaining > 0.0:
+		visible_poses[player.hero_sprite.texture] = true
+		minimum_speed = minf(minimum_speed, player.velocity.x)
+		if weapon != WeaponCatalog.SWORD and player._is_planted_strike(player.hero_sprite.texture):
+			var boot: Vector2 = RoguePlayer.POSE_ANCHORS.FORWARD_STRIKE_BOOTS[weapon]
+			var sprite := player.hero_sprite
+			planted_positions.append(sprite.transform * (boot + sprite.offset) + player.global_position)
+		await physics_frame
+	match weapon:
+		WeaponCatalog.SWORD:
+			check(visible_poses.has(RoguePlayer.HERO_MOVING_SLASH_LOAD), "Moon sword missed its loading pose")
+			check(visible_poses.has(RoguePlayer.HERO_MOVING_SLASH_RELEASE), "Moon sword missed its release pose")
+			check(visible_poses.has(RoguePlayer.HERO_SLASH), "Moon sword missed its hit pose")
+			check(visible_poses.has(RoguePlayer.HERO_MOVING_SLASH_STEP), "Moon sword missed its recovery step")
+		_:
+			var strike_pose := player._weapon_pose_texture(&"hero_attack_forward_strike", RoguePlayer.HERO_SLASH)
+			check(visible_poses.has(strike_pose), "%s: running swing missed its hit pose" % weapon)
+			check(visible_poses.has(player._run_texture(exit_frame)), "%s: running swing missed its recovery step" % weapon)
+			check(not planted_positions.is_empty(), "%s: running swing never planted a boot" % weapon)
+			if not planted_positions.is_empty():
+				for contact in planted_positions:
+					check(absf(contact.y - 500.0) < 0.25 and absf(contact.x - planted_positions[0].x) < 1.0, "%s: the planted boot moved during the hit pose (start %s, now %s)" % [weapon, planted_positions[0], contact])
+	var minimum_ratio := minimum_speed / player.run_speed
+	if weapon == WeaponCatalog.TWIN_BLADES:
+		check(minimum_ratio > 0.24 and minimum_ratio < 0.50, "Twin blades should carry some speed through the cut")
+	elif weapon == WeaponCatalog.GREATSWORD:
+		check(minimum_ratio < 0.14, "Greatsword should plant for the hit")
+	else:
+		check(minimum_ratio < 0.36, "Moon sword should brake for the hit")
+	check(player.velocity.x > player.run_speed * 0.66, "%s: running swing did not reaccelerate on recovery" % weapon)
+	check(hit_progress.size() == 1 and absf(hit_progress[0] - RoguePlayer.ATTACK_HIT_PROGRESS) < 0.065, "%s: running swing changed the attack timing" % weapon)
+	check(player._run_cycle >= float(exit_frame) and player._run_cycle < float(exit_frame + 2), "%s: running swing did not return to the matching stride" % weapon)
+	player.attack_hit.disconnect(capture_hit)
+	Input.action_release(&"move_right")

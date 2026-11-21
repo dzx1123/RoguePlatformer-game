@@ -26,6 +26,7 @@ enum VisualState {
 	DASH_RECOVERY,
 	HURT,
 	DEAD,
+	BRAKE,
 }
 
 enum AttackType {
@@ -51,6 +52,9 @@ const HERO_RUN_8: Texture2D = preload("res://assets/characters/frames_polished/h
 const HERO_RUN_9: Texture2D = preload("res://assets/characters/frames_polished/hero_run_9.png")
 const HERO_RUN_10: Texture2D = preload("res://assets/characters/frames_polished/hero_run_10.png")
 const HERO_RUN_11: Texture2D = preload("res://assets/characters/frames_polished/hero_run_11.png")
+const HERO_SPRINT_PUSH: Texture2D = preload("res://assets/characters/frames_polished/hero_sprint_push.png")
+const HERO_SPRINT_BRACE: Texture2D = preload("res://assets/characters/frames_polished/hero_sprint_brace.png")
+const HERO_SPRINT_PIVOT: Texture2D = preload("res://assets/characters/frames_polished/hero_sprint_pivot.png")
 const HERO_JUMP_TAKEOFF: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_takeoff.png")
 const HERO_JUMP_RISE: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_rise_v2.png")
 const HERO_JUMP_APEX: Texture2D = preload("res://assets/characters/frames_polished/hero_jump_apex_v2.png")
@@ -61,6 +65,9 @@ const HERO_WINDUP: Texture2D = preload("res://assets/characters/frames_polished/
 const HERO_SLASH: Texture2D = preload("res://assets/characters/frames_polished/hero_slash.png")
 const HERO_SLASH_FOLLOWTHROUGH: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_followthrough.png")
 const HERO_RECOVERY: Texture2D = preload("res://assets/characters/frames_polished/hero_recovery.png")
+const HERO_MOVING_SLASH_LOAD: Texture2D = preload("res://assets/characters/frames_polished/hero_moving_slash_load.png")
+const HERO_MOVING_SLASH_RELEASE: Texture2D = preload("res://assets/characters/frames_polished/hero_moving_slash_release.png")
+const HERO_MOVING_SLASH_STEP: Texture2D = preload("res://assets/characters/frames_polished/hero_moving_slash_step.png")
 const HERO_SLASH_UP_WINDUP: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_up_windup.png")
 const HERO_SLASH_UP: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_up.png")
 const HERO_SLASH_UP_FOLLOWTHROUGH: Texture2D = preload("res://assets/characters/frames_polished/hero_slash_up_followthrough.png")
@@ -78,11 +85,13 @@ const UPGRADE_CATALOG := preload("res://scripts/upgrade_catalog.gd")
 
 const HERO_FRAME_SIZE := Vector2(640.0, 416.0)
 const HERO_SCALE := 0.22
+const BODY_FLOOR_OFFSET := 28.0
 const RUN_FRAME_COUNT := 12.0
 # One full cycle covers a fixed stride. Cadence therefore scales with |vx|:
 # faster movement → faster steps. Do not clamp this below one frame/tick.
 const RUN_STRIDE_PIXELS := 118.0
 const RUN_START_BLEND := 0.10
+const RUN_PUSH_TIME := 0.055
 const RUN_SETTLE_FRAMES_PER_SECOND := 20.0
 const LANDING_SQUASH_DURATION := 0.20
 const MOVING_LANDING_DURATION := 0.09
@@ -195,6 +204,7 @@ var _buffered_drop := false
 var _coyote_remaining := 0.0
 var _attack_hit_emitted: bool = false
 var _attack_type: int = AttackType.FORWARD
+var _moving_ground_slash := false
 var _downslash_bounce_applied: bool = false
 var _skill_remaining: float = 0.0
 var _skill_cooldown_remaining: float = 0.0
@@ -218,6 +228,9 @@ var _run_is_settling: bool = false
 var _run_has_settled: bool = true
 var _run_start_remaining: float = 0.0
 var _movement_blend: float = 0.0
+var _move_axis := 0.0
+var _ground_braking := false
+var _ground_pose_origin_x := 0.0
 var _turn_remaining: float = 0.0
 var _turn_from_facing: float = 1.0
 var _landing_squash_remaining: float = 0.0
@@ -351,6 +364,8 @@ func _physics_process(delta: float) -> void:
 	var input_direction: float = 0.0
 	if _input_enabled:
 		input_direction = Input.get_axis(&"move_left", &"move_right")
+	_move_axis = input_direction
+	var ground_travel_before: float = velocity.x
 	var requested_facing: float = 0.0
 	if not is_zero_approx(input_direction):
 		requested_facing = signf(input_direction)
@@ -386,6 +401,9 @@ func _physics_process(delta: float) -> void:
 	_jump_buffer_remaining = maxf(0.0, _jump_buffer_remaining - delta)
 	_consume_buffered_action()
 	_action_buffer_remaining = maxf(0.0, _action_buffer_remaining - delta)
+	if not was_on_floor or velocity.y < 0.0:
+		_moving_ground_slash = false
+	_ground_braking = false
 
 	if _dash_remaining > 0.0:
 		velocity = Vector2(_facing * dash_speed, 0.0)
@@ -394,10 +412,13 @@ func _physics_process(delta: float) -> void:
 		if _skill_remaining > 0.0:
 			movement_scale = 0.28
 		elif _attack_remaining > 0.0:
-			movement_scale = 0.78
+			movement_scale = _moving_slash_speed_scale() if _moving_ground_slash else 0.78
 		elif _hurt_remaining > 0.0:
 			movement_scale = 0.15
 		var target_speed: float = input_direction * run_speed * movement_scale
+		if _moving_ground_slash:
+			# Steering against the swing is allowed again when the planted step finishes.
+			target_speed = _facing * maxf(0.0, target_speed * _facing)
 		if _skill_remaining > 0.0:
 			var skill_progress := clampf(
 				1.0 - _skill_remaining / maxf(_skill_duration, 0.001),
@@ -406,11 +427,14 @@ func _physics_process(delta: float) -> void:
 			)
 			target_speed += _facing * _get_skill_lunge_speed(skill_progress)
 		var acceleration: float = ground_acceleration if was_on_floor else air_acceleration
+		if _moving_ground_slash and absf(target_speed) < absf(velocity.x):
+			acceleration = ground_braking
 		if was_on_floor and _attack_remaining <= 0.0 and _skill_remaining <= 0.0 and _hurt_remaining <= 0.0:
 			if is_zero_approx(input_direction):
 				acceleration = ground_braking
 			elif velocity.x * input_direction < 0.0:
 				acceleration = ground_turn_acceleration
+			_ground_braking = is_zero_approx(input_direction) or ground_travel_before * input_direction < 0.0
 		velocity.x = move_toward(velocity.x, target_speed, acceleration * delta)
 
 	move_and_slide()
@@ -425,6 +449,7 @@ func _physics_process(delta: float) -> void:
 				action_started.emit(&"land")
 		_airborne_time = 0.0
 	else:
+		_moving_ground_slash = false
 		_airborne_time += delta
 		_last_footstep_cycle = -1
 
@@ -468,7 +493,7 @@ func _physics_process(delta: float) -> void:
 		_run_is_settling = false
 		_run_has_settled = false
 		_emit_run_footstep(previous_cycle)
-	elif now_on_floor and _movement_blend > 0.03:
+	elif now_on_floor and _movement_blend > 0.03 and not _moving_ground_slash:
 		_settle_run_cycle(delta)
 
 	_update_hero_visuals(delta)
@@ -505,6 +530,7 @@ func respawn() -> void:
 	_attack_button_latched = false
 	_attack_hit_emitted = false
 	_attack_type = AttackType.FORWARD
+	_moving_ground_slash = false
 	_downslash_bounce_applied = false
 	_skill_remaining = 0.0
 	_skill_cooldown_remaining = 0.0
@@ -521,6 +547,8 @@ func respawn() -> void:
 	_run_is_settling = false
 	_run_has_settled = true
 	_movement_blend = 0.0
+	_move_axis = 0.0
+	_ground_braking = false
 	_turn_remaining = 0.0
 	_turn_from_facing = _facing
 	_landing_squash_remaining = 0.0
@@ -636,7 +664,7 @@ func enter_room(spawn_position: Vector2, recovery: int = 10) -> void:
 	respawn()
 	_current_health = mini(maxi(1, max_health), carried_health + maxi(0, recovery))
 	if _base_ground_surface_y < INF:
-		global_position.y = _base_ground_surface_y - 28.0
+		global_position.y = _base_ground_surface_y - BODY_FLOOR_OFFSET
 	_arrival_remaining = 1.50
 	_arrival_idle_blend = 0.0
 	modulate.a = 0.0
@@ -1063,6 +1091,13 @@ func _start_attack(attack_type: int = AttackType.FORWARD) -> void:
 	_clear_turn_transition()
 	_attack_hit_emitted = false
 	_attack_type = clampi(attack_type, AttackType.FORWARD, AttackType.DOWNWARD)
+	_moving_ground_slash = (
+		_attack_type == AttackType.FORWARD
+		and is_on_floor()
+		and velocity.y >= 0.0
+		and velocity.x * _facing >= 52.0
+		and _move_axis * _facing > 0.0
+	)
 	_downslash_bounce_applied = false
 	action_started.emit(&"attack")
 
@@ -1182,18 +1217,17 @@ func _finish_attack() -> void:
 		and not _is_dead
 		and _hurt_remaining <= 0.0
 	)
+	var resume_frame := _moving_slash_exit_frame() if _moving_ground_slash and _move_axis * _facing > 0.0 and is_on_floor() else 0
 	_attack_remaining = 0.0
 	_attack_elapsed = 0.0
 	_attack_hit_emitted = false
 	_attack_type = AttackType.FORWARD
+	_moving_ground_slash = false
 	_downslash_bounce_applied = false
 	if should_blend_out:
-		# Resume from the same planted-foot anchor used by skill recovery. Without
-		# this hold, a moving attack jumps back to the arbitrary run frame captured
-		# when the attack started, which reads as a one-frame character twitch.
 		_attack_exit_blend_remaining = ATTACK_EXIT_BLEND_DURATION
-		_run_cycle = 0.0
-		_run_settle_target = 0.0
+		_run_cycle = float(resume_frame)
+		_run_settle_target = _run_cycle
 		_run_is_settling = false
 		_run_has_settled = true
 
@@ -1551,6 +1585,8 @@ func _resolve_visual_state() -> int:
 		return VisualState.LAND
 	if _turn_remaining > 0.0:
 		return VisualState.TURN
+	if _ground_braking and _movement_blend > 0.04 and absf(velocity.x) < run_speed * 0.48:
+		return VisualState.BRAKE
 	if _movement_blend > 0.04:
 		return VisualState.RUN
 	return VisualState.IDLE
@@ -1563,11 +1599,14 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 	var previous_visual_state: int = _visual_state
 	var next_visual_state: int = _resolve_visual_state()
 	var state_changed: bool = next_visual_state != _visual_state
+	var starts_running := state_changed and next_visual_state == VisualState.RUN and previous_visual_state in [VisualState.IDLE, VisualState.BRAKE]
 	if state_changed:
 		_visual_state = next_visual_state
 		_visual_state_elapsed = 0.0
-		if _visual_state == VisualState.RUN and previous_visual_state == VisualState.IDLE:
+		if starts_running:
 			_run_start_remaining = RUN_START_BLEND
+		if starts_running or _visual_state == VisualState.BRAKE:
+			_ground_pose_origin_x = global_position.x
 	else:
 		_visual_state_elapsed += maxf(0.0, delta)
 	if _visual_state == VisualState.RUN:
@@ -1597,6 +1636,8 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 			_animate_land()
 		VisualState.TURN:
 			_animate_turn()
+		VisualState.BRAKE:
+			_animate_brake()
 		VisualState.ATTACK:
 			_animate_attack()
 		VisualState.ATTACK_RECOVERY:
@@ -1640,7 +1681,7 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 			elif _visual_state in [VisualState.RUN, VisualState.JUMP_RISE, VisualState.JUMP_FALL, VisualState.LAND]:
 				minimum_transition_blend = 0.22
 			pose_blend = maxf(pose_blend, minimum_transition_blend)
-		if state_changed and _visual_state == VisualState.RUN and previous_visual_state == VisualState.IDLE:
+		if starts_running:
 			_run_cycle = 0.0
 			_run_has_settled = false
 			_run_is_settling = false
@@ -1659,6 +1700,16 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 			hero_sprite.position.y = target_position.y + _get_boot_baseline(_current_texture) * (target_scale.y - hero_sprite.scale.y)
 	else:
 		_sprite_pose_initialized = true
+	var strike_has_planted_foot := _moving_ground_slash and _is_planted_strike(_current_texture)
+	if strike_has_planted_foot and _weapon_id != WeaponCatalog.SWORD:
+		_align_forward_strike_boot(previous_texture)
+	elif strike_has_planted_foot or _visual_state == VisualState.BRAKE or (_visual_state == VisualState.RUN and _is_pushing_off()):
+		# Keep the loaded boot fixed in world space while the collision origin advances.
+		# The window is short enough that the sprite stays close to its collision shape.
+		if strike_has_planted_foot and not _is_planted_strike(previous_texture):
+			_ground_pose_origin_x = global_position.x
+		_pose_alignment_offset.x = clampf(_ground_pose_origin_x - global_position.x, -12.0, 12.0)
+		hero_sprite.position.x += _pose_alignment_offset.x
 
 	if (
 		(
@@ -1703,7 +1754,18 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 	if state_changed or weapon_changed_visually:
 		# Twin/greatsword keep the old frame for their first few windup ticks.
 		# Carry the boundary until their first actual texture change.
-		_pose_boundary_remaining = 0.08
+		var planted_transition := (
+			starts_running or previous_visual_state == VisualState.BRAKE or _visual_state in [VisualState.BRAKE, VisualState.TURN]
+			or (_visual_state == VisualState.ATTACK and _moving_ground_slash)
+			or (previous_visual_state == VisualState.ATTACK and _visual_state == VisualState.RUN
+				and previous_texture != null
+				and (previous_texture == HERO_MOVING_SLASH_STEP or previous_texture.resource_path.get_file().begins_with("hero_run_")))
+		)
+		if planted_transition and not weapon_changed_visually:
+			_pose_boundary_remaining = 0.0
+			_pose_transition_remaining = 0.0
+		else:
+			_pose_boundary_remaining = 0.08
 	if previous_texture != null and previous_texture != _current_texture and _pose_boundary_remaining > 0 and not _is_dead and _hurt_remaining <= 0 and previous_flip_h == hero_sprite.flip_h:
 		_pose_boundary_remaining = 0.0
 		_pose_transition.texture = previous_texture
@@ -1729,8 +1791,9 @@ func _update_hero_visuals(delta: float = 1.0 / 60.0) -> void:
 		var incoming_head := _pose_head_position(hero_sprite)
 		var shared_head := outgoing_head.lerp(incoming_head, blend)
 		_pose_transition.position += shared_head - outgoing_head
-		_pose_alignment_offset = shared_head - incoming_head
-		hero_sprite.position += _pose_alignment_offset
+		var head_offset := shared_head - incoming_head
+		_pose_alignment_offset += head_offset
+		hero_sprite.position += head_offset
 		_pose_transition.modulate = Color(visual_modulate, visual_modulate.a * (1.0 - blend))
 		visual_modulate.a *= blend
 		# Do not stack the coloured skill trail over the neutral pose transition.
@@ -2005,10 +2068,27 @@ func _animate_run() -> void:
 			1.0
 		)
 	var current_frame := int(floor(_run_cycle))
-	_set_texture(_run_texture(current_frame))
+	if _is_pushing_off():
+		_set_texture(HERO_SPRINT_PUSH if _weapon_id == WeaponCatalog.SWORD else _run_texture(0))
+	else:
+		_set_texture(_run_texture(current_frame))
 	hero_sprite.position.x += _facing * 1.2 * start_weight
 	hero_sprite.rotation = -_facing * 0.028 * start_weight
 	hero_sprite.scale = Vector2(HERO_SCALE, HERO_SCALE)
+
+
+func _is_pushing_off() -> bool:
+	return _run_start_remaining > RUN_START_BLEND - RUN_PUSH_TIME
+
+
+func _animate_brake() -> void:
+	if _weapon_id == WeaponCatalog.SWORD:
+		_set_texture(HERO_SPRINT_BRACE)
+		return
+	var brace := 1.0 - clampf(absf(velocity.x) / (run_speed * 0.48), 0.0, 1.0)
+	_set_texture(_run_texture(0 if _run_cycle < RUN_FRAME_COUNT * 0.5 else 6))
+	hero_sprite.rotation = _facing * 0.075 * brace
+	hero_sprite.position.y += brace
 
 
 func _animate_turn() -> void:
@@ -2018,7 +2098,10 @@ func _animate_turn() -> void:
 		1.0
 	)
 	var braking_weight: float = sin(turn_progress * PI)
-	_set_texture(_run_texture(6 if turn_progress >= 0.5 else 0))
+	if _weapon_id == WeaponCatalog.SWORD:
+		_set_texture(HERO_SPRINT_PIVOT if turn_progress < 0.5 else HERO_SPRINT_PUSH)
+	else:
+		_set_texture(_run_texture(6 if turn_progress >= 0.5 else 0))
 	hero_sprite.position += Vector2(
 		-_turn_from_facing * braking_weight * 1.4,
 		braking_weight * 0.35
@@ -2135,6 +2218,12 @@ func _animate_dead() -> void:
 
 func _animate_attack() -> void:
 	var attack_progress: float = 1.0 - _attack_remaining / maxf(attack_duration, 0.001)
+	if _moving_ground_slash and _weapon_id == WeaponCatalog.SWORD:
+		_animate_moving_slash(attack_progress)
+		return
+	if _moving_ground_slash and attack_progress >= 0.87 and _move_axis * _facing > 0.0:
+		_set_texture(_run_texture(_moving_slash_exit_frame()))
+		return
 	match _weapon_id:
 		WeaponCatalog.TWIN_BLADES:
 			_animate_twin_blades_attack(attack_progress)
@@ -2187,6 +2276,69 @@ func _animate_attack() -> void:
 			HERO_SCALE * lerpf(1.025, 1.0, recovery_time),
 			HERO_SCALE * lerpf(0.98, 1.0, recovery_time)
 		)
+
+
+func _moving_slash_speed_scale() -> float:
+	var progress := 1.0 - _attack_remaining / maxf(attack_duration, 0.001)
+	var approach_speed := 0.72
+	var strike_speed := 0.08
+	var recovery_start := ATTACK_HIT_PROGRESS
+	var recovery_end := 0.92
+	match _weapon_id:
+		WeaponCatalog.TWIN_BLADES:
+			approach_speed = 0.87
+			strike_speed = 0.32
+			recovery_end = 0.84
+		WeaponCatalog.GREATSWORD:
+			approach_speed = 0.70
+			strike_speed = 0.05
+			recovery_start = 0.52
+	if progress < ATTACK_HIT_PROGRESS:
+		return lerpf(approach_speed, strike_speed, smoothstep(0.0, ATTACK_HIT_PROGRESS, progress))
+	return lerpf(strike_speed, 0.92, smoothstep(recovery_start, recovery_end, progress))
+
+
+func _moving_slash_exit_frame() -> int:
+	if _weapon_id == WeaponCatalog.SWORD:
+		return 6
+	return 6 if _run_cycle < RUN_FRAME_COUNT * 0.5 else 0
+
+
+func _is_planted_strike(texture: Texture2D) -> bool:
+	if texture == null:
+		return false
+	if _weapon_id == WeaponCatalog.SWORD:
+		return texture == HERO_MOVING_SLASH_RELEASE or texture == HERO_SLASH
+	return texture.resource_path.get_file() == "hero_attack_forward_strike.png"
+
+
+func _align_forward_strike_boot(previous_texture: Texture2D) -> void:
+	var boot: Vector2 = POSE_ANCHORS.FORWARD_STRIKE_BOOTS[_weapon_id]
+	if hero_sprite.flip_h:
+		boot.x = -boot.x
+	var contact := hero_sprite.transform * (boot + hero_sprite.offset)
+	if previous_texture != _current_texture:
+		_ground_pose_origin_x = global_position.x + contact.x
+	_pose_alignment_offset.x = clampf(_ground_pose_origin_x - global_position.x - contact.x, -16.0, 16.0)
+	_pose_alignment_offset.y = BODY_FLOOR_OFFSET - contact.y
+	hero_sprite.position += _pose_alignment_offset
+
+
+func _animate_moving_slash(progress: float) -> void:
+	if progress < 0.13:
+		_set_texture(HERO_MOVING_SLASH_LOAD)
+	elif progress < 0.24:
+		_set_texture(HERO_WINDUP)
+	elif progress < ATTACK_HIT_PROGRESS:
+		_set_texture(HERO_MOVING_SLASH_RELEASE)
+	elif progress < 0.55:
+		_set_texture(HERO_SLASH)
+	elif progress < 0.77:
+		_set_texture(HERO_SLASH_FOLLOWTHROUGH)
+	elif _move_axis * _facing > 0.0:
+		_set_texture(HERO_MOVING_SLASH_STEP)
+	else:
+		_set_texture(HERO_RECOVERY)
 
 
 func _attack_pose_name(phase: String) -> StringName:

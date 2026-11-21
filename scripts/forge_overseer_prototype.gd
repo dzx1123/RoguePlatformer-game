@@ -1,6 +1,6 @@
 extends "res://scripts/forge_caster_prototype.gd"
 
-## Greybox boss with explicit warnings and damage windows; artwork remains provisional.
+## The overseer owns the phase and attack clocks used by both damage and its poses.
 signal ember_requested(origin: Vector2, target_position: Vector2)
 signal hazards_cleared
 signal overheat_started
@@ -20,6 +20,14 @@ const RIGHT := 1100.0
 const CHARGE_SPEED := 420.0
 const CHARGE_DURATION := 0.65
 const CHARGE_CONTACT_REACH := 58.0
+const HAMMER_WINDUP := 0.9
+const HAMMER_IMPACT := 0.15
+const BARRAGE_DURATION := 2.2
+const SECOND_EMBER_DELAY := 0.45
+const CHARGE_WINDUP := 0.8
+const RECOVERY_DURATION := 1.1
+const OVERLOAD_DURATION := 1.2
+var recovery_from := State.IDLE
 
 func get_charge_warning_rect() -> Rect2:
 	var endpoint := clampf(position.x + locked_facing * CHARGE_SPEED * CHARGE_DURATION, LEFT, RIGHT)
@@ -68,7 +76,7 @@ func _physics_process(delta: float) -> void:
 	if phase == 1 and _current_health <= _max_health / 2:
 		phase = 2
 		state = State.SHIFT
-		remaining = 1.2
+		remaining = OVERLOAD_DURATION
 		hazards_cleared.emit()
 		queue_redraw()
 		return
@@ -91,7 +99,7 @@ func _physics_process(delta: float) -> void:
 			if remaining <= 0:
 				state = State.HAMMER_HIT
 				sound_requested.emit(&"goblin_attack", true)
-				remaining = 0.15
+				remaining = HAMMER_IMPACT
 				hit_spent = true
 				if hammer_rect.intersects(Rect2(_target.position - Vector2(18, 28), Vector2(36, 56))):
 					_target.receive_enemy_attack(hammer_rect.get_center(), _get_scaled_damage(20), &"forge_boss_hammer")
@@ -99,7 +107,7 @@ func _physics_process(delta: float) -> void:
 			if remaining <= 0:
 				_recover()
 		State.BARRAGE:
-			if not second_ember and remaining <= 1.75:
+			if not second_ember and remaining <= BARRAGE_DURATION - SECOND_EMBER_DELAY:
 				second_ember = true
 				ember_requested.emit(position, _target.position)
 			if remaining <= 0:
@@ -134,27 +142,53 @@ func _begin_attack(kind: int) -> void:
 	match kind:
 		0:
 			state = State.HAMMER_WARNING
-			remaining = 0.9
+			remaining = HAMMER_WINDUP
 			var x := clampf(_target.position.x, position.x - 200, position.x + 200)
 			hammer_rect = Rect2(clampf(x - 80, 120, 1000), 545, 160, 75)
 		1:
 			state = State.BARRAGE
-			remaining = 2.2
+			remaining = BARRAGE_DURATION
 			second_ember = false
 			ember_requested.emit(position, _target.position)
 		2:
 			state = State.CHARGE_WARNING
-			remaining = 0.8
+			remaining = CHARGE_WINDUP
 
 func _recover() -> void:
+	recovery_from = state
 	state = State.RECOVER
-	remaining = 1.1
+	remaining = RECOVERY_DURATION
 	velocity.x = 0
 
 func _visual_state() -> Dictionary:
-	var pose := 3 if _is_defeated else (1 if state in [State.HAMMER_WARNING, State.CHARGE_WARNING, State.SHIFT] else (2 if state in [State.HAMMER_HIT, State.CHARGE, State.BARRAGE] or (state == State.RECOVER and remaining > 0.96) else 0))
-	var duration := 0.9 if state == State.HAMMER_WARNING else (1.2 if state == State.SHIFT else 0.8)
-	return {"pose": pose, "progress": clampf(1.0 - remaining / duration, 0, 1), "facing": locked_facing}
+	if _is_defeated:
+		return _action_visual(3, MOTION.Clip.IDLE, 0.0, locked_facing)
+	match state:
+		State.HAMMER_WARNING:
+			const SWING_TIME := 0.15
+			if remaining < SWING_TIME:
+				return _action_visual(2, MOTION.Clip.HAMMER_DROP, (1.0 - remaining / SWING_TIME) * 0.5, locked_facing)
+			return _action_visual(1, MOTION.Clip.HAMMER_LIFT, (HAMMER_WINDUP - remaining) / (HAMMER_WINDUP - SWING_TIME), locked_facing)
+		State.HAMMER_HIT:
+			return _action_visual(2, MOTION.Clip.HAMMER_DROP, 1.0 - 0.5 * remaining / HAMMER_IMPACT, locked_facing)
+		State.BARRAGE:
+			var age := BARRAGE_DURATION - remaining
+			var shot_age := age - SECOND_EMBER_DELAY if age >= EMBER.WARNING + 0.18 else age
+			return _action_visual(0, MOTION.Clip.CORE_PULSE, (shot_age - EMBER.WARNING + 0.20) / 0.40, locked_facing)
+		State.CHARGE_WARNING:
+			return _action_visual(1, MOTION.Clip.SHIELD_LIFT, 1.0 - remaining / CHARGE_WINDUP, locked_facing)
+		State.CHARGE:
+			return _action_visual(2, MOTION.Clip.SHIELD_DRIVE, 1.0 - remaining / CHARGE_DURATION, locked_facing)
+		State.SHIFT:
+			var progress := 1.0 - remaining / OVERLOAD_DURATION
+			return _action_visual(1 if progress > 0.3 and progress < 0.80 else 0, MOTION.Clip.OVERLOAD, progress, locked_facing)
+		State.RECOVER:
+			var elapsed := RECOVERY_DURATION - remaining
+			if recovery_from == State.HAMMER_HIT:
+				return _action_visual(2 if elapsed < 0.14 else 0, MOTION.Clip.HAMMER_RETURN, elapsed / 0.35, locked_facing)
+			if recovery_from == State.CHARGE:
+				return _action_visual(2 if elapsed < 0.14 else 0, MOTION.Clip.SHIELD_BRAKE, elapsed / 0.4, locked_facing)
+	return _action_visual(0, MOTION.Clip.IDLE, 0.0, locked_facing)
 
 func _draw() -> void:
 	var tint := Color("#a67a65")
@@ -174,8 +208,17 @@ func _draw() -> void:
 		var area := Rect2(hammer_rect.position - position, hammer_rect.size)
 		draw_rect(area, Color(1, 0.5, 0.2, 0.23))
 		draw_rect(area, Color("#ffd085"), false, 3)
-		for x in range(0, 160, 20):
-			draw_line(area.position + Vector2(x, 75), area.position + Vector2(x + 16, 0), Color("#ffd085"), 2)
+		if state == State.HAMMER_WARNING:
+			for x in range(0, 160, 20):
+				draw_line(area.position + Vector2(x, 75), area.position + Vector2(x + 16, 0), Color("#ffd085"), 2)
+		else:
+			var flash := Color(1.0, 0.56, 0.27, remaining / HAMMER_IMPACT)
+			draw_line(Vector2(area.position.x, area.end.y - 2.0), area.end - Vector2(0.0, 2.0), flash, 5)
+	if state == State.SHIFT:
+		var progress := 1.0 - remaining / OVERLOAD_DURATION
+		var core := Vector2(locked_facing * 12, -66)
+		var band := Color(1.0, 0.62, 0.28, sin(progress * PI) * 0.85)
+		draw_arc(core, 20.0 + 22.0 * progress, 0.0, TAU, 24, band, 2.0, true)
 	if state == State.CHARGE_WARNING:
 		var warning := get_charge_warning_rect()
 		draw_rect(warning, Color(1, 0.65, 0.25, 0.10))

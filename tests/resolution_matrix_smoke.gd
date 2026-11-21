@@ -25,13 +25,12 @@ func _run_test() -> void:
 	var hud: CanvasLayer = main.get_node("HUD") as CanvasLayer
 	var required_paths: Array[String] = [
 		"BottomHUD",
-		"VitalsPanel",
-		"AbilityPanel",
-		"WeaponPanel",
+		"BottomHUD/VitalsPanel",
+		"BottomHUD/AbilityBar",
+		"BottomHUD/WeaponPanel",
 		"RoomCard",
 		"StatusToast",
-		"HealthBackground",
-		"AbilityBar",
+		"BottomHUD/VitalsPanel/HealthBackground",
 		"EntryFlow",
 		"PauseMenu",
 		"SettingsMenu",
@@ -45,12 +44,12 @@ func _run_test() -> void:
 			_fail("HUD control leaves the design viewport: %s %s" % [path, control.get_global_rect()])
 			return
 	var bottom_hud: Control = hud.get_node("BottomHUD") as Control
-	if bottom_hud.position != Vector2(0.0, 640.0) or bottom_hud.size.y != 80.0:
-		_fail("Bottom HUD no longer owns the compact ground-level dock")
+	if bottom_hud.size.x >= DESIGN_SIZE.x or bottom_hud.size.y > 64.0:
+		_fail("Combat dock is no longer compact")
 		return
-	var vitals: Control = hud.get_node("VitalsPanel") as Control
-	var abilities: Control = hud.get_node("AbilityPanel") as Control
-	var weapons: Control = hud.get_node("WeaponPanel") as Control
+	var vitals: Control = bottom_hud.get_node("VitalsPanel") as Control
+	var abilities: Control = bottom_hud.get_node("AbilityBar") as Control
+	var weapons: Control = bottom_hud.get_node("WeaponPanel") as Control
 	if vitals.get_global_rect().intersects(abilities.get_global_rect()):
 		_fail("Vitals and ability panels overlap")
 		return

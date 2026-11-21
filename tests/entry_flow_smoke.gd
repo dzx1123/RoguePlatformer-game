@@ -17,12 +17,10 @@ func _run_test() -> void:
 	if entry_flow == null or not entry_flow.visible:
 		_fail("The start screen was not shown on game entry")
 		return
-	var entry_kicker: Label = entry_flow.get_node("EntryKicker") as Label
 	var entry_subtitle: Label = main.get("_entry_subtitle") as Label
 	var about: Label = main.get_node("HUD/SettingsMenu/SettingsAbout") as Label
 	if (
-		entry_kicker.text != "踏入月夜 · 循回不息"
-		or entry_subtitle.text != "二十房月桥 · 肉鸽动作"
+		entry_subtitle.text != "月桥与铸庭 · 四十房连续旅程"
 		or (main.get_node("HUD/Title") as Label).visible
 		or (main.get_node("HUD/Controls") as Label).visible
 		or about == null or about.text.is_empty()

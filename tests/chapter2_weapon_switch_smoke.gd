@@ -15,7 +15,7 @@ func run_test() -> void:
 	scene.persistence_enabled = false
 	root.add_child(scene)
 	await create_timer(1.8).timeout
-	assert(scene.campaign_hud.get_node("WeaponPanel/WeaponSwitch").visible)
+	assert(scene.campaign_hud.get_node("BottomHUD/WeaponPanel/WeaponSwitch").visible)
 	scene.player.configure_weapon(WeaponCatalog.TWIN_BLADES)
 	var seen: Array[StringName] = []
 	for index in range(3):

@@ -3,7 +3,9 @@ extends SceneTree
 const SETTINGS_STORE := preload("res://scripts/settings_store.gd")
 const OUTPUT_DIR := "res://tests/artifacts/accessibility-matrix"
 const SAVE_PATH := "res://tests/accessibility_matrix_temp.json"
-const WINDOW_SIZE := Vector2i(1280, 720)
+const DESIGN_SIZE := Vector2i(1280, 720)
+var _window_size := DESIGN_SIZE
+var _output_dir := OUTPUT_DIR
 const SCENARIOS: Array[Dictionary] = [
 	{
 		"name": "hud_90_default",
@@ -56,17 +58,20 @@ func _capture_matrix() -> void:
 	if DisplayServer.get_name() == "headless":
 		_fail("Accessibility screenshots require a non-headless display server")
 		return
+	if "1080p" in OS.get_cmdline_user_args():
+		_window_size = Vector2i(1920, 1080)
+		_output_dir = OUTPUT_DIR + "/1080p"
 	_cleanup()
-	var output_absolute: String = ProjectSettings.globalize_path(OUTPUT_DIR)
+	var output_absolute := ProjectSettings.globalize_path(_output_dir)
 	var directory_error: Error = DirAccess.make_dir_recursive_absolute(output_absolute)
 	if directory_error != OK:
 		_fail("Could not create the accessibility capture directory")
 		return
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-	DisplayServer.window_set_size(WINDOW_SIZE)
+	DisplayServer.window_set_size(_window_size)
 	root.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 	root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
-	root.content_scale_size = WINDOW_SIZE
+	root.content_scale_size = DESIGN_SIZE
 	var main_scene := load("res://scenes/Main.tscn") as PackedScene
 	var main := main_scene.instantiate() as Node2D
 	main.set("save_enabled", false)
@@ -74,7 +79,8 @@ func _capture_matrix() -> void:
 	await physics_frame
 	await _wait_frames(16)
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-	DisplayServer.window_set_size(WINDOW_SIZE)
+	root.borderless = true
+	DisplayServer.window_set_size(_window_size)
 	await _wait_frames(8)
 
 	var settings = SETTINGS_STORE.new(SAVE_PATH)
@@ -94,17 +100,17 @@ func _capture_matrix() -> void:
 		if image == null or image.is_empty():
 			_fail("Renderer returned an empty image for %s" % String(scenario["name"]))
 			return
-		if Vector2i(image.get_width(), image.get_height()) != WINDOW_SIZE:
+		if image.get_size() != _window_size:
 			_fail("Capture size was incorrect for %s" % String(scenario["name"]))
 			return
-		var relative_path := "%s/%s.png" % [OUTPUT_DIR, String(scenario["name"])]
+		var relative_path := "%s/%s.png" % [_output_dir, String(scenario["name"])]
 		var save_error: Error = image.save_png(ProjectSettings.globalize_path(relative_path))
 		if save_error != OK:
 			_fail("Could not save %s" % relative_path)
 			return
-		var room_label := main.get_node("HUD/RoomProgress") as Label
-		var health_background := main.get_node("HUD/HealthBackground") as Control
-		var health_fill := main.get_node("HUD/HealthBackground/HealthFill") as ColorRect
+		var room_label := main.get_node("HUD/RoomCard/RoomProgress") as Label
+		var health_background := main.get_node("HUD/BottomHUD/VitalsPanel/HealthBackground") as Control
+		var health_fill := health_background.get_node("HealthFill") as ColorRect
 		entries.append({
 			"name": scenario["name"],
 			"path": relative_path,
@@ -114,7 +120,7 @@ func _capture_matrix() -> void:
 			"high_contrast": scenario["high_contrast"],
 			"color_blind": scenario["color_blind"],
 			"reduced_effects": scenario["reduced_effects"],
-			"applied_health_scale": health_background.scale.x,
+			"applied_health_scale": health_background.get_global_transform().get_scale().x,
 			"room_font_size": room_label.get_theme_font_size("font_size"),
 			"room_color": room_label.get_theme_color("font_color").to_html(),
 			"health_color": health_fill.color.to_html(),
@@ -129,13 +135,13 @@ func _capture_matrix() -> void:
 
 
 func _write_report(entries: Array[Dictionary]) -> bool:
-	var report_path := "%s/report.json" % OUTPUT_DIR
+	var report_path := "%s/report.json" % _output_dir
 	var report := FileAccess.open(report_path, FileAccess.WRITE)
 	if report == null:
 		_fail("Could not open the accessibility report for writing")
 		return false
 	report.store_string(JSON.stringify({
-		"window_size": [WINDOW_SIZE.x, WINDOW_SIZE.y],
+		"window_size": [_window_size.x, _window_size.y],
 		"captures": entries,
 	}, "\t"))
 	report.close()

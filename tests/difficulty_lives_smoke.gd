@@ -13,29 +13,24 @@ func _run_test() -> void:
 	for _settle_frame in range(12):
 		await physics_frame
 
-	var lives_label: Label = main.get_node("HUD/Lives") as Label
-	var ability_bar: Control = main.get_node("HUD/AbilityBar") as Control
-	var status_label: Label = main.get_node("HUD/CombatStatus") as Label
+	var bottom_hud := main.get_node("HUD/BottomHUD") as Control
+	var lives_label := bottom_hud.get_node("VitalsPanel/Lives") as Label
+	var ability_bar := bottom_hud.get_node("AbilityBar") as Control
+	var status_label := main.get_node("HUD/StatusToast/CombatStatus") as Label
 	var room_card: Panel = main.get_node("HUD/RoomCard") as Panel
 	var status_card: Panel = main.get_node("HUD/StatusToast") as Panel
-	var bottom_hud: Panel = main.get_node("HUD/BottomHUD") as Panel
-	var vitals_panel: Panel = main.get_node("HUD/VitalsPanel") as Panel
-	var ability_panel: Panel = main.get_node("HUD/AbilityPanel") as Panel
-	var weapon_panel: Panel = main.get_node("HUD/WeaponPanel") as Panel
+	var vitals_panel := bottom_hud.get_node("VitalsPanel") as Panel
+	var weapon_panel := bottom_hud.get_node("WeaponPanel") as Panel
 	var viewport_size: Vector2 = main.get_viewport_rect().size
 	if (
 		viewport_size != Vector2(1280.0, 720.0)
-		or bottom_hud.position != Vector2(0.0, 640.0)
-		or bottom_hud.position.y + bottom_hud.size.y > viewport_size.y
-		or lives_label.position.y < 640.0
-		or lives_label.position.y + lives_label.size.y > viewport_size.y
-		or ability_bar.position.y < 640.0
-		or room_card.position != Vector2(40, 40)
-		or status_label.position.x != 452.0
-		or status_card.size.x != 400.0
-		or bottom_hud.size.y != 80.0
-		or vitals_panel.position.x >= ability_panel.position.x
-		or ability_panel.position.x >= weapon_panel.position.x
+		or bottom_hud.size.x >= viewport_size.x
+		or bottom_hud.get_global_rect().end.y > viewport_size.y
+		or not vitals_panel.get_global_rect().encloses(lives_label.get_global_rect())
+		or vitals_panel.get_global_rect().end.x >= ability_bar.get_global_rect().position.x
+		or ability_bar.get_global_rect().end.x >= weapon_panel.get_global_rect().position.x
+		or room_card.get_global_rect().end.y >= 100.0
+		or not status_card.get_global_rect().encloses(status_label.get_global_rect())
 	):
 		_fail("Dedicated 1280x720 combat dock or its three-column layout was not aligned")
 		return

@@ -92,6 +92,8 @@ const RANGED_PREFERRED_MAX_X := 300.0
 const MELEE_ATTACK_DURATION := 0.42
 const MELEE_ATTACK_HIT_DELAY := 0.17
 const MELEE_ATTACK_COOLDOWN := 0.95
+const DIRECTIONAL_MELEE_WINDUP := 0.30
+const DIRECTIONAL_MELEE_BODY_TOLERANCE := 8.0
 const RANGED_ATTACK_DURATION := 0.58
 const RANGED_ATTACK_FIRE_DELAY := RANGED_ATTACK_DURATION * 0.5
 const RANGED_ATTACK_COOLDOWN := 1.35
@@ -148,6 +150,8 @@ const NIGHT_BAT_STRIKE_RANGE := Vector2(74.0, 66.0)
 const NIGHT_BAT_FLAP_FPS := 9.0
 const NIGHT_BAT_SPRITE_SCALE := 2.15
 
+var directional_melee := false
+var directional_melee_floor_y := INF
 var _variant: int = 0
 var _role: int = EnemyRole.MELEE
 var _rank: int = EnemyRank.NORMAL
@@ -1151,6 +1155,8 @@ func _start_attack() -> void:
 	_attack_remaining = _get_attack_duration()
 	_attack_cooldown_remaining = _get_attack_cooldown()
 	_attack_action_performed = false
+	if directional_melee:
+		velocity.x = 0.0
 	var attack_voice: StringName = &"slime_attack"
 	if _family == EnemyFamily.GOBLIN:
 		attack_voice = &"goblin_attack"
@@ -1175,6 +1181,8 @@ func _get_attack_duration() -> float:
 		base_duration = RANGED_ATTACK_DURATION if is_ranged_enemy() else MELEE_ATTACK_DURATION
 		if _is_caster():
 			base_duration *= 1.16
+		elif directional_melee:
+			base_duration += DIRECTIONAL_MELEE_WINDUP - MELEE_ATTACK_HIT_DELAY
 	return base_duration * _telegraph_scale
 
 
@@ -1194,6 +1202,8 @@ func _get_attack_action_delay() -> float:
 		base_delay = RANGED_ATTACK_FIRE_DELAY if is_ranged_enemy() else MELEE_ATTACK_HIT_DELAY
 		if _is_caster():
 			base_delay *= 1.16
+		elif directional_melee:
+			base_delay = DIRECTIONAL_MELEE_WINDUP
 	return base_delay * _telegraph_scale
 
 
@@ -1289,6 +1299,9 @@ func _hit_target_if_still_close() -> void:
 			or absf(boss_melee_offset.y) > _get_boss_lunge_reach_y()
 		):
 			return
+	elif directional_melee:
+		if not _target_is_visible() or not get_directional_melee_bounds().has_point(_target.global_position - global_position):
+			return
 	elif not _target_in_attack_range():
 		return
 	if _target.has_method(&"receive_enemy_attack"):
@@ -1309,6 +1322,11 @@ func _hit_target_if_still_close() -> void:
 		elif _is_crystal_king():
 			damage_cause = &"crystal_king_lunge"
 		_target.call(&"receive_enemy_attack", global_position, damage, damage_cause)
+
+
+func get_directional_melee_bounds() -> Rect2:
+	var left := -DIRECTIONAL_MELEE_BODY_TOLERANCE if _facing > 0.0 else -MELEE_ATTACK_REACH_X
+	return Rect2(left, -MELEE_ATTACK_REACH_Y, MELEE_ATTACK_REACH_X + DIRECTIONAL_MELEE_BODY_TOLERANCE, MELEE_ATTACK_REACH_Y * 2.0)
 
 
 func _night_bat_target_in_strike_range() -> bool:
@@ -2087,11 +2105,20 @@ func _update_sprite_animation(delta: float = 1.0 / 60.0) -> void:
 		animation_column = mini(1, int(floor(hurt_progress * 2.0)))
 	elif _attack_remaining > 0.0:
 		animation_row = 2
+		var attack_duration := _get_attack_duration()
 		attack_progress = clampf(
-			1.0 - _attack_remaining / maxf(_get_attack_duration(), 0.001),
+			1.0 - _attack_remaining / maxf(attack_duration, 0.001),
 			0.0,
 			0.999
 		)
+		if directional_melee:
+			var windup := _get_attack_action_delay()
+			var elapsed := attack_duration - _attack_remaining
+			# The third sprite cell is the bite. Start it on the damage tick.
+			if _attack_action_performed:
+				attack_progress = 0.5 + 0.499 * clampf(inverse_lerp(windup, attack_duration, elapsed), 0.0, 1.0)
+			else:
+				attack_progress = 0.499 * clampf(elapsed / windup, 0.0, 1.0)
 		if _family == EnemyFamily.GOBLIN:
 			animation_column = _get_goblin_attack_column(attack_progress)
 		elif is_boss():
@@ -2231,6 +2258,8 @@ func _draw() -> void:
 				charge_radius,
 				charge_color
 			)
+		elif directional_melee and not _attack_action_performed:
+			_draw_directional_melee_warning()
 
 	if _current_health < _max_health and not _is_defeated:
 		var health_ratio: float = float(_current_health) / float(maxi(_max_health, 1))
@@ -2245,6 +2274,26 @@ func _draw() -> void:
 			Rect2(-bar_width * 0.5 + 2.0, bar_y + 2.0, (bar_width - 4.0) * health_ratio, 2.0),
 			Color(0.96, 0.20, 0.22, 0.96)
 		)
+
+
+func _draw_directional_melee_warning() -> void:
+	var bounds := get_directional_melee_bounds()
+	var bottom_y := minf(bounds.end.y, directional_melee_floor_y - global_position.y - 1.0)
+	bounds.size.y = bottom_y - bounds.position.y
+	if bounds.size.y < 12.0:
+		return
+	var color := Color("#ffd583")
+	draw_rect(bounds, Color(color, 0.13))
+	draw_rect(bounds, Color(color, 0.75), false, 1.5)
+	var floor_y := minf(get_impact_bounds().end.y - global_position.y - 2.0, bottom_y - 6.0)
+	var start_x := bounds.position.x if _facing > 0.0 else bounds.end.x
+	var tip_x := bounds.end.x if _facing > 0.0 else bounds.position.x
+	var elapsed := _get_attack_duration() - _attack_remaining
+	var progress := clampf(elapsed / _get_attack_action_delay(), 0.0, 1.0)
+	var tip := Vector2(tip_x, floor_y)
+	draw_line(Vector2(start_x, floor_y), Vector2(lerpf(start_x, tip_x, progress), floor_y), color, 2.5)
+	var arrow_base := tip - Vector2(_facing * 9.0, 0)
+	draw_polyline(PackedVector2Array([arrow_base + Vector2(0, -5), tip, arrow_base + Vector2(0, 5)]), color, 2.0, true)
 
 
 func _draw_archetype_marker() -> void:

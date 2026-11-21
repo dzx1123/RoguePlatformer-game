@@ -15,8 +15,13 @@ func _run_test() -> void:
 	_add_safety_floor(main)
 	var player: RoguePlayer = main.get_node("Player") as RoguePlayer
 	player.attack_hit.connect(_on_attack_hit)
-	for _settle_frame in range(20):
+	for _settle_frame in range(120):
+		if player._arrival_remaining <= 0.0 and player._input_enabled and player.is_on_floor():
+			break
 		await physics_frame
+	if player._arrival_remaining > 0.0 or not player._input_enabled or not player.is_on_floor():
+		_fail("The starting room never released the player controls")
+		return
 
 	var initial_enemies: Array = main.get("_enemies") as Array
 	if initial_enemies.size() < 2:

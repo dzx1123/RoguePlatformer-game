@@ -78,6 +78,7 @@ func run_test() -> void:
 	check(is_equal_approx(journey.input_settings.get_music_volume(), 0.35))
 	menu._settings_reduced_effects_toggle.button_pressed = true
 	check(journey.player.get_reduced_effects_enabled())
+	menu._settings_overlay.get_node("ControlsTab").pressed.emit()
 	menu._settings_key_buttons[&"attack"].pressed.emit()
 	await send_key(KEY_U)
 	check(journey.input_settings.get_combined_binding_name(&"attack").contains("U"))
@@ -104,7 +105,7 @@ func run_test() -> void:
 	check(menu._pause_overlay.get_index() > journey.reward_view.get_index(), "Pause must cover reward cards")
 	menu._open_settings(true)
 	var heading: Label = menu._settings_overlay.get_node("SettingsGuideCard/Heading")
-	check(not Rect2(heading.global_position, Vector2(340, heading.size.y)).intersects(menu._settings_tutorial_toggle.get_global_rect()), "Tutorial toggle must not overlap the guide heading")
+	check(not heading.get_global_rect().intersects(menu._settings_tutorial_toggle.get_global_rect()), "Tutorial toggle must not overlap the guide heading")
 	check(menu._settings_overlay.get_index() > journey.reward_view.get_index(), "Settings must cover reward cards")
 	menu._close_settings()
 	await send_key(KEY_ESCAPE)

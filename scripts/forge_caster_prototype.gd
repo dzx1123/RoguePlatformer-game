@@ -2,21 +2,28 @@ extends "res://scripts/rogue_enemy.gd"
 
 ## Forge enemy movement and shared rendering; retains existing hit geometry.
 const ART := preload("res://scripts/forge_character_art.gd")
+const MOTION := preload("res://scripts/forge_actor_motion.gd")
+const EMBER := preload("res://scripts/forge_ember.gd")
+const CAST_DURATION := EMBER.WARNING + EMBER.FLIGHT
+const RELEASE_POSE_DURATION := 0.10
+const RETURN_POSE_DURATION := 0.28
 var cast_pose_time := 0.0
 var animation_time := 0.0
 var walk_direction := -1.0
 var walk_origin := 0.0
 var _ledge_turn_remaining := 0.0
-var actor_motion := preload("res://scripts/forge_actor_motion.gd").new()
+var actor_motion := MOTION.new()
 var _cast_facing := 1.0
 var _was_casting := false
+var _cast_ember: EMBER
 
 func _process(delta: float) -> void:
 	# Follow combat processing so menu pauses and event choices freeze animation too.
 	if is_physics_processing() and _hitstop_remaining <= 0.0:
 		animation_time += delta
 		var visual := _visual_state()
-		actor_motion.advance(delta, velocity.x, is_on_floor(), int(visual.pose) == 0 and not _is_defeated and _hurt_remaining <= 0, _pose_motion(int(visual.pose), float(visual.progress)), float(visual.facing), get_impact_height() * 0.65)
+		var walking: bool = visual.clip == MOTION.Clip.IDLE and visual.pose == 0 and not _is_defeated and _hurt_remaining <= 0
+		actor_motion.advance(delta, velocity.x, is_on_floor(), walking, _pose_motion(int(visual.pose), float(visual.progress)), float(visual.facing), get_impact_height() * 0.42)
 		queue_redraw()
 
 func _pose_motion(pose: int, progress: float = 0.0) -> Vector2:
@@ -32,12 +39,40 @@ func _pose_motion(pose: int, progress: float = 0.0) -> Vector2:
 	return Vector2(1.0 - breath, 1.0 + breath)
 
 func _visual_state() -> Dictionary:
-	var pose := 3 if _is_defeated else (1 if cast_pose_time > 0.8 else (2 if cast_pose_time > 0.18 else 0))
-	return {"pose": pose, "progress": clampf((1.52 - cast_pose_time) / 0.72, 0, 1), "facing": _cast_facing if cast_pose_time > 0 else _art_facing()}
+	if _is_defeated:
+		return _action_visual(3, MOTION.Clip.IDLE, 0.0, _art_facing())
+	if cast_pose_time > 0.0:
+		var age := CAST_DURATION - cast_pose_time
+		if age < EMBER.WARNING:
+			return _action_visual(1, MOTION.Clip.CAST_LIFT, age / EMBER.WARNING, _cast_facing)
+		var released := age - EMBER.WARNING
+		if released < RELEASE_POSE_DURATION:
+			return _action_visual(2, MOTION.Clip.CAST_RELEASE, released / RELEASE_POSE_DURATION, _cast_facing)
+		if released < RELEASE_POSE_DURATION + RETURN_POSE_DURATION:
+			return _action_visual(0, MOTION.Clip.CAST_RETURN, (released - RELEASE_POSE_DURATION) / RETURN_POSE_DURATION, _cast_facing)
+		return _action_visual(0, MOTION.Clip.IDLE, 0.0, _cast_facing)
+	return _action_visual(0, MOTION.Clip.IDLE, 0.0, _art_facing())
+
+func _action_visual(pose: int, clip: MOTION.Clip, progress: float, facing: float) -> Dictionary:
+	return {"pose": pose, "clip": clip, "progress": clampf(progress, 0.0, 1.0), "facing": facing}
 
 func _draw_actor(row: int) -> void:
 	var visual := _visual_state()
-	ART.draw_actor(self, row, int(visual.pose), float(visual.facing), get_impact_height(), _hurt_remaining > 0, _art_alpha(), actor_motion.shape, actor_motion.phase, actor_motion.weight)
+	ART.draw_actor(self, row, int(visual.pose), float(visual.facing), get_impact_height(), _hurt_remaining > 0, _art_alpha(), actor_motion.shape, actor_motion.phase, actor_motion.weight, visual.clip, float(visual.progress))
+
+func begin_ember_cast(ember: EMBER) -> void:
+	_lock_cast_facing()
+	_cast_ember = ember
+	cast_pose_time = CAST_DURATION
+	_was_casting = true
+
+func get_ember_release_point() -> Vector2:
+	return to_global(ART.caster_release_point(get_impact_height(), _cast_facing))
+
+func _lock_cast_facing() -> void:
+	_cast_facing = signf(_target.position.x - position.x) if is_instance_valid(_target) else _art_facing()
+	if is_zero_approx(_cast_facing):
+		_cast_facing = actor_motion.facing
 
 func _ready() -> void:
 	super._ready()
@@ -63,10 +98,8 @@ func _physics_process(delta: float) -> void:
 		return
 	_hurt_remaining = maxf(0, _hurt_remaining - delta)
 	if cast_pose_time > 0 and not _was_casting:
-		_cast_facing = signf(_target.position.x - position.x) if is_instance_valid(_target) else _art_facing()
-		if is_zero_approx(_cast_facing):
-			_cast_facing = actor_motion.facing
-	cast_pose_time = maxf(0, cast_pose_time - delta)
+		_lock_cast_facing()
+	cast_pose_time = maxf(0, CAST_DURATION - _cast_ember.age) if is_instance_valid(_cast_ember) else maxf(0, cast_pose_time - delta)
 	_was_casting = cast_pose_time > 0
 	_hurt_invulnerability_remaining = maxf(0, _hurt_invulnerability_remaining - delta)
 	if cast_pose_time <= 0 and _hurt_remaining <= 0:

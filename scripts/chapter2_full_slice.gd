@@ -2,6 +2,7 @@ extends "res://scripts/chapter2_mid_slice.gd"
 
 const FINAL := preload("res://scripts/chapter2_final_catalog.gd")
 const BOSS := preload("res://scripts/forge_overseer_prototype.gd")
+const SUPPLY_HEAL := 40
 var overseer: RogueEnemy
 var branch_choices: Dictionary = {}
 var overheat := false
@@ -98,8 +99,11 @@ func _choice_options(kind: StringName) -> Array:
 	if kind == &"branch":
 		return ["上路 · 高台上的 1 名守卫", "下路 · 宽阔地面的 2 只甲虫"]
 	if kind == &"supply":
-		return ["恢复 40 生命（实际 %d）" % mini(40, player.get_max_health() - player.get_current_health()), "生命铸纹 · 最大生命及当前生命 +20（满层改领 15 金币）"]
+		return ["恢复 %d 生命（实际 %d）" % [SUPPLY_HEAL, _supply_recovery()], "生命铸纹 · 最大生命及当前生命 +20（满层改领 15 金币）"]
 	return super._choice_options(kind)
+
+func _supply_recovery() -> int:
+	return mini(SUPPLY_HEAL, player.get_max_health() - player.get_current_health())
 
 func _select_option(index: int) -> void:
 	if choice_kind in [&"branch", &"supply"]:
@@ -121,7 +125,7 @@ func choose_final_option(index: int) -> bool:
 		last_reward = "已选择上路；仅需击败高台守卫" if index == 0 else "已选择下路；仅需击败两只甲虫"
 	else:
 		if index == 0:
-			last_reward = "战前补给：恢复 %d 生命" % player.heal(40)
+			last_reward = "战前补给：恢复 %d 生命" % player.heal(SUPPLY_HEAL)
 		elif not player.apply_run_upgrade(&"vitality_rune"):
 			gold += 15
 			last_reward = "生命铸纹已满层：金币 +15"
@@ -151,11 +155,18 @@ func _objective_text() -> String:
 func _completion_text() -> String:
 	return "第二章试玩完成 · 第三章待开放"
 
+func _branch_interaction_prompt() -> String:
+	return "交互：上路 / 下路"
+
 func _draw() -> void:
 	super._draw()
 	if room_index == 16 and not branch_choices.has(37):
-		draw_line(BRANCH_SIGN, BRANCH_SIGN - Vector2(0, 80), Color("#8ce1d5"), 5)
-		draw_string(ThemeDB.fallback_font, BRANCH_SIGN - Vector2(80, 100), "交互：上路 / 下路", HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
+		var sign_face := Rect2(BRANCH_SIGN - Vector2(92, 95), Vector2(184, 38))
+		var frame := Color("#8ce1d5")
+		draw_line(BRANCH_SIGN + Vector2(0, 27), sign_face.get_center(), frame.darkened(0.40), 5)
+		draw_rect(sign_face, Color("#132a30"))
+		draw_rect(sign_face, frame, false, 1.5)
+		draw_string(ThemeDB.fallback_font, sign_face.position + Vector2(6, 25), _branch_interaction_prompt(), HORIZONTAL_ALIGNMENT_CENTER, sign_face.size.x - 12, 17, frame)
 	if route_complete:
 		draw_rect(Rect2(300, 240, 680, 190), Color("#19212b"))
 		draw_string(ThemeDB.fallback_font, Vector2(380, 295), "余烬铸庭 · 20 房独立试玩已完成", HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color("#ffce92"))
@@ -165,5 +176,5 @@ func _draw() -> void:
 func _draw_forge_background() -> void:
 	super._draw_forge_background()
 	if room_index == 15:
-		# Background pass only: platform edges, actors and warnings are drawn afterward.
-		draw_rect(Rect2(0, 110, 1280, 510), Color(0.02, 0.025, 0.05, 0.45))
+		# Dim the back wall uniformly, before drawing treads, actors and warnings.
+		draw_rect(Rect2(Vector2.ZERO, ROOM_SIZE), Color(0.02, 0.025, 0.05, 0.30))

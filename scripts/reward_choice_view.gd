@@ -1,8 +1,12 @@
 extends Control
 class_name RewardChoiceView
 signal selected(index: int)
+signal shop_exit_requested
 const UI = preload("res://scripts/ui_theme.gd")
 const DISPLAY_SIZE = Vector2(1280, 720)
+const CARD_SIZE := Vector2(300.0, 316.0)
+const CARD_GAP := 28.0
+const CARD_TOP := 176.0
 var hud: Node
 var _settings
 var _soundscape
@@ -15,6 +19,7 @@ var _upgrade_kicker: Label
 var _upgrade_title: Label
 var _upgrade_hint: Label
 var _upgrade_buttons: Array[Button] = []
+var shop_exit_button: Button
 var _upgrade_tween: Tween
 var _upgrade_victory_summary: Control
 func build(settings, soundscape = null) -> void:
@@ -25,6 +30,9 @@ func build(settings, soundscape = null) -> void:
 func _on_upgrade_button_pressed(index: int) -> void:
 	selected.emit(index)
 func _hide_upgrade_overlay() -> void:
+	if _upgrade_tween != null and _upgrade_tween.is_valid():
+		_upgrade_tween.kill()
+	shop_exit_button.hide()
 	_upgrade_overlay.hide()
 func _create_surface_style(fill: Color, stroke: Color, radius: int, border: int, padding: int) -> StyleBoxFlat:
 	return UI.surface(fill, stroke, radius, border, padding)
@@ -104,28 +112,57 @@ func _create_upgrade_ui() -> void:
 	for choice_index in range(3):
 		var button := Button.new()
 		button.name = "Upgrade_%d" % (choice_index + 1)
-		button.position = Vector2(50.0 + float(choice_index) * 340.0, 180.0)
-		button.size = Vector2(300.0, 340.0)
+		button.size = CARD_SIZE
 		button.pivot_offset = button.size * 0.5
 		button.add_theme_font_size_override("font_size", 19)
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.alignment = HORIZONTAL_ALIGNMENT_CENTER
 		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		button.pressed.connect(_on_upgrade_button_pressed.bind(choice_index))
-		button.mouse_entered.connect(_on_upgrade_card_hovered.bind(button, true))
-		button.mouse_exited.connect(_on_upgrade_card_hovered.bind(button, false))
-		button.focus_entered.connect(_on_upgrade_card_hovered.bind(button, true))
-		button.focus_exited.connect(_on_upgrade_card_hovered.bind(button, false))
 		_create_upgrade_card_content(button)
 		_style_upgrade_card(button, {})
 		_upgrade_panel.add_child(button)
 		_upgrade_buttons.append(button)
-	_configure_horizontal_focus(_upgrade_buttons)
-
-
-
+	shop_exit_button = Button.new()
+	shop_exit_button.name = "ShopExit"
+	shop_exit_button.position = Vector2(420, 516)
+	shop_exit_button.size = Vector2(280, 48)
+	shop_exit_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	shop_exit_button.add_theme_stylebox_override("normal", UI.surface(UI.BG_DEEP, UI.STROKE_QUIET))
+	var focused_exit := UI.surface(UI.BG_PANEL_ELEV, UI.ACCENT_GOLD, UI.CHIP_RADIUS, 2)
+	shop_exit_button.add_theme_stylebox_override("hover", focused_exit)
+	shop_exit_button.add_theme_stylebox_override("focus", focused_exit)
+	shop_exit_button.add_theme_stylebox_override("pressed", focused_exit)
+	shop_exit_button.pressed.connect(func(): shop_exit_requested.emit())
+	_upgrade_panel.add_child(shop_exit_button)
 	_hide_upgrade_overlay()
 
+
+func set_shop_exit_prompt(shortcut: String) -> void:
+	shop_exit_button.text = "离开商店  [%s]" % shortcut
+	shop_exit_button.add_theme_font_size_override("font_size", UI.BODY + (2 if _settings != null and _settings.get_large_text_enabled() else 0))
+
+
+func is_choice_action(control: Control) -> bool:
+	return control != null and (control in _upgrade_buttons or control == shop_exit_button)
+
+
+func focus_choice(preferred: Control = null) -> bool:
+	if _can_focus_choice(preferred):
+		preferred.grab_focus()
+		return true
+	for button in _upgrade_buttons:
+		if _can_focus_choice(button):
+			button.grab_focus()
+			return true
+	if _can_focus_choice(shop_exit_button):
+		shop_exit_button.grab_focus()
+		return true
+	return false
+
+
+func _can_focus_choice(control: Control) -> bool:
+	return is_choice_action(control) and control.is_visible_in_tree() and not (control as Button).disabled and control.focus_mode != Control.FOCUS_NONE
 
 
 func _style_upgrade_card(button: Button, choice: Dictionary) -> void:
@@ -139,10 +176,11 @@ func _style_upgrade_card(button: Button, choice: Dictionary) -> void:
 		"事件": accent = UI.ACCENT_OMEN
 	if _flow_state.shopping:
 		accent = UI.ACCENT_GOLD
-	button.add_theme_stylebox_override("normal", UI.card(accent))
-	button.add_theme_stylebox_override("hover", UI.card(accent, true))
-	button.add_theme_stylebox_override("focus", UI.card(accent, true))
-	button.add_theme_stylebox_override("pressed", UI.card(accent, true))
+	button.add_theme_stylebox_override("normal", UI.surface(UI.BG_PANEL, UI.STROKE_QUIET, 12, 1, 6))
+	var focused := UI.surface(UI.BG_PANEL_ELEV, accent, 12, 2)
+	button.add_theme_stylebox_override("hover", focused)
+	button.add_theme_stylebox_override("focus", focused)
+	button.add_theme_stylebox_override("pressed", focused)
 	button.add_theme_stylebox_override("disabled", UI.surface(UI.BG_DEEP, UI.STROKE_QUIET))
 	button.add_theme_color_override("font_color", UI.TEXT_PRIMARY)
 	button.add_theme_color_override("font_hover_color", UI.TEXT_PRIMARY)
@@ -189,25 +227,23 @@ func _create_upgrade_card_content(button: Button) -> void:
 
 	var rarity_label := Label.new()
 	rarity_label.name = "CardRarity"
-	rarity_label.position = Vector2(20.0, 20.0)
-	rarity_label.size = Vector2(260.0, 22.0)
-	rarity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rarity_label.position = Vector2(23.0, 20.0)
+	rarity_label.size = Vector2(254.0, 22.0)
 	rarity_label.add_theme_font_size_override("font_size", 14)
 	rarity_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	button.add_child(rarity_label)
 
 	var separator := ColorRect.new()
 	separator.name = "CardSeparator"
-	separator.position = Vector2(30.0, 57.0)
-	separator.size = Vector2(240.0, 1.0)
+	separator.position = Vector2(24.0, 139.0)
+	separator.size = Vector2(252.0, 1.0)
 	separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	button.add_child(separator)
 
 	var title_label := Label.new()
 	title_label.name = "CardTitle"
-	title_label.position = Vector2(24.0, 134.0)
-	title_label.size = Vector2(252.0, 44.0)
-	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_label.position = Vector2(23.0, 84.0)
+	title_label.size = Vector2(254.0, 48.0)
 	title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title_label.add_theme_font_size_override("font_size", UI.HEADLINE)
@@ -227,18 +263,17 @@ func _create_upgrade_card_content(button: Button) -> void:
 	button.add_child(sigil_label)
 	var emblem := Control.new()
 	emblem.name = "CardEmblem"
-	emblem.position = Vector2(94, 53)
+	emblem.position = Vector2(218, 13)
 	emblem.size = Vector2(112, 80)
+	emblem.scale = Vector2(0.55, 0.55)
 	emblem.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	emblem.draw.connect(func(): UI.draw_reward_emblem(emblem, emblem.get_meta(&"accent", UI.ACCENT_MOON), String(emblem.get_meta(&"identity", ""))))
 	button.add_child(emblem)
 
 	var description_label := Label.new()
 	description_label.name = "CardDescription"
-	description_label.position = Vector2(26.0, 185.0)
-	description_label.size = Vector2(248.0, 66.0)
-	description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	description_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	description_label.position = Vector2(23.0, 156.0)
+	description_label.size = Vector2(254.0, 70.0)
 	description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	description_label.add_theme_font_size_override("font_size", UI.BODY)
 	description_label.add_theme_color_override("font_color", UI.TEXT_SECONDARY)
@@ -247,9 +282,9 @@ func _create_upgrade_card_content(button: Button) -> void:
 
 	var cost_label := Label.new()
 	cost_label.name = "CardCost"
-	cost_label.position = Vector2(20, 252)
-	cost_label.size = Vector2(260, 26)
-	cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cost_label.position = Vector2(23, 232)
+	cost_label.size = Vector2(254, 36)
+	cost_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	cost_label.add_theme_font_size_override("font_size", UI.CAPTION)
 	cost_label.add_theme_color_override("font_color", UI.ACCENT_RISK)
 	cost_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -257,15 +292,15 @@ func _create_upgrade_card_content(button: Button) -> void:
 
 	var badge := Panel.new()
 	badge.name = "CardBadge"
-	badge.position = Vector2(44, 281)
-	badge.size = Vector2(212, 40)
+	badge.position = Vector2(18, 270)
+	badge.size = Vector2(264, 34)
 	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	button.add_child(badge)
 
 	var footer_label := Label.new()
 	footer_label.name = "CardFooter"
-	footer_label.position = Vector2(20.0, 282.0)
-	footer_label.size = Vector2(260.0, 38.0)
+	footer_label.position = Vector2(23.0, 270.0)
+	footer_label.size = Vector2(254.0, 34.0)
 	footer_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	footer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	footer_label.add_theme_font_size_override("font_size", 13)
@@ -283,26 +318,15 @@ func _set_upgrade_card_content(
 	footer_text: String
 ) -> void:
 	button.text = ""
-	button.tooltip_text = "%s · %s" % [card_name, description]
+	var cost := (button.get_node("CardCost") as Label).text
+	var tooltip_lines := [card_name, description, cost].filter(func(line: String) -> bool: return not line.is_empty())
+	button.tooltip_text = "\n".join(PackedStringArray(tooltip_lines))
 	(button.get_node("CardRarity") as Label).text = "[%s]  %s" % [shortcut, rarity_name]
 	(button.get_node("CardTitle") as Label).text = card_name
-	(button.get_node("CardDescription") as Label).text = description
+	var effect := button.get_node("CardDescription") as Label
+	effect.text = description
+	effect.add_theme_font_size_override("font_size", UI.BODY + (2 if _settings != null and _settings.get_large_text_enabled() else 0))
 	(button.get_node("CardFooter") as Label).text = footer_text
-
-
-
-func _on_upgrade_card_hovered(button: Button, emphasized: bool) -> void:
-	if button.disabled or not button.visible:
-		return
-	var choice_index: int = _upgrade_buttons.find(button)
-	if choice_index < 0:
-		return
-	var resting_position := Vector2(50.0 + float(choice_index) * 340.0, 180.0)
-	var reduced: bool = _settings != null and _settings.get_reduced_effects_enabled()
-	var target_position := resting_position + (Vector2(0.0, -8.0) if emphasized and not reduced else Vector2.ZERO)
-	var tween := button.create_tween().set_parallel(true)
-	tween.tween_property(button, "position", target_position, 0.12)
-	button.scale = Vector2.ONE
 
 
 
@@ -330,11 +354,15 @@ func _play_upgrade_overlay_intro() -> void:
 	if is_instance_valid(_upgrade_victory_summary) and _upgrade_victory_summary.visible:
 		_upgrade_victory_summary.position = Vector2(50.0, 180.0 + enter_offset)
 		_upgrade_victory_summary.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	for choice_index in range(_upgrade_buttons.size()):
-		var button: Button = _upgrade_buttons[choice_index]
-		if not button.visible:
-			continue
-		var resting_position := Vector2(50.0 + float(choice_index) * 340.0, 180.0)
+	var visible_cards := _upgrade_buttons.filter(func(button: Button) -> bool: return button.visible)
+	shop_exit_button.visible = _flow_state.shopping
+	shop_exit_button.disabled = false
+	_configure_choice_navigation(visible_cards.filter(func(button: Button) -> bool: return not button.disabled))
+	var row_width := float(visible_cards.size()) * (CARD_SIZE.x + CARD_GAP) - CARD_GAP
+	var row_start := (panel.size.x - row_width) * 0.5
+	for choice_index in range(visible_cards.size()):
+		var button: Button = visible_cards[choice_index]
+		var resting_position := Vector2(row_start + float(choice_index) * (CARD_SIZE.x + CARD_GAP), CARD_TOP)
 		button.position = resting_position + Vector2(0.0, enter_offset)
 		button.scale = Vector2.ONE
 		button.modulate = Color(1.0, 1.0, 1.0, 0.0)
@@ -352,25 +380,38 @@ func _play_upgrade_overlay_intro() -> void:
 		_upgrade_tween.tween_property(
 			_upgrade_victory_summary, "position", Vector2(50.0, 180.0), 0.34
 		).set_delay(0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	for choice_index in range(_upgrade_buttons.size()):
-		var button: Button = _upgrade_buttons[choice_index]
-		if not button.visible:
-			continue
-		var resting_position := Vector2(50.0 + float(choice_index) * 340.0, 180.0)
+	for choice_index in range(visible_cards.size()):
+		var button: Button = visible_cards[choice_index]
+		var resting_position := Vector2(row_start + float(choice_index) * (CARD_SIZE.x + CARD_GAP), CARD_TOP)
 		var delay: float = 0.08 + float(choice_index) * 0.04
 		_upgrade_tween.tween_property(button, "modulate:a", 1.0, 0.20).set_delay(delay)
 		_upgrade_tween.tween_property(button, "position", resting_position, 0.30).set_delay(delay)
 
 
 
-func _configure_horizontal_focus(buttons: Array) -> void:
-	if buttons.size() < 2:
-		return
+func _configure_choice_navigation(buttons: Array[Button]) -> void:
+	for button: Button in _upgrade_buttons:
+		button.focus_neighbor_left = NodePath()
+		button.focus_neighbor_right = NodePath()
+		button.focus_neighbor_top = NodePath()
+		button.focus_neighbor_bottom = NodePath()
+		button.focus_next = NodePath()
+		button.focus_previous = NodePath()
 	for button_index in range(buttons.size()):
-		var button: Control = buttons[button_index] as Control
-		var previous: Control = buttons[posmod(button_index - 1, buttons.size())] as Control
-		var next: Control = buttons[(button_index + 1) % buttons.size()] as Control
+		var button := buttons[button_index]
+		var previous := buttons[posmod(button_index - 1, buttons.size())]
+		var next := buttons[(button_index + 1) % buttons.size()]
 		button.focus_neighbor_left = button.get_path_to(previous)
 		button.focus_neighbor_right = button.get_path_to(next)
+		if shop_exit_button.visible:
+			button.focus_neighbor_bottom = button.get_path_to(shop_exit_button)
+			button.focus_next = button.get_path_to(shop_exit_button if button_index == buttons.size() - 1 else next)
+			button.focus_previous = button.get_path_to(shop_exit_button if button_index == 0 else previous)
+	if shop_exit_button.visible:
+		var first := buttons[0] if not buttons.is_empty() else shop_exit_button
+		var last := buttons.back() as Button if not buttons.is_empty() else shop_exit_button
+		shop_exit_button.focus_neighbor_top = shop_exit_button.get_path_to(first)
+		shop_exit_button.focus_next = shop_exit_button.get_path_to(first)
+		shop_exit_button.focus_previous = shop_exit_button.get_path_to(last)
 
 

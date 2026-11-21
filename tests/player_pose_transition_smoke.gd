@@ -51,20 +51,27 @@ func run_test() -> void:
 		Input.action_press(&"attack")
 		await frames(2)
 		Input.action_release(&"attack")
+		var moving_slash: bool = p._moving_ground_slash
 		# Heavy/light weapons retain the run frame briefly before their authored windup.
-		for tick in range(4):
-			if p._pose_transition_remaining > 0: break
-			await physics_frame
+		if not moving_slash:
+			for tick in range(4):
+				if p._pose_transition_remaining > 0: break
+				await physics_frame
 		var remaining: float = p._pose_transition_remaining
-		check(remaining > 0 and p._pose_transition.visible, "%s: run -> attack must preserve the outgoing silhouette" % weapon)
-		check(p._pose_head_position(p._pose_transition).distance_to(p._pose_head_position(p.hero_sprite)) < 0.01, "Pose blend must align both heads")
+		if moving_slash:
+			check(not p._pose_transition.visible and not p.hero_sprite.material.get_shader_parameter(&"pose_blend_active"), "Authored slash entry must show a single weapon silhouette")
+		else:
+			check(remaining > 0 and p._pose_transition.visible, "%s: run -> attack must preserve the outgoing silhouette" % weapon)
+			check(p._pose_head_position(p._pose_transition).distance_to(p._pose_head_position(p.hero_sprite)) < 0.01, "Pose blend must align both heads")
 		sample(p, 0, row)
 		await frames(2)
 		sample(p, 1, row)
-		check(p._pose_transition_remaining < remaining, "Pose transition must advance")
+		if not moving_slash:
+			check(p._pose_transition_remaining < remaining, "Pose transition must advance")
 		while p._attack_remaining > 0: await physics_frame
 		await frames(1)
-		check(p._visual_state == p.VisualState.RUN and p._pose_transition_remaining > 0, "%s: attack -> run must blend without an input lock" % weapon)
+		check(p._visual_state == p.VisualState.RUN, "%s: attack -> run must resume without an input lock" % weapon)
+		check(p._pose_transition.visible == not moving_slash, "%s: recovery should use either the planted step or the pose blend" % weapon)
 		sample(p, 2, row)
 		p._hitstop_remaining = 0.1
 		var frozen: float = p._pose_transition_remaining

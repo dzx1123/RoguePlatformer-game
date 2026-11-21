@@ -69,13 +69,26 @@ func run_test() -> void:
 	assert(scene.player.get_current_health() == 20 and scene.player.get_total_run_upgrade_count() == upgrades)
 	assert(scene.choose_mid_option(scene.offered.size()) and scene.room_index == 8)
 	# High chest requires proximity and cannot be farmed through retry.
+	var chest: Vector2 = scene.rooms[8].chest
 	scene.player.position = Vector2(650, 590)
 	assert(not scene.try_exit())
-	scene.player.position = scene.rooms[8].chest
+	assert(scene._side_chest_prompt(chest) == "高处宝箱 · 金币 +15")
+	scene.player.position = chest + Vector2(scene.CHEST_REACH, 0)
+	assert(not scene._at_side_chest(chest) and not scene.try_exit())
+	scene.player.position = chest
+	var original_binding: Array = scene.input_settings._bindings["interact"].duplicate()
+	scene.input_settings._bindings["interact"] = [KEY_U]
+	scene.using_controller = false
+	assert(scene._side_chest_prompt(chest) == "U 打开 · 金币 +15")
+	scene.using_controller = true
+	assert(scene._side_chest_prompt(chest) == "RB 打开 · 金币 +15")
+	scene.input_settings._bindings["interact"] = original_binding
+	scene.using_controller = false
 	assert(scene.try_exit() and scene.gold == 15)
 	scene.retry_room()
-	scene.player.position = scene.rooms[8].chest
+	scene.player.position = chest
 	assert(not scene.try_exit() and scene.gold == 15)
+	assert(scene._side_chest_prompt(chest) == "宝箱已领取")
 	# Accepted challenge restarts from the choice on death, with no reward.
 	scene._load_layout(12)
 	open_exit(scene)
@@ -93,20 +106,33 @@ func run_test() -> void:
 	assert(scene.choose_mid_option(scene.offered.size()) and scene.room_index == 14)
 	# Alternate whole heat cycles, never two dangerous lanes at once.
 	scene.player.set_physics_process(false)
+	var vents: Array = scene._display_vents()
+	assert(vents.size() == 2, "Both vents remain visible through each cycle")
 	scene.elapsed = 0
-	scene._physics_process(2.5)
+	scene._physics_process(1.8)
+	assert(scene._vent_phase(vents[0]) == scene.VentPhase.WARNING and scene._vent_phase(vents[1]) == scene.VentPhase.IDLE)
+	scene._physics_process(0.7)
 	assert(scene.heat_zones.size() == 1 and scene.heat_zones[0].position.x == 390)
+	assert(scene._vent_phase(vents[0]) == scene.VentPhase.ACTIVE and scene._vent_phase(vents[1]) == scene.VentPhase.IDLE)
 	scene.elapsed = 3
-	scene._physics_process(2.5)
+	scene._physics_process(1.8)
+	assert(scene._vent_phase(vents[0]) == scene.VentPhase.IDLE and scene._vent_phase(vents[1]) == scene.VentPhase.WARNING)
+	scene._physics_process(0.7)
 	assert(scene.heat_zones.size() == 1 and scene.heat_zones[0].position.x == 810)
+	assert(scene._vent_phase(vents[0]) == scene.VentPhase.IDLE and scene._vent_phase(vents[1]) == scene.VentPhase.ACTIVE)
 	# A player camping a marked spawn postpones spawning until the marker is clear.
 	scene._load_layout(9)
 	await clear_enemies(scene)
-	scene.player.position = scene.rooms[9].waves[0][0].position
+	var spawn_point: Vector2 = scene.rooms[9].waves[0][0].position
+	scene.player.position = spawn_point + Vector2(scene.WAVE_CLEARANCE - 1.0, 0.0)
 	scene._physics_process(0.01)
+	assert(scene._wave_warning_label(spawn_point) == "增援落点")
 	scene._physics_process(1.3)
 	assert(scene.living_enemies().is_empty() and scene._waves_pending())
-	scene.player.position = scene.EXIT_POSITION
+	assert(scene._wave_warning_label(spawn_point) == "让开落点")
+	scene.player.position = spawn_point + Vector2(scene.WAVE_CLEARANCE, 0.0)
+	assert(scene._spawn_points_clear())
+	assert(scene._wave_warning_label(spawn_point) == "增援落点")
 	scene._physics_process(0.01)
 	assert(scene.living_enemies().size() == 2)
 	scene.queue_free()

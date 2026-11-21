@@ -115,6 +115,16 @@ func begin_room(
 	_save_after_event()
 
 
+func resume_room(room_number: int, room_id: StringName, room_title: String, encounter_name: String) -> void:
+	if int(_current_room.get("room_number", 0)) == room_number and str(_current_room.get("room_id", "")) == str(room_id):
+		return
+	begin_room(room_number, room_id, room_title, encounter_name)
+
+
+func tracks_seed(seed_value: int) -> bool:
+	return is_run_active() and int(_current_run.get("seed", 0)) == seed_value
+
+
 func tick(delta: float) -> void:
 	if not is_run_active() or delta <= 0.0:
 		return

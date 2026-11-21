@@ -41,6 +41,43 @@ func run_test() -> void:
 	await physics_frame
 	await physics_frame
 	assert(not is_instance_valid(scene.room_portal), "Pending wave must block portal")
+
+	scene.tutorial_enabled = true
+	scene._load_layout(11, true)
+	assert(scene.route_hint_panel.visible and scene.route_hint_label.text.contains("落到右台"), "Room 32 must explain the approach to its caster")
+	scene._load_layout(7, true)
+	scene._sync_room_portal()
+	assert(scene.room_portal.get_meta(&"badge_text") == "交易")
+	assert(scene.room_portal.get_meta(&"prompt_text").ends_with("查看铸火代价"))
+	scene.player.set_current_health(52)
+	scene._open_choice(&"toll")
+	scene._sync_room_portal()
+	assert(not scene.room_portal.get_node("PromptBubble").visible, "The portal bubble must stay behind an active choice")
+	var paid_card: Button = scene.reward_view._upgrade_buttons[0]
+	assert(not paid_card.disabled and paid_card.get_node("CardCost").text.contains("交易后 32/100"))
+	scene._select_reward_card(0)
+	assert(scene.room_index == 8 and scene.player.get_current_health() == 32)
+
+	scene._load_layout(7, true)
+	scene.claimed.erase(&"forge_28")
+	scene.player.set_current_health(20)
+	scene._open_choice(&"toll")
+	paid_card = scene.reward_view._upgrade_buttons[0]
+	assert(paid_card.disabled and paid_card.get_node("CardCost").text.contains("保留至少 1 生命"))
+	scene._select_reward_card(0)
+	assert(scene.room_index == 7 and scene.player.get_current_health() == 20)
+	scene._select_reward_card(scene.reward_cards.size() - 1)
+	assert(scene.room_index == 8 and scene.player.get_current_health() == 20)
+
+	scene._load_layout(12, true)
+	scene._sync_room_portal()
+	assert(scene.room_portal.get_meta(&"badge_text") == "试炼")
+	assert(scene.room_portal.get_meta(&"prompt_text").ends_with("选择是否挑战"))
+	scene.trial_active = true
+	scene.next_wave = scene.rooms[12].waves.size()
+	scene._sync_room_portal()
+	assert(scene.room_portal.get_meta(&"badge_text") == "奖励")
+	assert(scene.room_portal.get_meta(&"prompt_text").ends_with("领取试炼奖励"))
 	scene.queue_free()
 	await process_frame
 	print("chapter2_portal_smoke: PASS")

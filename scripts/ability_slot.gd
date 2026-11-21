@@ -1,6 +1,9 @@
 extends Control
 
-## Compact moonlit ability icon for the center combat rail.
+## Action icon, input prompt, and readable remaining cooldown.
+
+const UI := preload("res://scripts/ui_theme.gd")
+const KEY_BOUNDS := Rect2(54, 5, 37, 20)
 
 enum IconType {
 	ATTACK,
@@ -16,6 +19,8 @@ var _accent := Color("#65dcff")
 var _cooldown_remaining: float = 0.0
 var _cooldown_duration: float = 1.0
 var _is_hovered: bool = false
+var _high_contrast: bool = false
+var _panel_style: StyleBoxFlat
 var _title_label: Label
 var _key_label: Label
 var _countdown_label: Label
@@ -30,44 +35,69 @@ func _ready() -> void:
 
 
 func configure(icon_type: int, title: String, hotkey: String, description: String, accent: Color) -> void:
+	if icon_type == _icon_type and title == _title and hotkey == _hotkey and description == _description and accent == _accent:
+		return
+	var accent_changed := accent != _accent
 	_icon_type = icon_type
 	_title = title
 	_hotkey = hotkey
 	_description = description
 	_accent = accent
+	if accent_changed:
+		_update_panel_style()
 	_refresh()
 
 
 func set_cooldown(remaining: float, duration: float) -> void:
-	_cooldown_remaining = maxf(0.0, remaining)
-	_cooldown_duration = maxf(0.01, duration)
+	var clamped_remaining := maxf(0.0, remaining)
+	var clamped_duration := maxf(0.01, duration)
+	if clamped_remaining == _cooldown_remaining and clamped_duration == _cooldown_duration:
+		return
+	_cooldown_remaining = clamped_remaining
+	_cooldown_duration = clamped_duration
+	_countdown_label.text = "" if _cooldown_remaining <= 0.0 else "%.1f" % _cooldown_remaining
+	queue_redraw()
+
+
+func apply_accessibility(large_text: bool, high_contrast: bool) -> void:
+	_high_contrast = high_contrast
+	_title_label.add_theme_font_size_override("font_size", UI.CAPTION + (2 if large_text else 0))
+	_key_label.add_theme_font_size_override("font_size", 11 + (2 if large_text else 0))
+	_countdown_label.add_theme_font_size_override("font_size", UI.BODY + (2 if large_text else 0))
+	_update_panel_style()
 	_refresh()
 
 
 func _create_labels() -> void:
 	_title_label = Label.new()
-	_title_label.position = Vector2(2.0, 52.0)
-	_title_label.size = Vector2(100.0, 16.0)
+	_title_label.position = Vector2(4, 32)
+	_title_label.size = Vector2(88, 20)
 	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_title_label.add_theme_font_size_override("font_size", 10)
+	_title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_title_label.clip_text = true
+	_title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_title_label.add_theme_font_size_override("font_size", UI.CAPTION)
 	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_title_label)
 
 	_key_label = Label.new()
-	_key_label.position = Vector2(7.0, 4.0)
-	_key_label.size = Vector2(20.0, 16.0)
+	_key_label.position = KEY_BOUNDS.position
+	_key_label.size = KEY_BOUNDS.size
 	_key_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_key_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_key_label.clip_text = true
+	_key_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_key_label.add_theme_font_size_override("font_size", 11)
 	_key_label.add_theme_color_override("font_color", Color(0.88, 0.97, 1.0, 1.0))
 	_key_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_key_label)
 
 	_countdown_label = Label.new()
-	_countdown_label.position = Vector2(28.0, 17.0)
-	_countdown_label.size = Vector2(48.0, 28.0)
+	_countdown_label.position = Vector2(6, 3)
+	_countdown_label.size = Vector2(43, 28)
 	_countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_countdown_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_countdown_label.add_theme_font_size_override("font_size", 17)
+	_countdown_label.add_theme_font_size_override("font_size", UI.BODY)
 	_countdown_label.add_theme_color_override("font_color", Color.WHITE)
 	_countdown_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_countdown_label)
@@ -77,10 +107,16 @@ func _refresh() -> void:
 	tooltip_text = "%s [%s]\n%s" % [_title, _hotkey, _description]
 	if is_instance_valid(_title_label):
 		_title_label.text = _title
-		_title_label.add_theme_color_override("font_color", _accent.lightened(0.18))
+		_title_label.add_theme_color_override("font_color", UI.TEXT_PRIMARY if _high_contrast else _accent.lightened(0.24))
 		_key_label.text = _hotkey
 		_countdown_label.text = "" if _cooldown_remaining <= 0.0 else "%.1f" % _cooldown_remaining
 	queue_redraw()
+
+
+func _update_panel_style() -> void:
+	var fill := UI.BG_DEEP if _high_contrast else Color(UI.BG_PANEL, 0.91)
+	var edge := Color(UI.TEXT_PRIMARY, 0.72) if _high_contrast else Color(_accent, 0.38)
+	_panel_style = UI.surface(fill, edge, 7, 1)
 
 
 func _on_mouse_entered() -> void:
@@ -94,34 +130,21 @@ func _on_mouse_exited() -> void:
 
 
 func _draw() -> void:
-	var slot_rect := Rect2(1.0, 1.0, size.x - 2.0, size.y - 2.0)
-	var edge_alpha: float = 0.88 if _is_hovered else 0.38
-	draw_rect(slot_rect, Color(0.006, 0.025, 0.052, 0.42), true)
-	draw_rect(slot_rect, Color(_accent, edge_alpha), false, 1.0)
-	draw_rect(Rect2(8.0, 3.0, size.x - 16.0, 1.0), Color(_accent, 0.70), true)
-	draw_rect(Rect2(5.0, 3.0, 20.0, 18.0), Color(0.008, 0.030, 0.056, 0.66), true)
-	draw_rect(Rect2(5.0, 3.0, 20.0, 18.0), Color(_accent, 0.42), false, 1.0)
-	draw_rect(Rect2(7.0, size.y - 18.0, size.x - 14.0, 1.0), Color(_accent, 0.26), true)
-	_draw_icon()
-	var icon_height: float = size.y - 19.0
-	if _cooldown_remaining > 0.0:
-		var fill_ratio: float = clampf(_cooldown_remaining / _cooldown_duration, 0.0, 1.0)
-		draw_rect(Rect2(1.0, 1.0, size.x - 2.0, icon_height * fill_ratio), Color(0.004, 0.012, 0.030, 0.72), true)
-	else:
-		draw_arc(
-			Vector2(size.x * 0.5, 30.0),
-			18.0,
-			-PI * 0.5,
-			TAU - PI * 0.5,
-			20,
-			Color(_accent, 0.52 if not _is_hovered else 0.84),
-			1.25,
-			true
-		)
+	if _panel_style == null:
+		_update_panel_style()
+	draw_style_box(_panel_style, Rect2(Vector2.ZERO, size))
+	draw_rect(KEY_BOUNDS, Color(UI.BG_DEEP, 0.90))
+	draw_rect(KEY_BOUNDS, Color(_accent, 0.72 if _is_hovered else 0.4), false, 1.0)
+	if _cooldown_remaining <= 0.0:
+		_draw_icon()
+	var bar_width := size.x - 16.0
+	var ready_ratio := 1.0 - clampf(_cooldown_remaining / _cooldown_duration, 0.0, 1.0)
+	draw_rect(Rect2(8, 53, bar_width, 2), Color(_accent, 0.16))
+	draw_rect(Rect2(8, 53, bar_width * ready_ratio, 2), Color(_accent, 0.85))
 
 
 func _draw_icon() -> void:
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(size.x / 100.0, 0.68))
+	draw_set_transform(Vector2(2, 1), 0.0, Vector2(0.50, 0.49))
 	var center := Vector2(50.0, 34.0)
 	if _icon_type == IconType.ATTACK:
 		var blade := PackedVector2Array([

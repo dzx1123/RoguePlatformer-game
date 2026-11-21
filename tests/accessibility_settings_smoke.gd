@@ -35,7 +35,7 @@ func _run_test() -> void:
 		or not player.get_reduced_effects_enabled()
 	):
 		return _fail("Reduced-effects mode did not limit shake and player flashes")
-	var room_label: Label = main.get_node("HUD/RoomProgress") as Label
+	var room_label: Label = main.get_node("HUD/RoomCard/RoomProgress") as Label
 	if room_label == null:
 		return _fail("RoomProgress label missing for accessibility checks")
 	var room_font_size: int = room_label.get_theme_font_size("font_size")
@@ -51,16 +51,18 @@ func _run_test() -> void:
 		return _fail(
 			"High-contrast mode did not set RoomProgress near TEXT_PRIMARY, got %s" % str(room_color)
 		)
-	var health_background := main.get_node("HUD/HealthBackground") as Control
-	var health_fill := main.get_node("HUD/HealthBackground/HealthFill") as ColorRect
-	if health_background.scale.x < 1.05 or health_background.scale.x > 1.101:
-		return _fail("HUD 110%% did not enlarge the combat dock: %s" % str(health_background.scale))
+	var dock := main.get_node("HUD/BottomHUD") as Control
+	var vitals := dock.get_node("VitalsPanel") as Control
+	var health_background := vitals.get_node("HealthBackground") as Control
+	var health_fill := health_background.get_node("HealthFill") as ColorRect
+	if not is_equal_approx(health_background.get_global_transform().get_scale().x, 1.10):
+		return _fail("HUD 110%% did not enlarge the combat dock to the requested scale")
 	var canvas := Rect2(Vector2.ZERO, Vector2(1280.0, 720.0))
-	var vitals := main.get_node("HUD/VitalsPanel") as Control
-	var abilities := main.get_node("HUD/AbilityPanel") as Control
-	var weapons := main.get_node("HUD/WeaponPanel") as Control
-	var ability_bar := main.get_node("HUD/AbilityBar") as Control
-	for control: Control in [vitals, abilities, weapons, health_background, ability_bar]:
+	var abilities := dock.get_node("AbilityBar") as Control
+	var weapons := dock.get_node("WeaponPanel") as Control
+	var room := main.get_node("HUD/RoomCard") as Control
+	var boss := main.get_node("HUD/BossHealth") as Control
+	for control: Control in [vitals, abilities, weapons, health_background, room, boss]:
 		if not canvas.encloses(control.get_global_rect().grow(-0.5)):
 			return _fail("Scaled HUD left the 1280x720 canvas: %s %s" % [control.name, control.get_global_rect()])
 	if vitals.get_global_rect().grow(-0.5).intersects(abilities.get_global_rect().grow(-0.5)):
@@ -75,11 +77,11 @@ func _run_test() -> void:
 	):
 		return _fail("Color-vision palette did not reach the health bar: %s" % str(health_fill.color))
 	# Idempotency: re-apply must not compound font sizes or HUD scale.
-	var scaled_health: float = health_background.scale.x
+	var scaled_health := health_background.get_global_transform().get_scale().x
 	main.call(&"_apply_accessibility_presentation")
 	if room_label.get_theme_font_size("font_size") != room_font_size:
 		return _fail("Accessibility apply compounded RoomProgress font_size")
-	if absf(health_background.scale.x - scaled_health) > 0.001:
+	if not is_equal_approx(health_background.get_global_transform().get_scale().x, scaled_health):
 		return _fail("Accessibility apply compounded HUD scale")
 	var presentation_cases: Array[Dictionary] = [
 		{
@@ -107,13 +109,9 @@ func _run_test() -> void:
 			main.call(&"_apply_accessibility_presentation")
 			await process_frame
 			var case_name := "%s_%d" % [String(presentation["name"]), scale_index]
-			var actual_scale: float = health_background.scale.x
-			if scale_index < 2:
-				var requested_scale: float = float(settings.get_hud_scale_factor())
-				if absf(actual_scale - requested_scale) > 0.015:
-					return _fail("HUD scale mismatch for %s: %.3f" % [case_name, actual_scale])
-			elif actual_scale < 1.05 or actual_scale > 1.101:
-				return _fail("HUD 110%% fitted scale was invalid for %s: %.3f" % [case_name, actual_scale])
+			var actual_scale := health_background.get_global_transform().get_scale().x
+			if not is_equal_approx(actual_scale, settings.get_hud_scale_factor()):
+				return _fail("HUD scale mismatch for %s: %.3f" % [case_name, actual_scale])
 			var expected_font_size: int = UI.CAPTION + (2 if large_text_enabled else 0)
 			if room_label.get_theme_font_size("font_size") != expected_font_size:
 				return _fail("Large-text state was incorrect for %s" % case_name)
@@ -123,13 +121,15 @@ func _run_test() -> void:
 			var expected_health_color: Color = Color("#4cc9ff") if color_blind_enabled else UI.ACCENT_MOON
 			if not health_fill.color.is_equal_approx(expected_health_color):
 				return _fail("Color-vision state was incorrect for %s" % case_name)
-			for control: Control in [vitals, abilities, weapons, health_background, ability_bar]:
+			for control: Control in [vitals, abilities, weapons, health_background, room, boss]:
 				if not canvas.encloses(control.get_global_rect().grow(-0.5)):
 					return _fail("Accessible HUD left the canvas for %s: %s" % [case_name, control.name])
 			if vitals.get_global_rect().grow(-0.5).intersects(abilities.get_global_rect().grow(-0.5)):
 				return _fail("Accessible HUD overlapped vitals and abilities for %s" % case_name)
 			if abilities.get_global_rect().grow(-0.5).intersects(weapons.get_global_rect().grow(-0.5)):
 				return _fail("Accessible HUD overlapped abilities and weapons for %s" % case_name)
+			if room.get_global_rect().intersects(boss.get_global_rect()):
+				return _fail("Accessible HUD overlapped room and boss readouts for %s" % case_name)
 	main.queue_free()
 	await process_frame
 	_cleanup()

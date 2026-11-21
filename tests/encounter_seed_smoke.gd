@@ -89,9 +89,15 @@ func _capture_seed_snapshot(seed_value: int) -> Dictionary:
 	if int(main.call(&"get_run_seed")) != seed_value:
 		_fail("Main did not honor the requested run seed")
 		return {}
-	var room_label := main.get_node("HUD/RoomProgress") as Label
-	if not room_label.text.contains("S%06d" % seed_value):
-		_fail("HUD did not expose the reproducible run seed")
+	var room_label := main.get_node("HUD/RoomCard/RoomProgress") as Label
+	var room_name := main.get_node("HUD/RoomCard/RoomName") as Label
+	if room_label.text.contains("S%06d" % seed_value) or room_name.text.is_empty():
+		_fail("Combat HUD must show the room name and reserve the seed for results")
+		return {}
+	main.call(&"_present_death_recap", "")
+	var detail := main.get_node("HUD/DeathRecap/Sheet/DeathStat_0/Detail") as Label
+	if not detail.text.contains("S%06d" % seed_value):
+		_fail("Death recap did not expose the reproducible run seed")
 		return {}
 	var snapshot := {
 		"rooms": main.call(&"get_room_sequence_ids"),

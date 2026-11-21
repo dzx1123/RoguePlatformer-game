@@ -6,6 +6,19 @@ func run_test():
 	scene.persistence_enabled = false
 	root.add_child(scene)
 	await create_timer(1.8).timeout
+	scene._load_layout(3)
+	scene.player.set_current_health(90)
+	scene._open_choice(&"ritual")
+	await create_timer(0.6).timeout
+	var left: Button = scene.reward_view._upgrade_buttons[0]
+	var right: Button = scene.reward_view._upgrade_buttons[1]
+	assert(not scene.reward_view._upgrade_buttons[2].visible)
+	assert(is_equal_approx((left.position.x + right.get_rect().end.x) / 2.0, left.get_parent().size.x / 2.0))
+	assert(left.get_node(left.focus_neighbor_right) == right and right.get_node(right.focus_neighbor_right) == left)
+	assert(right.get_node("CardTitle").text == "恢复生命")
+	assert(right.get_node("CardDescription").text == "当前可恢复 10 生命")
+	right.pressed.emit()
+	assert(scene.room_index == 4 and scene.player.get_current_health() == 100)
 	for weapon in WeaponCatalog.all_weapon_ids():
 		scene._load_layout(4)
 		scene.claimed.erase(scene.rooms[4].id)

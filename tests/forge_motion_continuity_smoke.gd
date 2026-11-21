@@ -48,6 +48,20 @@ func run_test() -> void:
 	scene.player.position.x = scene.caster.position.x - 100
 	await create_timer(0.1).timeout
 	check(direction == 1 and scene.caster._visual_state().facing == direction, "Caster windup must not flip when crossed")
+	# The projectile and the release pose share the cast phase and the hand anchor.
+	scene._spawn_ember()
+	var ember = scene.embers.get_child(0)
+	ember.advance(ember.WARNING - 0.01)
+	scene.caster._physics_process(0.01)
+	check(scene.caster._visual_state().pose == 1, "The lantern must stay in windup before projectile release")
+	scene.caster._hitstop_remaining = 0.05
+	ember.advance(0.02)
+	check(ember.age < ember.WARNING, "Caster hitstop must delay an unreleased projectile")
+	scene.caster._hitstop_remaining = 0.0
+	ember.advance(0.02)
+	scene.caster._physics_process(0.01)
+	check(scene.caster._visual_state().pose == 2, "Release must select the extended hand pose")
+	check(ember.origin.is_equal_approx(scene.caster.get_ember_release_point()), "Fireball must begin at the extended hand")
 	# Stop and change posture: shape eases toward its target without changing hit geometry.
 	var bounds: Rect2 = scene.caster.get_impact_bounds()
 	var before_shape: Vector2 = scene.caster.actor_motion.shape

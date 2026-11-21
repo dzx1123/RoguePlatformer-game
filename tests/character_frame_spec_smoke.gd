@@ -20,6 +20,12 @@ const CANONICAL_FRAMES: Array[String] = [
 	"hero_jump_tuck.png",
 	"hero_jump_fall.png",
 	"hero_land.png",
+	"hero_sprint_push.png",
+	"hero_sprint_brace.png",
+	"hero_sprint_pivot.png",
+	"hero_moving_slash_load.png",
+	"hero_moving_slash_release.png",
+	"hero_moving_slash_step.png",
 	"hero_slash.png",
 	"hero_slash_followthrough.png",
 	"hero_slash_up_windup.png",
@@ -69,6 +75,10 @@ func _run_test() -> void:
 			return
 		if frame_name.begins_with("hero_run_"):
 			run_baselines.append(int(alpha_metrics.get("bottom", -1)))
+		elif frame_name.begins_with("hero_sprint_") or frame_name.begins_with("hero_moving_slash_"):
+			if absi(int(alpha_metrics.get("bottom", -1)) - 402) > 2:
+				_fail("Ground pose has a displaced boot baseline: %s" % frame_name)
+				return
 
 	if run_baselines.size() != 12:
 		_fail("The canonical locomotion set does not contain twelve run frames")

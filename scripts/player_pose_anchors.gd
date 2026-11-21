@@ -1,5 +1,12 @@
 extends RefCounted
 
+# Relative to the centered texture. Use the sole of the forward boot on the
+# strike frame so the blade and effects never count as ground contact.
+const FORWARD_STRIKE_BOOTS := {
+	&"twin_blades": Vector2(78.0, 170.0),
+	&"star_greatsword": Vector2(62.0, 213.0),
+}
+
 # Measured from existing art by tools/measure_player_pose_anchors.py.
 const HEADS := {
 	"res://assets/characters/frames_polished/hero_idle.png": Vector2(14.0, -83.0),
@@ -10,6 +17,9 @@ const HEADS := {
 	"res://assets/characters/frames_polished/hero_jump_takeoff.png": Vector2(44.5, -120.5),
 	"res://assets/characters/frames_polished/hero_jump_tuck.png": Vector2(51.0, -109.0),
 	"res://assets/characters/frames_polished/hero_land.png": Vector2(83.0, -21.5),
+	"res://assets/characters/frames_polished/hero_moving_slash_load.png": Vector2(71.5, -72.5),
+	"res://assets/characters/frames_polished/hero_moving_slash_release.png": Vector2(62.0, -59.5),
+	"res://assets/characters/frames_polished/hero_moving_slash_step.png": Vector2(98.5, -82.0),
 	"res://assets/characters/frames_polished/hero_recovery.png": Vector2(14.0, -83.0),
 	"res://assets/characters/frames_polished/hero_run_0.png": Vector2(115.0, -89.0),
 	"res://assets/characters/frames_polished/hero_run_1.png": Vector2(115.0, -89.5),
@@ -31,6 +41,9 @@ const HEADS := {
 	"res://assets/characters/frames_polished/hero_slash_up.png": Vector2(10.5, -41.0),
 	"res://assets/characters/frames_polished/hero_slash_up_followthrough.png": Vector2(17.5, -50.5),
 	"res://assets/characters/frames_polished/hero_slash_up_windup.png": Vector2(65.0, -56.5),
+	"res://assets/characters/frames_polished/hero_sprint_brace.png": Vector2(53.0, -69.0),
+	"res://assets/characters/frames_polished/hero_sprint_pivot.png": Vector2(28.0, -49.5),
+	"res://assets/characters/frames_polished/hero_sprint_push.png": Vector2(88.0, -73.5),
 	"res://assets/characters/frames_polished/hero_walk_1.png": Vector2(16.5, -85.5),
 	"res://assets/characters/frames_polished/hero_walk_2.png": Vector2(14.5, -77.0),
 	"res://assets/characters/frames_polished/hero_walk_3.png": Vector2(12.5, -81.0),

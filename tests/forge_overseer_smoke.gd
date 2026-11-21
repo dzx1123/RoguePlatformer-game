@@ -82,14 +82,20 @@ func run_test() -> void:
 	boss._physics_process(0.01)
 	assert(boss.state == boss.State.SHIFT and scene.embers.get_child_count() == 0)
 	assert(not scene.overheat and boss.phase == 2)
+	var vents: Array = scene._display_vents()
+	assert(vents.size() == 2 and scene._vent_phase(vents[0]) == scene.VentPhase.IDLE and scene._vent_phase(vents[1]) == scene.VentPhase.IDLE)
 	boss._physics_process(1.21)
 	assert(scene.overheat and scene.cycle == 0 and boss.state == boss.State.RECOVER)
+	scene.elapsed = 1.8
+	scene._physics_process(0.01)
+	assert(scene._vent_phase(vents[0]) == scene.VentPhase.WARNING and scene._vent_phase(vents[1]) == scene.VentPhase.IDLE)
 	scene.elapsed = 2.5
 	scene._physics_process(0.01)
 	assert(scene.heat_zones.size() == 1 and scene.heat_zones[0].position.x == 290)
 	scene.elapsed = 5.5
 	scene._physics_process(0.01)
 	assert(scene.heat_zones.size() == 1 and scene.heat_zones[0].position.x == 860)
+	assert(scene._vent_phase(vents[0]) == scene.VentPhase.IDLE and scene._vent_phase(vents[1]) == scene.VentPhase.ACTIVE)
 	# Scene pause must freeze boss as well as projectiles and heat.
 	var key := InputEventKey.new()
 	key.pressed = true
@@ -105,6 +111,7 @@ func run_test() -> void:
 	assert(scene.embers.get_child_count() == 1)
 	boss.receive_player_attack(boss.position, 1, 9999)
 	assert(boss.get_current_health() == 0 and scene.embers.get_child_count() == 0 and not scene.overheat)
+	assert(scene._vent_phase(vents[0]) == scene.VentPhase.IDLE and scene._vent_phase(vents[1]) == scene.VentPhase.IDLE)
 	boss._physics_process(2)
 	await process_frame
 	assert(scene.living_enemies().is_empty())

@@ -75,6 +75,7 @@ func _on_reduced_effects_toggled(enabled: bool) -> void:
 
 func _apply_accessibility_presentation() -> void:
 	journey.campaign_presenter.apply_accessibility(_settings.get_large_text_enabled(), _settings.get_high_contrast_enabled(), _settings.get_color_blind_enabled(), _settings.get_hud_scale_factor())
+	journey._apply_route_hint_accessibility()
 
 func _fit_to_viewport() -> void:
 	var size := get_viewport().get_visible_rect().size
@@ -96,6 +97,7 @@ func _on_joy_connection_changed(_device: int, connected: bool) -> void:
 
 func _refresh_input_prompts() -> void:
 	_refresh_settings_key_buttons()
+	journey._refresh_reward_choice_prompts()
 	_pause_overview_button.text = "构筑总览  [%s]" % _get_action_prompt(&"build_overview")
 	_settings_controller_status_label.text = ("手柄：已连接 · 当前显示 Xbox 键位" if _using_controller_input else "手柄：已连接 · 按任意手柄键切换提示") if not Input.get_connected_joypads().is_empty() else "手柄：未连接 · Xbox 映射已启用"
 	_ensure_context_focus()
@@ -104,7 +106,7 @@ func _ensure_context_focus() -> void:
 	var current := get_viewport().gui_get_focus_owner()
 	if _settings_overlay.visible:
 		if current == null or not _settings_overlay.is_ancestor_of(current):
-			_settings_resolution_selector.grab_focus()
+			preload("res://scripts/settings_page_layout.gd").focus_active_tab(_settings_overlay)
 	elif _pause_overlay.visible:
 		if current == null or not _pause_overlay.is_ancestor_of(current):
 			_pause_overlay.get_node("Resume").grab_focus()

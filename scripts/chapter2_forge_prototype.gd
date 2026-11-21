@@ -111,8 +111,22 @@ const HEAT_PERIOD := HEAT_CONFIG.HEAT_PERIOD
 const HEAT_ACTIVE_START := HEAT_PERIOD - HEAT_CONFIG.HEAT_ACTIVE_SECONDS
 const HEAT_WARNING_START := HEAT_ACTIVE_START - HEAT_CONFIG.HEAT_WARNING_SECONDS
 
+enum VentPhase { IDLE, COOL, WARNING, ACTIVE }
+
 func heat_is_active() -> bool:
 	return not heat_disabled and cycle >= HEAT_ACTIVE_START
+
+func _vent_phase(vent: Rect2) -> VentPhase:
+	if heat_disabled:
+		return VentPhase.COOL
+	if vent not in heat_zones:
+		return VentPhase.IDLE
+	if heat_is_active():
+		return VentPhase.ACTIVE
+	return VentPhase.WARNING if cycle >= HEAT_WARNING_START else VentPhase.IDLE
+
+func _display_vents() -> Array:
+	return heat_zones
 
 func _ready() -> void:
 	preload("res://scripts/settings_store.gd").new().apply()
@@ -250,8 +264,6 @@ func _heat_damage_enabled() -> bool:
 	return true
 
 func _spawn_ember() -> void:
-	if is_instance_valid(caster):
-		caster.cast_pose_time = 1.52
 	# Lock a supported landing point once. The marker never tracks the player.
 	var point := player.position + Vector2(0, 28)
 	var best_y := INF
@@ -261,12 +273,12 @@ func _spawn_ember() -> void:
 	if best_y == INF:
 		return
 	var ember := preload("res://scripts/forge_ember.gd").new()
-	ember.origin = caster.position
 	ember.landing = Vector2(point.x, best_y - 12)
 	ember.target = player
+	ember.caster = caster
+	caster.begin_ember_cast(ember)
+	ember.origin = caster.get_ember_release_point()
 	embers.add_child(ember)
-	if is_instance_valid(caster):
-		caster.sound_requested.emit(&"spit", caster.is_boss())
 
 func _attack_hit(origin: Vector2, facing: float) -> void:
 	if paused:
@@ -318,19 +330,35 @@ func _draw() -> void:
 		draw_string(ThemeDB.fallback_font, Vector2(430, 130), _completion_text(), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("#77ead5"))
 	for rect: Rect2 in platforms:
 		preload("res://scripts/forge_platform_art.gd").draw_platform(self, rect)
-	for heat: Rect2 in heat_zones:
-		var warning := not heat_disabled and cycle >= HEAT_WARNING_START and cycle < HEAT_ACTIVE_START
-		var active := heat_is_active()
-		var color := Color("#ffbe62") if warning else (Color("#ff4b20") if active else Color("#8c4328"))
-		if heat_disabled:
-			color = Color("#77b9ce")
-		draw_rect(heat, Color(color, 0.28 if active else 0.14))
-		draw_line(heat.position, Vector2(heat.end.x, heat.position.y), Color(color, 0.95), 4.0)
-		if warning:
-			for x in range(int(heat.position.x) + 8, int(heat.end.x), 22):
-				draw_line(Vector2(x, heat.end.y), Vector2(x + 8, heat.position.y), Color("#ffd78c"), 2.0)
-
+	for vent: Rect2 in _display_vents():
+		_draw_vent(vent)
 	_draw_hud()
+
+func _draw_vent(vent: Rect2) -> void:
+	var phase := _vent_phase(vent)
+	var color := Color("#84706a")
+	match phase:
+		VentPhase.COOL: color = Color("#77b9ce")
+		VentPhase.WARNING: color = Color("#ffd583")
+		VentPhase.ACTIVE: color = Color("#ff7251")
+
+	var grate := Rect2(vent.position.x, vent.end.y + 1.0, vent.size.x, 12.0)
+	draw_rect(grate, Color("#19171e"))
+	draw_rect(grate, color, false, 2.0)
+	for slot in range(int(grate.position.x) + 8, int(grate.end.x) - 3, 12):
+		draw_line(Vector2(slot, grate.position.y + 3), Vector2(slot + 4, grate.end.y - 3), color, 2.0)
+	if phase == VentPhase.WARNING:
+		draw_rect(vent, Color(color, 0.13))
+		for x in range(int(vent.position.x) + 5, int(vent.end.x) - 12, 18):
+			draw_line(Vector2(x, vent.end.y - 2.0), Vector2(x + 10, vent.position.y + 2.0), Color(color, 0.82), 2.0)
+		var progress := clampf(inverse_lerp(HEAT_WARNING_START, HEAT_ACTIVE_START, cycle), 0.0, 1.0)
+		draw_rect(Rect2(vent.position, Vector2(vent.size.x * progress, 3.0)), color)
+	elif phase == VentPhase.ACTIVE:
+		draw_rect(vent, Color(color, 0.30))
+		draw_rect(vent, color, false, 2.0)
+		for x in range(int(vent.position.x) + 10, int(vent.end.x) - 9, 18):
+			var top := Vector2(x, vent.position.y + 6.0)
+			draw_polyline(PackedVector2Array([Vector2(x - 5, vent.end.y - 3.0), top, Vector2(x + 5, vent.end.y - 3.0)]), color, 2.0)
 
 func _draw_exit_marker() -> void:
 	var exit_open := living_enemies().is_empty()
